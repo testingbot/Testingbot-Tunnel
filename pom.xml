@@ -18,7 +18,9 @@
   <name>TestingBotTunnel</name>
   <description>Tunnel to run TestingBot Selenium tests on your local machine</description>
   <url>http://testingbot.com</url>
-  <scm>https://github.com/testingbot/Testingbot-Tunnel</scm>
+  <scm>
+		<url>https://github.com/testingbot/Testingbot-Tunnel</url>
+	</scm>
   <build>
     <plugins>
         <plugin>
