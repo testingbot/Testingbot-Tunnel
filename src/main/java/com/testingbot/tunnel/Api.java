@@ -15,6 +15,8 @@ import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.impl.client.DefaultHttpClient;
 
 import net.sf.json.*;
+import org.apache.http.params.HttpConnectionParams;
+import org.apache.http.params.HttpParams;
 
 /**
  *
@@ -50,6 +52,9 @@ public class Api {
     
     public void destroyTunnel() throws Exception {
         DefaultHttpClient httpClient = new DefaultHttpClient();
+        HttpParams params = httpClient.getParams();
+        HttpConnectionParams.setConnectionTimeout(params, 1000);
+        HttpConnectionParams.setSoTimeout(params, 1000);
         String auth = this.clientKey + ":" + this.clientSecret;
         String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
 
