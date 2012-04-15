@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuite failures="0" time="0.008" errors="0" skipped="0" tests="1" name="com.testingbot.tunnel.AppTest">
+<testsuite failures="0" time="0.01" errors="0" skipped="0" tests="1" name="com.testingbot.tunnel.AppTest">
   <properties>
     <property name="java.runtime.name" value="Java(TM) SE Runtime Environment"/>
     <property name="sun.boot.library.path" value="/System/Library/Java/JavaVirtualMachines/1.6.0.jdk/Contents/Libraries"/>
@@ -22,7 +22,7 @@
     <property name="basedir" value="/Users/jochen/ruby/testingbot/tunnel"/>
     <property name="java.endorsed.dirs" value="/System/Library/Java/JavaVirtualMachines/1.6.0.jdk/Contents/Home/lib/endorsed"/>
     <property name="os.arch" value="x86_64"/>
-    <property name="surefire.real.class.path" value="/Users/jochen/ruby/testingbot/tunnel/target/surefire/surefirebooter4748704448916298472.jar"/>
+    <property name="surefire.real.class.path" value="/Users/jochen/ruby/testingbot/tunnel/target/surefire/surefirebooter4746781142912923247.jar"/>
     <property name="java.io.tmpdir" value="/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/T/"/>
     <property name="line.separator" value="
 "/>
@@ -46,7 +46,7 @@
     <property name="java.vm.specification.version" value="1.0"/>
     <property name="sun.arch.data.model" value="64"/>
     <property name="java.home" value="/System/Library/Java/JavaVirtualMachines/1.6.0.jdk/Contents/Home"/>
-    <property name="sun.java.command" value="/Users/jochen/ruby/testingbot/tunnel/target/surefire/surefirebooter4748704448916298472.jar /Users/jochen/ruby/testingbot/tunnel/target/surefire/surefire7206355880341128597tmp /Users/jochen/ruby/testingbot/tunnel/target/surefire/surefire5423903465331343657tmp"/>
+    <property name="sun.java.command" value="/Users/jochen/ruby/testingbot/tunnel/target/surefire/surefirebooter4746781142912923247.jar /Users/jochen/ruby/testingbot/tunnel/target/surefire/surefire4427141681498744787tmp /Users/jochen/ruby/testingbot/tunnel/target/surefire/surefire5444833923491132290tmp"/>
     <property name="java.specification.vendor" value="Sun Microsystems Inc."/>
     <property name="user.language" value="en"/>
     <property name="awt.toolkit" value="apple.awt.CToolkit"/>

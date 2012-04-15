@@ -19,7 +19,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.0";
+    public static final String VERSION = "1.4";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -166,7 +166,7 @@ public class App {
         }
     }
     
-    private void boot() throws Exception {
+    public void boot() throws Exception {
         Thread cleanupThread = new Thread() {
           @Override
           public void run() {
@@ -197,6 +197,19 @@ public class App {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
             TunnelPoller poller = new TunnelPoller(this);
         }
+    }
+
+    public void stop() {
+      if (tunnel != null) {
+         tunnel.stop();
+      }
+
+      try {
+          System.out.println("Shutting down your personal Tunnel Server.");
+          api.destroyTunnel();
+      } catch (Exception ex) {
+          Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+      }
     }
     
     public void tunnelReady(String serverIP) {
