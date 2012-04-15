@@ -170,7 +170,9 @@ public class App {
         Thread cleanupThread = new Thread() {
           @Override
           public void run() {
-            tunnel.stop();
+              if (tunnel != null) {
+                 tunnel.stop();
+              }
             try {
                 System.out.println("Shutting down your personal Tunnel Server.");
                 api.destroyTunnel();
