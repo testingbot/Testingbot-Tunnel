@@ -19,7 +19,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.4";
+    public static final String VERSION = "1.5";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -231,7 +231,7 @@ public class App {
     
     private void startProxies() {
        HttpProxy httpProxy = new HttpProxy(this);
-       HttpForwarder httpForwarder = new HttpForwarder(this.seleniumPort);
+       HttpForwarder httpForwarder = new HttpForwarder(this);
        
        if (this.readyFile != null) {
            File f = new File(this.readyFile);
@@ -270,5 +270,12 @@ public class App {
      */
     public String[] getFastFail() {
         return fastFail;
+    }
+
+   /**
+    * @return the seleniumPort
+    */
+    public String getSeleniumPort() {
+      return seleniumPort;
     }
 }

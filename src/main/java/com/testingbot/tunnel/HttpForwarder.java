@@ -15,10 +15,10 @@ import com.testingbot.tunnel.proxy.ForwarderServlet;
  */
 public class HttpForwarder {
     
-    public HttpForwarder(String port) {
+    public HttpForwarder(App app) {
         Server httpProxy = new Server();
         SelectChannelConnector connector = new SelectChannelConnector();
-        connector.setPort(Integer.parseInt(port));
+        connector.setPort(Integer.parseInt(app.getSeleniumPort()));
         connector.setMaxIdleTime(400000);
         connector.setThreadPool(new QueuedThreadPool(128));
         
@@ -27,7 +27,7 @@ public class HttpForwarder {
         
         httpProxy.addConnector(connector);
         ServletHandler servletHandler = new ServletHandler();
-        servletHandler.addServletWithMapping(new ServletHolder(new ForwarderServlet()), "/*");
+        servletHandler.addServletWithMapping(new ServletHolder(new ForwarderServlet(app)), "/*");
         
         httpProxy.setHandler(servletHandler);
         try {

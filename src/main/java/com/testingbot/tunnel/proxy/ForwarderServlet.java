@@ -1,6 +1,7 @@
 package com.testingbot.tunnel.proxy;
 
 
+import com.testingbot.tunnel.App;
 import org.eclipse.jetty.servlets.ProxyServlet;
 
 import javax.servlet.ServletConfig;
@@ -20,6 +21,12 @@ import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.util.IO;
 
 public class ForwarderServlet extends ProxyServlet {
+    private App app;
+    
+    public ForwarderServlet(App app) {
+        this.app = app;
+    }
+    
     @Override
     public void init(ServletConfig config) throws ServletException {
         super.init(config);
@@ -60,7 +67,10 @@ public class ForwarderServlet extends ProxyServlet {
         {
             String uri=request.getRequestURI();
             if (request.getQueryString()!=null)
+            {
                 uri+="?"+request.getQueryString();
+            }
+                
             URL url = new URL(request.getScheme(),
                     		  "127.0.0.1",
                     		  4446,
@@ -119,7 +129,8 @@ public class ForwarderServlet extends ProxyServlet {
             }
             
             connection.addRequestProperty("TB-Tunnel", "1");
-            
+            connection.addRequestProperty("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
+      
             // Proxy headers
             connection.setRequestProperty("Via","1.1 (jetty)");
             if (!xForwardedFor)
