@@ -16,6 +16,8 @@ import java.net.Socket;
 import java.net.URL;
 import java.net.URLConnection;
 import java.util.Enumeration;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.util.IO;
@@ -87,6 +89,8 @@ public class ForwarderServlet extends ProxyServlet {
                 http.setRequestMethod(request.getMethod());
                 http.setInstanceFollowRedirects(false);
             }
+            
+            Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [" + request.getMethod() + "] " + url.toString());
 
             // check connection header
             String connectionHdr = request.getHeader("Connection");
@@ -128,7 +132,7 @@ public class ForwarderServlet extends ProxyServlet {
                 }
             }
             
-            connection.addRequestProperty("TB-Tunnel", "1");
+            connection.addRequestProperty("TB-Tunnel", this.app.getServerIP());
             connection.addRequestProperty("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
       
             // Proxy headers

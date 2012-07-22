@@ -32,7 +32,9 @@ public class CustomConnectHandler extends ConnectHandler {
         String url = request.getRequestURL().toString();
         
         String method = request.getMethod();
-        Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1} ({2})", new Object[]{method, url, response.toString().substring(9, 12)});
+        if (method.equalsIgnoreCase("CONNECT")) {
+            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, url, response.toString().substring(9, 12)});
+        }
         
         super.handle(target, baseRequest, request, response);
     }

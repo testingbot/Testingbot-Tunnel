@@ -19,9 +19,11 @@ import net.sf.json.JSONObject;
 public class TunnelPoller {
     private App app;
     private Timer timer;
+    private String tunnelID;
     
-    public TunnelPoller(App app) {
+    public TunnelPoller(App app, String tunnelID) {
         this.app = app;
+        this.tunnelID = tunnelID;
         timer = new Timer();
         timer.schedule(new PollTask(), 5000, 5000);
     }
@@ -31,7 +33,7 @@ public class TunnelPoller {
             Api api = app.getApi();
             JSONObject response;
             try {
-                response = api.pollTunnel();
+                response = api.pollTunnel(tunnelID);
             
                 if (response.getString("state").equals("READY")) {
                    timer.cancel();

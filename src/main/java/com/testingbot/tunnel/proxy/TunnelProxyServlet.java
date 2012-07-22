@@ -27,7 +27,7 @@ public class TunnelProxyServlet extends ProxyServlet {
         
         String method = request.getMethod();
         HttpServletResponse response = (HttpServletResponse)res;
-        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "[{0}] {1} ({2})", new Object[]{method, url, response.toString().substring(9, 12)});
+        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, url, response.toString().substring(9, 12)});
         super.service(req, res);
     } 
 }

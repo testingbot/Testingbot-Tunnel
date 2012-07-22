@@ -19,7 +19,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.5";
+    public static final String VERSION = "1.6";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -27,6 +27,7 @@ public class App {
     private String seleniumPort = "4445";
     private String[] fastFail;
     private SSHTunnel tunnel;
+    private String serverIP;
     
     public static void main(String... args) throws Exception {
         
@@ -195,7 +196,7 @@ public class App {
             this.tunnelReady(tunnel.getString("ip"));
         } else {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
-            TunnelPoller poller = new TunnelPoller(this);
+            TunnelPoller poller = new TunnelPoller(this, tunnel.getString("id"));
         }
     }
 
@@ -217,6 +218,7 @@ public class App {
         try {
             tunnel = new SSHTunnel(this, serverIP);
             if (tunnel.isAuthenticated() == true) {
+                this.serverIP = serverIP;
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 this.startProxies();
@@ -277,5 +279,9 @@ public class App {
     */
     public String getSeleniumPort() {
       return seleniumPort;
+    }
+    
+    public String getServerIP() {
+        return serverIP;
     }
 }

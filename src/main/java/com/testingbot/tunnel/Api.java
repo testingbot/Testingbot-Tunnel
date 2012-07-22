@@ -34,16 +34,16 @@ public class Api {
     
     public JSONObject createTunnel() throws Exception {
         try {
-            return this._get("http://api.testingbot.com/v1/tunnel");
+            return this._get("http://api.testingbot.com/v1/tunnel/start");
         } 
         catch (Exception e) {
             throw new Exception("Could not get tunnel info: " + e.getMessage());
         }
     }
     
-    public JSONObject pollTunnel() throws Exception {
+    public JSONObject pollTunnel(String tunnelID) throws Exception {
         try {
-            return this._get("http://api.testingbot.com/v1/tunnel");
+            return this._get("http://api.testingbot.com/v1/tunnel/" + tunnelID);
         } 
         catch (Exception e) {
             throw new Exception("Could not get tunnel info: " + e.getMessage());
