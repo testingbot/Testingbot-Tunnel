@@ -1,0 +1,3 @@
+2012-07-23:
+* Added support for running multiple tunnels under the same account.
+  This allows for spreading the load across multiple machines when running a high number of simultaneous tests.
