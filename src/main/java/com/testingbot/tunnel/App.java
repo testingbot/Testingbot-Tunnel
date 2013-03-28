@@ -19,11 +19,12 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.6";
+    public static final double VERSION = 1.7;
     private Api api;
     private String clientKey;
     private String clientSecret;
     private String readyFile;
+    private String region = "US";
     private String seleniumPort = "4445";
     private String[] fastFail;
     private SSHTunnel tunnel;
@@ -52,6 +53,10 @@ public class App {
         Option logfile = new Option("l", "logfile", true, "Write logging to a file.");
         logfile.setArgName("FILE");
         options.addOption(logfile);
+        
+        Option region = new Option("r", "region", true, "Region where the tunnel will be used. Default US, possible values: US, EU");
+        logfile.setArgName("REGION");
+        options.addOption(region);
         
         options.addOption("v", "version", false, "Displays the current version of this program");
         
@@ -117,6 +122,13 @@ public class App {
                app.readyFile = commandLine.getOptionValue("readyfile");
            }
            
+           if (commandLine.hasOption("region")) {
+               app.region = commandLine.getOptionValue("region").toUpperCase();
+               if (!app.region.equals("US") && !app.region.equals("EU")) {
+                   throw new ParseException("Region must be US or EU");
+               }
+           }
+                      
            if (commandLine.hasOption("se-port")) {
                app.seleniumPort = commandLine.getOptionValue("se-port");
            }
@@ -185,10 +197,10 @@ public class App {
         
         Runtime.getRuntime().addShutdownHook(cleanupThread);
         
-        api = new Api(this.getClientKey(), this.getClientSecret());
+        api = new Api(this.getClientKey(), this.getClientSecret(), this.getRegion());
         JSONObject tunnel = api.createTunnel();
         
-        if (tunnel.getString("version").equals(App.VERSION) == false) {
+        if (Double.parseDouble(tunnel.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnel.getString("version") + ") is available for download at http://testingbot.com\nYou have version " + App.VERSION);
         }
         
@@ -247,6 +259,10 @@ public class App {
                 }
            }
        }
+    }
+    
+    public String getRegion() {
+        return region;
     }
     
     public Api getApi() {

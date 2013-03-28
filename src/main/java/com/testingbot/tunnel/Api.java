@@ -26,15 +26,17 @@ public class Api {
     
     private String clientKey;
     private String clientSecret;
+    private String apiHost = "api.testingbot.com";
     
-    public Api(String clientKey, String clientSecret) {
+    public Api(String clientKey, String clientSecret, String region) {
         this.clientKey = clientKey;
         this.clientSecret = clientSecret;
+        this.apiHost = (region.equalsIgnoreCase("US") ? "api.testingbot.com" : "api-eu.testingbot.com");
     }
     
     public JSONObject createTunnel() throws Exception {
         try {
-            return this._get("http://api.testingbot.com/v1/tunnel/start");
+            return this._get("https://" + apiHost + "/v1/tunnel/start");
         } 
         catch (Exception e) {
             throw new Exception("Could not get tunnel info: " + e.getMessage());
@@ -43,7 +45,7 @@ public class Api {
     
     public JSONObject pollTunnel(String tunnelID) throws Exception {
         try {
-            return this._get("http://api.testingbot.com/v1/tunnel/" + tunnelID);
+            return this._get("https://" + apiHost + "/v1/tunnel/" + tunnelID);
         } 
         catch (Exception e) {
             throw new Exception("Could not get tunnel info: " + e.getMessage());
@@ -58,7 +60,7 @@ public class Api {
         String auth = this.clientKey + ":" + this.clientSecret;
         String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
 
-        HttpDelete deleteRequest = new HttpDelete("http://api.testingbot.com/v1/tunnel");
+        HttpDelete deleteRequest = new HttpDelete("https://" + apiHost + "/v1/tunnel");
         deleteRequest.addHeader("accept", "application/json");
         deleteRequest.setHeader("Authorization", "Basic " + encoding);
 
