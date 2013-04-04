@@ -29,6 +29,7 @@ public class App {
     private String[] fastFail;
     private SSHTunnel tunnel;
     private String serverIP;
+    private int hubPort = 4444;
     
     public static void main(String... args) throws Exception {
         
@@ -55,8 +56,12 @@ public class App {
         options.addOption(logfile);
         
         Option region = new Option("r", "region", true, "Region where the tunnel will be used. Default US, possible values: US, EU");
-        logfile.setArgName("REGION");
+        region.setArgName("REGION");
         options.addOption(region);
+        
+        Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
+        hubPort.setArgName("HUBPORT");
+        options.addOption(hubPort);
         
         options.addOption("v", "version", false, "Displays the current version of this program");
         
@@ -120,6 +125,13 @@ public class App {
            
            if (commandLine.hasOption("readyfile")) {
                app.readyFile = commandLine.getOptionValue("readyfile");
+           }
+           
+           if (commandLine.hasOption("hubport")) {
+               app.hubPort = Integer.parseInt(commandLine.getOptionValue("hubport"));
+               if ((app.hubPort != 80) && (app.hubPort != 4444)) {
+                   throw new ParseException("The hub port must either be 80 or 4444");
+               }
            }
            
            if (commandLine.hasOption("region")) {
@@ -267,6 +279,10 @@ public class App {
     
     public Api getApi() {
         return api;
+    }
+    
+    public int getHubPort() {
+        return hubPort;
     }
 
     /**
