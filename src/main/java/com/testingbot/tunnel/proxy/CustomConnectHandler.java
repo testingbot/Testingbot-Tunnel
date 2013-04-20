@@ -1,7 +1,3 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package com.testingbot.tunnel.proxy;
 
 import java.io.IOException;
@@ -15,25 +11,20 @@ import org.eclipse.jetty.server.handler.ConnectHandler;
 
 /**
  *
- * @author jochen
+ * @author TestingBot
  */
 public class CustomConnectHandler extends ConnectHandler {
     
     @Override
-    public void handleConnect(Request baseRequest, HttpServletRequest request, HttpServletResponse response, String serverAddress) throws ServletException, IOException
-    {
-        String url = request.getRequestURL().toString();
-        
+    public void handleConnect(Request baseRequest, HttpServletRequest request, HttpServletResponse response, String serverAddress) throws ServletException, IOException {
         super.handleConnect(baseRequest, request, response, serverAddress);
     }
     
     @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        String url = request.getRequestURL().toString();
-        
         String method = request.getMethod();
         if (method.equalsIgnoreCase("CONNECT")) {
-            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, url, response.toString().substring(9, 12)});
+            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, request.getRequestURL().toString(), response.toString().substring(9, 12)});
         }
         
         super.handle(target, baseRequest, request, response);

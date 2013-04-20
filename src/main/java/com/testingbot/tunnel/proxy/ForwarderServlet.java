@@ -134,7 +134,10 @@ public class ForwarderServlet extends ProxyServlet {
             
             connection.addRequestProperty("TB-Tunnel", this.app.getServerIP());
             connection.addRequestProperty("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
-      
+            for (String key : app.getCustomHeaders().keySet()) {
+                connection.addRequestProperty(key, app.getCustomHeaders().get(key));
+            }
+            
             // Proxy headers
             connection.setRequestProperty("Via","1.1 (jetty)");
             if (!xForwardedFor)

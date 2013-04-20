@@ -1,7 +1,3 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package ssh;
 
 import ch.ethz.ssh2.Connection;
@@ -13,7 +9,7 @@ import java.util.logging.Logger;
 
 /**
  *
- * @author jochen
+ * @author TestingBot
  */
 public class SSHTunnel {
     private App app;

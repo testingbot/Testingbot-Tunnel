@@ -14,7 +14,7 @@ import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 /**
  *
- * @author jochen
+ * @author TestingBot
  */
 public class HttpProxy {
     

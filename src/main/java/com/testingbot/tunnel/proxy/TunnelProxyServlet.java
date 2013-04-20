@@ -22,12 +22,9 @@ public class TunnelProxyServlet extends ProxyServlet {
     @Override
     public void service(ServletRequest req, ServletResponse res) throws ServletException, IOException {
         HttpServletRequest request = (HttpServletRequest)req;
-        
-        String url = request.getRequestURL().toString();
-        
-        String method = request.getMethod();
         HttpServletResponse response = (HttpServletResponse)res;
-        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, url, response.toString().substring(9, 12)});
+        
+        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12)});
         super.service(req, res);
     } 
 }

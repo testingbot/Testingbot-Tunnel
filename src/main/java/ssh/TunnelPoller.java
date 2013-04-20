@@ -1,7 +1,3 @@
-/*
- * To change this template, choose Tools | Templates
- * and open the template in the editor.
- */
 package ssh;
 
 import com.testingbot.tunnel.Api;
@@ -14,7 +10,7 @@ import net.sf.json.JSONObject;
 
 /**
  *
- * @author jochen
+ * @author TestingBot
  */
 public class TunnelPoller {
     private App app;
@@ -37,7 +33,7 @@ public class TunnelPoller {
             
                 if (response.getString("state").equals("READY")) {
                    timer.cancel();
-                   app.tunnelReady(response.getString("ip"));
+                   app.tunnelReady(response);
                 } else {
                     Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.getString("state"));
                 }

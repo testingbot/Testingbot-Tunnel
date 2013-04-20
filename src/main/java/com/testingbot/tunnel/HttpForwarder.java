@@ -11,7 +11,7 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import com.testingbot.tunnel.proxy.ForwarderServlet;
 /**
  *
- * @author jochen
+ * @author TestingBot
  */
 public class HttpForwarder {
     

@@ -5,10 +5,11 @@ import java.io.BufferedWriter;
 import java.io.DataInputStream;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.FileHandler;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -29,6 +30,8 @@ public class App {
     private String[] fastFail;
     private SSHTunnel tunnel;
     private String serverIP;
+    private Map<String, String> customHeaders = new HashMap<String, String>();
+    private boolean useBrowserMob = false;
     private int hubPort = 4444;
     
     public static void main(String... args) throws Exception {
@@ -63,11 +66,13 @@ public class App {
         hubPort.setArgName("HUBPORT");
         options.addOption(hubPort);
         
+        options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
+        
         options.addOption("v", "version", false, "Displays the current version of this program");
         
         CommandLine commandLine;  
-        try  
-        {  
+       try  
+       {  
            commandLine = cmdLinePosixParser.parse(options, args);  
            if (commandLine.hasOption("help"))  
            {  
@@ -121,6 +126,10 @@ public class App {
            if (commandLine.hasOption("fast-fail-regexps")) {
                String line = commandLine.getOptionValue("fast-fail-regexps");
                app.fastFail = line.split(",");
+           }
+           
+           if (commandLine.hasOption("ssl")) {
+               app.useBrowserMob = true;
            }
            
            if (commandLine.hasOption("readyfile")) {
@@ -209,18 +218,27 @@ public class App {
         
         Runtime.getRuntime().addShutdownHook(cleanupThread);
         
-        api = new Api(this.getClientKey(), this.getClientSecret(), this.getRegion());
-        JSONObject tunnel = api.createTunnel();
+        api = new Api(this);
+        JSONObject tunnelData = api.createTunnel();
         
-        if (Double.parseDouble(tunnel.getString("version")) > App.VERSION) {
-            System.err.println("A new version (" + tunnel.getString("version") + ") is available for download at http://testingbot.com\nYou have version " + App.VERSION);
+        if (tunnelData.has("error")) {
+            System.err.println("An error ocurred: " + tunnelData.getString("error"));
+            return;
         }
         
-        if (tunnel.getString("state").equals("READY")) {
-            this.tunnelReady(tunnel.getString("ip"));
+        if (tunnelData.has("id")) {
+            api.setTunnelID(Integer.parseInt(tunnelData.getString("id")));
+        }
+        
+        if (Double.parseDouble(tunnelData.getString("version")) > App.VERSION) {
+            System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at http://testingbot.com\nYou have version " + App.VERSION);
+        }
+        
+        if (tunnelData.getString("state").equals("READY")) {
+            this.tunnelReady(tunnelData);
         } else {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
-            TunnelPoller poller = new TunnelPoller(this, tunnel.getString("id"));
+            TunnelPoller poller = new TunnelPoller(this, tunnelData.getString("id"));
         }
     }
 
@@ -237,15 +255,24 @@ public class App {
       }
     }
     
-    public void tunnelReady(String serverIP) {
+    public void tunnelReady(JSONObject apiResponse) {
         // server is booted, make the connection
         try {
+            String serverIP = apiResponse.getString("ip");
             tunnel = new SSHTunnel(this, serverIP);
             if (tunnel.isAuthenticated() == true) {
                 this.serverIP = serverIP;
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 this.startProxies();
+                if (useBrowserMob == true) {
+                    try {
+                        Thread.sleep(10000);
+                    } catch(InterruptedException ex) {
+                        Thread.currentThread().interrupt();
+                    }
+                    api.setupBrowserMob(apiResponse);
+                }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", serverIP);
                 this.saveUserData();
             }
@@ -304,6 +331,18 @@ public class App {
      */
     public String[] getFastFail() {
         return fastFail;
+    }
+    
+    public boolean getUseBrowserMob() {
+        return useBrowserMob;
+    }
+    
+    public Map<String, String> getCustomHeaders() {
+        return customHeaders;
+    }
+    
+    public void addCustomHeader(String key, String value) {
+        customHeaders.put(key, value);
     }
 
    /**
