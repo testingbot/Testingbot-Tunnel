@@ -143,7 +143,7 @@ public class Api {
                 return jsonObject;
             }
             catch (JSONException e) {
-                throw new Exception("Json parse error: " + e.getMessage());
+                throw new Exception("Json parse error: " + e.getMessage() + " for " + sb.toString());
             }
             
         } 
