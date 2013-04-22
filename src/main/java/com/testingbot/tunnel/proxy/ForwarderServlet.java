@@ -30,7 +30,7 @@ public class ForwarderServlet extends ProxyServlet {
         if (!validateDestination(serverName,uri))
             return null;
 
-        return new HttpURI(scheme + "://127.0.0.1:4446" + uri);
+        return new HttpURI("http://127.0.0.1:4446" + uri);
     }
     
     @Override
@@ -41,6 +41,7 @@ public class ForwarderServlet extends ProxyServlet {
         for (String key : app.getCustomHeaders().keySet()) {
             exchange.addRequestHeader(key, app.getCustomHeaders().get(key));
         }
+        
         
         Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{request.getMethod(), request.getRequestURL()});
     }
