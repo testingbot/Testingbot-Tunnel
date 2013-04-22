@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final double VERSION = 1.7;
+    public static final double VERSION = 1.8;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -258,10 +258,10 @@ public class App {
     public void tunnelReady(JSONObject apiResponse) {
         // server is booted, make the connection
         try {
-            String serverIP = apiResponse.getString("ip");
-            tunnel = new SSHTunnel(this, serverIP);
+            String _serverIP = apiResponse.getString("ip");
+            tunnel = new SSHTunnel(this, _serverIP);
             if (tunnel.isAuthenticated() == true) {
-                this.serverIP = serverIP;
+                this.serverIP = _serverIP;
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 this.startProxies();
@@ -273,7 +273,7 @@ public class App {
                     }
                     api.setupBrowserMob(apiResponse);
                 }
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", serverIP);
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 this.saveUserData();
             }
         } catch (Exception ex) {
