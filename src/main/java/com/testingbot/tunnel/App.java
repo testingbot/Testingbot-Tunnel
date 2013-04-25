@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final double VERSION = 1.8;
+    public static final double VERSION = 1.9;
     private Api api;
     private String clientKey;
     private String clientSecret;
