@@ -147,6 +147,11 @@ public class HttpProxy {
             while ((output = br.readLine()) != null) {
                     sb.append(output);
             }
+            try {
+                server.stop();
+            } catch (Exception ex) {
+                
+            }
             
             return ((response.getStatusLine().getStatusCode() == 200) && (sb.indexOf("test=" + this.randomNumber) > -1));
         } catch (IOException ex) {
