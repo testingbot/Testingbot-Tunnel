@@ -2,9 +2,26 @@ package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
 import com.testingbot.tunnel.proxy.TunnelProxyServlet;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.ServerSocket;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import org.apache.http.HttpResponse;
+import org.apache.http.NameValuePair;
+import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.message.BasicNameValuePair;
+import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.handler.AbstractHandler;
 import org.eclipse.jetty.server.nio.SelectChannelConnector;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
@@ -17,8 +34,12 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  * @author TestingBot
  */
 public class HttpProxy {
+    private App app;
+    private int randomNumber = (int )(Math.random() * 50 + 1);
     
     public HttpProxy(App app) {
+        this.app = app;
+        
         Server httpProxy = new Server();
         SelectChannelConnector connector = new SelectChannelConnector();
         connector.setPort(8087);
@@ -63,6 +84,88 @@ public class HttpProxy {
         Thread shutDownHook = new Thread(new ShutDownHook(httpProxy));
 
         Runtime.getRuntime().addShutdownHook(shutDownHook);
+    }
+    
+    private ServerSocket _findAvailableSocket() {
+        int[] ports = {80, 888, 2000, 2001, 2020, 2222, 3000, 3001, 3030, 3333, 4000, 4001, 4040, 4502, 4503, 5000, 5001, 5050, 5555, 6000, 6001, 6060, 6666, 7000, 7070, 7777, 8000, 8001, 8080, 8888, 9000, 9001, 9090, 9999};
+        
+        for (int port : ports) {
+            try {
+                return new ServerSocket(port);
+            } catch (IOException ex) {
+                continue; // try next port
+            }
+        }
+        
+        return null;
+    }
+    
+    public boolean testProxy() {
+        // find a free port, create a webserver, make a request to the proxy endpoint, expect it to arrive here.
+        
+        ServerSocket serverSocket;
+        int port;
+        try {
+            serverSocket = _findAvailableSocket();
+            if (serverSocket == null) {
+                return true;
+            }
+            
+            port = serverSocket.getLocalPort();
+            serverSocket.close();
+        } catch (Exception ex) {
+            // no port available? assume everything is ok
+            return true;
+        }
+        
+        Server server = new Server(port);
+        server.setHandler(new TestHandler());
+        try {
+            server.start();
+        } catch (Exception e) {
+            return true;
+        }
+        
+        try {
+            DefaultHttpClient httpClient = new DefaultHttpClient();
+            HttpPost postRequest = new HttpPost("https://testingbot.com/test_tunnel");
+            
+            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);
+            nameValuePairs.add(new BasicNameValuePair("client_key", app.getClientKey()));
+            nameValuePairs.add(new BasicNameValuePair("client_secret", app.getClientSecret()));
+            nameValuePairs.add(new BasicNameValuePair("tunnel_id", Integer.toString(app.getTunnelID())));
+            nameValuePairs.add(new BasicNameValuePair("test_port", Integer.toString(port)));
+            
+            postRequest.setEntity(new UrlEncodedFormEntity(nameValuePairs));
+            
+            HttpResponse response = httpClient.execute(postRequest);
+            BufferedReader br = new BufferedReader(
+                     new InputStreamReader((response.getEntity().getContent()), "UTF8"));
+
+            String output;
+            StringBuilder sb = new StringBuilder();
+            while ((output = br.readLine()) != null) {
+                    sb.append(output);
+            }
+            
+            return ((response.getStatusLine().getStatusCode() == 200) && (sb.indexOf("test=" + this.randomNumber) > -1));
+        } catch (IOException ex) {
+            return true;
+        }
+    }
+    
+    private class TestHandler extends AbstractHandler {
+        public void handle(String target,
+                       Request baseRequest,
+                       HttpServletRequest request,
+                       HttpServletResponse response) 
+        throws IOException, ServletException
+        {
+            response.setContentType("text/html;charset=utf-8");
+            response.setStatus(HttpServletResponse.SC_OK);
+            baseRequest.setHandled(true);
+            response.getWriter().println("test=" + Integer.toString(randomNumber));
+        }
     }
     
     private class ShutDownHook implements Runnable {

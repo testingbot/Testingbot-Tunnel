@@ -33,6 +33,7 @@ public class App {
     private Map<String, String> customHeaders = new HashMap<String, String>();
     private boolean useBrowserMob = false;
     private int hubPort = 4444;
+    private int tunnelID = 0;
     
     public static void main(String... args) throws Exception {
         
@@ -227,7 +228,8 @@ public class App {
         }
         
         if (tunnelData.has("id")) {
-            api.setTunnelID(Integer.parseInt(tunnelData.getString("id")));
+            this.tunnelID = Integer.parseInt(tunnelData.getString("id"));
+            api.setTunnelID(tunnelID);
         }
         
         if (Double.parseDouble(tunnelData.getString("version")) > App.VERSION) {
@@ -244,7 +246,7 @@ public class App {
 
     public void stop() {
       if (tunnel != null) {
-         tunnel.stop();
+         tunnel.stop(true);
       }
 
       try {
@@ -286,6 +288,14 @@ public class App {
        HttpProxy httpProxy = new HttpProxy(this);
        HttpForwarder httpForwarder = new HttpForwarder(this);
        
+       if (httpForwarder.testForwarding() == false) {
+           Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", getSeleniumPort());
+       }
+       
+       if (httpProxy.testProxy() == false) {
+           Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Tunnel might not work properly, test failed");
+       }
+       
        if (this.readyFile != null) {
            File f = new File(this.readyFile);
            if (f.exists()) {
@@ -310,6 +320,10 @@ public class App {
 
             Runtime.getRuntime().addShutdownHook(cleanupThread);
        }
+    }
+    
+    public int getTunnelID() {
+        return tunnelID;
     }
     
     public String getRegion() {
