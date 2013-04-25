@@ -297,6 +297,18 @@ public class App {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
                 }
            }
+           
+           Thread cleanupThread = new Thread() {
+              @Override
+              public void run() {
+                  File f = new File(readyFile);
+                  if (f.exists()) {
+                        f.delete();
+                  }
+              }
+            };
+
+            Runtime.getRuntime().addShutdownHook(cleanupThread);
        }
     }
     
