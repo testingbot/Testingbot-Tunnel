@@ -16,7 +16,6 @@ import net.sf.json.*;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.params.HttpConnectionParams;
 import org.apache.http.params.HttpParams;
-import org.eclipse.jetty.client.HttpClient;
 
 /**
  *
