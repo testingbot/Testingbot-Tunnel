@@ -24,7 +24,10 @@ public class TunnelProxyServlet extends ProxyServlet {
         HttpServletRequest request = (HttpServletRequest)req;
         HttpServletResponse response = (HttpServletResponse)res;
         
-        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12)});
+        long startTime = System.currentTimeMillis();
         super.service(req, res);
+        long endTime = System.currentTimeMillis();
+        
+        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-startTime) + " ms"});
     } 
 }
