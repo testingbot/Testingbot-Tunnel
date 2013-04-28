@@ -49,6 +49,6 @@ public class ForwarderServlet extends ProxyServlet {
     protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
     {
         super.handleOnException(ex, request, response);
-        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0}", ex.getMessage());
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{ex.getMessage(), ex.getStackTrace().toString()});
     }
 }
