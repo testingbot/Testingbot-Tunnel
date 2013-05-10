@@ -69,7 +69,10 @@ public class TunnelProxyServlet extends ProxyServlet {
                 String uri = request.getRequestURI();
                 if (request.getQueryString() != null)
                     uri += "?" + request.getQueryString();
-
+                if (request.getServerName().equalsIgnoreCase("localhost") && request.getServerPort() == 8087) {
+                    throw new ServletException("Bad request on TunnelProxyServlet");
+                }
+                
                 HttpURI url = proxyHttpURI(request,uri);
 
                 if (debug != 0)
