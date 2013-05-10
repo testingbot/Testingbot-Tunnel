@@ -5,12 +5,14 @@ import com.testingbot.tunnel.proxy.TunnelProxyServlet;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.ServletException;
+import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.apache.http.HttpResponse;
@@ -128,7 +130,8 @@ public class HttpProxy {
         
         try {
             DefaultHttpClient httpClient = new DefaultHttpClient();
-            HttpPost postRequest = new HttpPost("https://testingbot.com/test_tunnel");
+            String url = "https://" + (app.getRegion().equalsIgnoreCase("US") ? "api.testingbot.com" : "api-eu.testingbot.com") + "/v1/tunnel/test";
+            HttpPost postRequest = new HttpPost(url);
             
             List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);
             nameValuePairs.add(new BasicNameValuePair("client_key", app.getClientKey()));
@@ -153,7 +156,7 @@ public class HttpProxy {
                 
             }
             
-            return ((response.getStatusLine().getStatusCode() == 200) && (sb.indexOf("test=" + this.randomNumber) > -1));
+            return ((response.getStatusLine().getStatusCode() == 201) && (sb.indexOf("test=" + this.randomNumber) > -1));
         } catch (IOException ex) {
             return true;
         }
