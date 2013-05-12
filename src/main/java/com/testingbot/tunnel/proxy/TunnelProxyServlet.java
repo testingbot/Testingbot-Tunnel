@@ -16,6 +16,7 @@ import java.util.logging.Logger;
 import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import org.apache.commons.lang.exception.ExceptionUtils;
 import org.eclipse.jetty.client.HttpExchange;
 import org.eclipse.jetty.continuation.Continuation;
 import org.eclipse.jetty.continuation.ContinuationSupport;
@@ -41,6 +42,19 @@ public class TunnelProxyServlet extends ProxyServlet {
     @Override
     public void init(ServletConfig config) throws ServletException {
         super.init(config);
+    }
+    
+    @Override
+    protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
+    {
+        if (request.getRequestURL().toString().indexOf("squid-internal") == -1) {
+            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{ex.getMessage(), request.getMethod() + " - " + request.getRequestURL().toString(), ExceptionUtils.getStackTrace(ex)});
+        }
+        
+        if (!response.isCommitted())
+        {
+            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        }
     }
 
     @Override
