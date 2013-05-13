@@ -1,8 +1,11 @@
 1.11
-* add ssh compression (zlib)
+* ssh compression (zlib)
 
 1.10
-* add support for rabbIT proxy (compression proxy)
+* switch to using blowfish tunnel encryption which should be faster
+* improved error logging
+* display how long each proxied request takes in ms
+* add rabbIT support
 
 1.9
 * remove readyfile when tunnel is stopped
