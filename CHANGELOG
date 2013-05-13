@@ -1,3 +1,9 @@
+1.11
+* add ssh compression (zlib)
+
+1.10
+* add support for rabbIT proxy (compression proxy)
+
 1.9
 * remove readyfile when tunnel is stopped
 * cleanup code
