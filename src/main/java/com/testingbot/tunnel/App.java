@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.11";
+    public static final String VERSION = "1.11-surfly";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -35,6 +35,7 @@ public class App {
     private int hubPort = 4444;
     private int tunnelID = 0;
     private boolean useBoost = false;
+    private boolean noProxy = false;
     
     public static void main(String... args) throws Exception {
         
@@ -69,6 +70,7 @@ public class App {
         options.addOption(hubPort);
         
         options.addOption("b", "boost", false, "Will use rabbIT to compress and optimize traffic");
+        options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
         
         options.addOption("v", "version", false, "Displays the current version of this program");
@@ -139,6 +141,10 @@ public class App {
                app.useBoost = true;
            }
            
+           if (commandLine.hasOption("noproxy")) {
+               app.noProxy = true;
+           }
+
            if (commandLine.hasOption("readyfile")) {
                app.readyFile = commandLine.getOptionValue("readyfile");
            }
@@ -309,15 +315,17 @@ public class App {
     }
     
     private void startProxies() {
-       HttpProxy httpProxy = new HttpProxy(this);
        HttpForwarder httpForwarder = new HttpForwarder(this);
        
        if (httpForwarder.testForwarding() == false) {
            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", getSeleniumPort());
        }
-       
-       if (httpProxy.testProxy() == false) {
-           Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Tunnel might not work properly, test failed");
+      
+       if (! this.noProxy) {
+           HttpProxy httpProxy = new HttpProxy(this);
+           if (httpProxy.testProxy() == false) {
+               Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Tunnel might not work properly, test failed");
+            }
        }
        
        if (this.readyFile != null) {
