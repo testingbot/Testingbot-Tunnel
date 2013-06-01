@@ -39,7 +39,7 @@ public class TunnelPoller {
                 }
             } catch (Exception ex) {
                 Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, "Unable to poll for tunnel status.");
-                Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, null, ex);
+                Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, ex.toString());
             }
         }
     }
