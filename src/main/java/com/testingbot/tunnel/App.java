@@ -36,6 +36,7 @@ public class App {
     private int tunnelID = 0;
     private boolean useBoost = false;
     private boolean noProxy = false;
+    private boolean bypassSquid = false;
     
     public static void main(String... args) throws Exception {
         
@@ -72,6 +73,7 @@ public class App {
         options.addOption("b", "boost", false, "Will use rabbIT to compress and optimize traffic");
         options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
+        options.addOption("q", "squid", false, "Bypass our Squid proxy running on the tunnel VM.");
         
         options.addOption("v", "version", false, "Displays the current version of this program");
         
@@ -147,6 +149,10 @@ public class App {
 
            if (commandLine.hasOption("readyfile")) {
                app.readyFile = commandLine.getOptionValue("readyfile");
+           }
+           
+           if (commandLine.hasOption("squid")) {
+               app.bypassSquid = true;
            }
            
            if (commandLine.hasOption("hubport")) {
@@ -416,5 +422,9 @@ public class App {
     
     public String getServerIP() {
         return serverIP;
+    }
+    
+    public boolean isBypassingSquid() {
+        return bypassSquid;
     }
 }

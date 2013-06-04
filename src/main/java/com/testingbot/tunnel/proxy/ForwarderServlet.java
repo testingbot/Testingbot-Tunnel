@@ -38,6 +38,10 @@ public class ForwarderServlet extends ProxyServlet {
         exchange.addRequestHeader("TB-Tunnel", this.app.getServerIP());
         exchange.addRequestHeader("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
         
+        if (this.app.isBypassingSquid()) {
+            exchange.addRequestHeader("TB-Tunnel-Port", "2010");
+        }
+        
         for (String key : app.getCustomHeaders().keySet()) {
             exchange.addRequestHeader(key, app.getCustomHeaders().get(key));
         }
