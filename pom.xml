@@ -3,7 +3,7 @@
 
   <groupId>com.testingbot</groupId>
   <artifactId>TestingBotTunnel</artifactId>
-  <version>1.13-SNAPSHOT</version>
+  <version>1.13</version>
   <packaging>jar</packaging>
 
   <licenses>
