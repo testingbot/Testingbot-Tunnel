@@ -3,7 +3,7 @@
 
   <groupId>com.testingbot</groupId>
   <artifactId>TestingBotTunnel</artifactId>
-  <version>1.13</version>
+  <version>1.14-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <licenses>
@@ -94,23 +94,23 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <version>8.1.12.v20130726</version>
+      <version>8.1.14.v20131031</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
-      <version>8.1.12.v20130726</version>
+      <version>8.1.14.v20131031</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlets</artifactId>
-      <version>8.1.12.v20130726</version>
+      <version>8.1.14.v20131031</version>
       <type>jar</type>
     </dependency>
     <dependency>
       <groupId>org.apache.httpcomponents</groupId>
       <artifactId>httpclient</artifactId>
-      <version>4.2.5</version>
+      <version>4.2.6</version>
     </dependency>
     <dependency>
       <groupId>net.iharder</groupId>

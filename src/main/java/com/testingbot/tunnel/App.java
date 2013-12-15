@@ -20,12 +20,11 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.13";
+    public static final String VERSION = "1.14";
     private Api api;
     private String clientKey;
     private String clientSecret;
     private String readyFile;
-    private String region = "US";
     private String seleniumPort = "4445";
     private String[] fastFail;
     private SSHTunnel tunnel;
@@ -61,10 +60,6 @@ public class App {
         Option logfile = new Option("l", "logfile", true, "Write logging to a file.");
         logfile.setArgName("FILE");
         options.addOption(logfile);
-        
-        Option region = new Option("r", "region", true, "Region where the tunnel will be used. Default US, possible values: US, EU");
-        region.setArgName("REGION");
-        options.addOption(region);
         
         Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
         hubPort.setArgName("HUBPORT");
@@ -159,13 +154,6 @@ public class App {
                app.hubPort = Integer.parseInt(commandLine.getOptionValue("hubport"));
                if ((app.hubPort != 80) && (app.hubPort != 4444)) {
                    throw new ParseException("The hub port must either be 80 or 4444");
-               }
-           }
-           
-           if (commandLine.hasOption("region")) {
-               app.region = commandLine.getOptionValue("region").toUpperCase();
-               if (!app.region.equals("US") && !app.region.equals("EU")) {
-                   throw new ParseException("Region must be US or EU");
                }
            }
                       
@@ -362,10 +350,6 @@ public class App {
     
     public int getTunnelID() {
         return tunnelID;
-    }
-    
-    public String getRegion() {
-        return region;
     }
     
     public Api getApi() {

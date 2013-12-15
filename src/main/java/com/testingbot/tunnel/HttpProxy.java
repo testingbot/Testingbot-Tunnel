@@ -130,7 +130,7 @@ public class HttpProxy {
         
         try {
             DefaultHttpClient httpClient = new DefaultHttpClient();
-            String url = "https://" + (app.getRegion().equalsIgnoreCase("US") ? "api.testingbot.com" : "api-eu.testingbot.com") + "/v1/tunnel/test";
+            String url = "https://api.testingbot.com/v1/tunnel/test";
             HttpPost postRequest = new HttpPost(url);
             
             List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);

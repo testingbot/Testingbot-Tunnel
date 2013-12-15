@@ -33,7 +33,7 @@ public class Api {
         this.app = app;
         this.clientKey = app.getClientKey();
         this.clientSecret = app.getClientSecret();
-        this.apiHost = (app.getRegion().equalsIgnoreCase("US") ? "api.testingbot.com" : "api-eu.testingbot.com");
+        this.apiHost = "api.testingbot.com";
     }
     
     public JSONObject createTunnel() throws Exception {
