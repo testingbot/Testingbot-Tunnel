@@ -51,7 +51,7 @@ public class HttpForwarder {
         HttpResponse response;
         try {
             response = httpClient.execute(getRequest);
-        } catch (Exception ex) {
+        } catch (IOException ex) {
             return false;
         }
 

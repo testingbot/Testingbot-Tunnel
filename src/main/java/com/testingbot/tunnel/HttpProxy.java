@@ -5,14 +5,12 @@ import com.testingbot.tunnel.proxy.TunnelProxyServlet;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintWriter;
 import java.net.ServerSocket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.ServletException;
-import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.apache.http.HttpResponse;
@@ -37,12 +35,13 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  */
 public class HttpProxy {
     private App app;
-    private int randomNumber = (int )(Math.random() * 50 + 1);
+    private Server httpProxy;
+    private final int randomNumber = (int )(Math.random() * 50 + 1);
     
     public HttpProxy(App app) {
         this.app = app;
         
-        Server httpProxy = new Server();
+        this.httpProxy = new Server();
         SelectChannelConnector connector = new SelectChannelConnector();
         connector.setPort(8087);
         connector.setMaxIdleTime(400000);
@@ -76,16 +75,28 @@ public class HttpProxy {
         }
         handlers.addHandler(proxy);
 
+        start();
+
+        Thread shutDownHook = new Thread(new ShutDownHook(httpProxy));
+
+        Runtime.getRuntime().addShutdownHook(shutDownHook);
+    }
+
+    public void stop() {
+        try {
+            httpProxy.stop();
+        } catch (Exception ex) {
+            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+
+    public void start() {
         try {
             httpProxy.start();
         } catch (Exception ex) {
             Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port 8087 on this computer.");
             Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
         }
-
-        Thread shutDownHook = new Thread(new ShutDownHook(httpProxy));
-
-        Runtime.getRuntime().addShutdownHook(shutDownHook);
     }
     
     private ServerSocket _findAvailableSocket() {
@@ -95,7 +106,6 @@ public class HttpProxy {
             try {
                 return new ServerSocket(port);
             } catch (IOException ex) {
-                continue; // try next port
             }
         }
         
@@ -115,7 +125,7 @@ public class HttpProxy {
             
             port = serverSocket.getLocalPort();
             serverSocket.close();
-        } catch (Exception ex) {
+        } catch (IOException ex) {
             // no port available? assume everything is ok
             return true;
         }
