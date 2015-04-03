@@ -1,5 +1,5 @@
 TestingBot.com Tunnel to run Cloud Selenium tests on your local computer or staging environment.
-You can find more info on http://testingbot.com/support/other/tunnel
+You can find more info on https://testingbot.com/support/other/tunnel
 
 About
 -------
@@ -20,7 +20,7 @@ Install
 To start the tunnel, enter the following command:
     java -jar testingbot-tunnel.jar key secret
 
-You can obtain a free key and secret from http://testingbot.com
+You can obtain a free key and secret from https://testingbot.com
 
 Now point your tests to use localhost and port 4445
 

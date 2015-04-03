@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.15";
+    public static final String VERSION = "1.16";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -164,8 +164,8 @@ public class App {
            
            System.out.println("----------------------------------------------------------------");
            System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
-           System.out.println("  Questions or suggestions, please visit http://testingbot.com  ");
-           System.out.println("-----------------------------------------------------------------");
+           System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
+           System.out.println("----------------------------------------------------------------");
            
            app.boot();
         }  
@@ -240,7 +240,7 @@ public class App {
                 System.setProperty("https.proxyHost", "127.0.0.1");
                 System.setProperty("http.proxyPort", "9666");
                 System.setProperty("https.proxyPort", "9666");
-                System.getProperties().put("http.nonProxyHosts", "localhost|127.0.0.1|testingbot.com|api.testingbot.com|hub.testingbot.com|europe.testingbot.com|api-eu.testingbot.com");
+                System.getProperties().put("http.nonProxyHosts", "localhost|127.0.0.1|testingbot.com|api.testingbot.com|hub.testingbot.com");
             }
         }
         
