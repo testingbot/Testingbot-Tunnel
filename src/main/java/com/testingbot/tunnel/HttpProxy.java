@@ -64,6 +64,15 @@ public class HttpProxy {
             }
             proxyServlet.setInitParameter("blackList", sb.toString());
         }
+        
+        if (app.getUseBoost() == true) {
+            proxyServlet.setInitParameter("proxy", "127.0.0.1:9666");     
+        }
+        
+        if (app.getProxy() != null) {
+            proxyServlet.setInitParameter("proxy", app.getProxy());     
+        }
+        
         context.addServlet(proxyServlet, "/*");
         
         // Setup proxy handler to handle CONNECT methods
@@ -165,7 +174,7 @@ public class HttpProxy {
             } catch (Exception ex) {
                 
             }
-            
+
             return ((response.getStatusLine().getStatusCode() == 201) && (sb.indexOf("test=" + this.randomNumber) > -1));
         } catch (IOException ex) {
             return true;
