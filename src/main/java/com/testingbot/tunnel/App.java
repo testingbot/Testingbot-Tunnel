@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.16";
+    public static final String VERSION = "1.17";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -37,6 +37,7 @@ public class App {
     private boolean noProxy = false;
     private boolean bypassSquid = false;
     private HttpProxy httpProxy;
+    private String proxy;
     
     public static void main(String... args) throws Exception {
         
@@ -57,6 +58,10 @@ public class App {
         Option fastFail = new Option("F", "fast-fail-regexps", true, "Specify domains you don't want to proxy, comma separated.");
         fastFail.setArgName("OPTIONS");
         options.addOption(fastFail);
+        
+        Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
+        proxy.setArgName("PROXYHOST:PROXYPORT");
+        options.addOption(proxy);
         
         Option logfile = new Option("l", "logfile", true, "Write logging to a file.");
         logfile.setArgName("FILE");
@@ -119,16 +124,22 @@ public class App {
            }
            
            if ((clientKey != null) && (clientSecret != null)) {
-               app.clientKey = clientKey;
-               app.clientSecret = clientSecret;
+              app.clientKey = clientKey;
+              app.clientSecret = clientSecret;
            } else {
-                app.clientKey = commandLine.getArgs()[0].trim();
-                app.clientSecret = commandLine.getArgs()[1].trim();
+              app.clientKey = commandLine.getArgs()[0].trim();
+              app.clientSecret = commandLine.getArgs()[1].trim();
            }
            
            if (commandLine.hasOption("fast-fail-regexps")) {
-               String line = commandLine.getOptionValue("fast-fail-regexps");
-               app.fastFail = line.split(",");
+              String line = commandLine.getOptionValue("fast-fail-regexps");
+              app.fastFail = line.split(",");
+              Logger.getLogger(App.class.getName()).log(Level.INFO, "Fast-fail mode set for {0}", line);
+           }
+           
+           if (commandLine.hasOption("proxy")) {
+              String line = commandLine.getOptionValue("proxy");
+              app.setProxy(line);
            }
            
            if (commandLine.hasOption("ssl")) {
@@ -148,7 +159,8 @@ public class App {
            }
            
            if (commandLine.hasOption("squid")) {
-               app.bypassSquid = true;
+              Logger.getLogger(App.class.getName()).log(Level.INFO, "Bypassing Squid on the tunnel VM");
+              app.bypassSquid = true;
            }
            
            if (commandLine.hasOption("hubport")) {
@@ -240,7 +252,8 @@ public class App {
                 System.setProperty("https.proxyHost", "127.0.0.1");
                 System.setProperty("http.proxyPort", "9666");
                 System.setProperty("https.proxyPort", "9666");
-                System.getProperties().put("http.nonProxyHosts", "localhost|127.0.0.1|testingbot.com|api.testingbot.com|hub.testingbot.com");
+                System.getProperties().put("http.nonProxyHosts", "testingbot.com|api.testingbot.com|hub.testingbot.com");
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Boost mode is activated");
             }
         }
         
@@ -258,7 +271,7 @@ public class App {
         }
         
         if (!tunnelData.getString("version").equals(App.VERSION)) {
-            System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at http://testingbot.com\nYou have version " + App.VERSION);
+            System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
         
         if (tunnelData.getString("state").equals("READY")) {
@@ -301,6 +314,8 @@ public class App {
                     api.setupBrowserMob(apiResponse);
                 }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
+                
                 this.saveUserData();
             }
         } catch (Exception ex) {
@@ -316,7 +331,7 @@ public class App {
            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", getSeleniumPort());
        }
       
-       if (! this.noProxy) {
+       if (!this.noProxy && !this.getUseBoost()) {
            this.httpProxy = new HttpProxy(this);
            if (this.httpProxy.testProxy() == false) {
                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Tunnel might not work properly, test failed");
@@ -379,6 +394,22 @@ public class App {
         return clientSecret;
     }
 
+
+    public void setClientKey(String key) {
+      clientKey = key;
+    }
+
+    public void setClientSecret(String secret) {
+      clientSecret = secret;
+    }
+
+    public void setProxy(String p) {
+        proxy = p;
+    }
+    
+    public String getProxy() {
+        return proxy;
+    }
     /**
      * @return the fastFail
      */
