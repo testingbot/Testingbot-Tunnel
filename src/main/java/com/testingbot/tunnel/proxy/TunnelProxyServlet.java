@@ -17,6 +17,8 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.apache.commons.lang.exception.ExceptionUtils;
+import org.eclipse.jetty.client.Address;
+import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpExchange;
 import org.eclipse.jetty.continuation.Continuation;
 import org.eclipse.jetty.continuation.ContinuationSupport;
@@ -55,6 +57,21 @@ public class TunnelProxyServlet extends ProxyServlet {
         {
             response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
         }
+    }
+    
+    @Override
+    protected HttpClient createHttpClientInstance()
+    {
+        HttpClient client = new HttpClient();
+        
+        String proxy = getServletConfig().getInitParameter("proxy");
+        if (proxy != null && !proxy.isEmpty())
+        {
+            String[] splitted = proxy.split(":");
+            client.setProxy(new Address(splitted[0], Integer.parseInt(splitted[1])));    
+        }
+        
+        return client;
     }
 
     @Override
