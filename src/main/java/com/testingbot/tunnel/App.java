@@ -331,9 +331,9 @@ public class App {
            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", getSeleniumPort());
        }
       
-       if (!this.noProxy && !this.getUseBoost()) {
+       if (!this.noProxy) {
            this.httpProxy = new HttpProxy(this);
-           if (this.httpProxy.testProxy() == false) {
+           if (!this.getUseBoost() && this.httpProxy.testProxy() == false) {
                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "!! Tunnel might not work properly, test failed");
             }
        }
