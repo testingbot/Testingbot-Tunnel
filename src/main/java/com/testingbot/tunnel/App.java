@@ -155,7 +155,7 @@ public class App {
            }
 
            if (commandLine.hasOption("readyfile")) {
-               app.readyFile = commandLine.getOptionValue("readyfile");
+               app.readyFile = commandLine.getOptionValue("readyfile").trim();
            }
            
            if (commandLine.hasOption("squid")) {
@@ -257,6 +257,8 @@ public class App {
             }
         }
         
+        trackPid();
+        
         api = new Api(this);
         JSONObject tunnelData = api.createTunnel();
         
@@ -280,6 +282,10 @@ public class App {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
             TunnelPoller poller = new TunnelPoller(this, tunnelData.getString("id"));
         }
+    }
+    
+    public void trackPid() {
+        PidPoller pidPoller = new PidPoller(this);
     }
 
     public void stop() {
@@ -344,7 +350,10 @@ public class App {
                f.setLastModified(System.currentTimeMillis());
            } else {
                 try {
-                    f.createNewFile();
+                    FileWriter fw = new FileWriter(f.getAbsoluteFile());
+                    BufferedWriter bw = new BufferedWriter(fw);
+                    bw.write("TestingBot Tunnel Ready");
+                    bw.close();
                 } catch (IOException ex) {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
                 }
