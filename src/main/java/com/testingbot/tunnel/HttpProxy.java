@@ -20,6 +20,7 @@ import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
+import org.eclipse.jetty.proxy.ConnectHandler;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -28,11 +29,9 @@ import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.AbstractHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
 import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.servlet.ServletHandler;
 /**
  *
  * @author TestingBot
@@ -54,7 +53,7 @@ public class HttpProxy {
         httpProxy.setConnectors(new Connector[] { connector });
         httpProxy.setStopAtShutdown(true);
         
-           ServletHolder servletHolder = new ServletHolder(new TunnelProxyServlet());
+        ServletHolder servletHolder = new ServletHolder(TunnelProxyServlet.class);
            
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
@@ -72,13 +71,15 @@ public class HttpProxy {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
         
-      ServletContextHandler ctxHandler = new ServletContextHandler(
-            ServletContextHandler.SESSIONS);
-      ctxHandler.setContextPath("/");
-      ctxHandler.addServlet(servletHolder, "/*");
-      
-        httpProxy.setHandler(ctxHandler);
-
+        HandlerCollection handlers = new HandlerCollection();
+        httpProxy.setHandler(handlers);
+        
+        ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
+        context.addServlet(servletHolder, "/*");
+        
+        ConnectHandler proxy = new CustomConnectHandler();
+        handlers.addHandler(proxy);
+        
         start();
 
         Thread shutDownHook = new Thread(new ShutDownHook(httpProxy));

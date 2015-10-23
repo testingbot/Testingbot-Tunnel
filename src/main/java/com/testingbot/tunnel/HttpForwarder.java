@@ -15,6 +15,7 @@ import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
+import org.eclipse.jetty.servlet.ServletContextHandler;
 /**
  *
  * @author TestingBot
@@ -35,10 +36,14 @@ public class HttpForwarder {
         
         httpProxy.addConnector(connector);
         
-        ServletHandler servletHandler = new ServletHandler();
-        servletHandler.addServletWithMapping(new ServletHolder(new ForwarderServlet(app)), "/*");
- 
-        httpProxy.setHandler(servletHandler);
+        ServletHolder servletHolder = new ServletHolder(new ForwarderServlet(app));
+         
+        ServletContextHandler ctxHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
+        ctxHandler.setContextPath("/");
+        ctxHandler.addServlet(servletHolder, "/*");
+        
+        httpProxy.setHandler(ctxHandler);
+        
         try {
             httpProxy.start();
         } catch (Exception ex) {
