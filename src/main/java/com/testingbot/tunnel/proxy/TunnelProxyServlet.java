@@ -17,29 +17,17 @@ import javax.servlet.ServletResponse;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.apache.commons.lang.exception.ExceptionUtils;
-import org.eclipse.jetty.client.Address;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpExchange;
+import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.continuation.Continuation;
 import org.eclipse.jetty.continuation.ContinuationSupport;
-import org.eclipse.jetty.http.HttpHeaderValues;
-import org.eclipse.jetty.http.HttpHeaders;
-import org.eclipse.jetty.http.HttpSchemes;
 import org.eclipse.jetty.http.HttpURI;
-import org.eclipse.jetty.io.Buffer;
 import org.eclipse.jetty.io.EofException;
+import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
-public class TunnelProxyServlet extends ProxyServlet {
+public class TunnelProxyServlet extends AsyncProxyServlet {
     
-    class CustomHttpExchange extends HttpExchange {
-        public long startTime = System.currentTimeMillis();
-        
-        @Override
-        protected void onRequestCommitted() throws IOException
-        {
-            startTime = System.currentTimeMillis();
-        }
-    }
     
     @Override
     public void init(ServletConfig config) throws ServletException {
@@ -47,15 +35,10 @@ public class TunnelProxyServlet extends ProxyServlet {
     }
     
     @Override
-    protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
+    protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
-        if (request.getRequestURL().toString().indexOf("squid-internal") == -1) {
-            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{ex.getMessage(), request.getMethod() + " - " + request.getRequestURL().toString(), ExceptionUtils.getStackTrace(ex)});
-        }
-        
-        if (!response.isCommitted())
-        {
-            response.setStatus(HttpServletResponse.SC_INTERNAL_SERVER_ERROR);
+        if (clientRequest.getRequestURL().toString().indexOf("squid-internal") == -1) {
+            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
         }
     }
     

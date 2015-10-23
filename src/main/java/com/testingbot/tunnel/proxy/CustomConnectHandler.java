@@ -7,18 +7,13 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.server.Request;
-import org.eclipse.jetty.server.handler.ConnectHandler;
+import org.eclipse.jetty.proxy.ConnectHandler;
 
 /**
  *
  * @author TestingBot
  */
 public class CustomConnectHandler extends ConnectHandler {
-    
-    @Override
-    public void handleConnect(Request baseRequest, HttpServletRequest request, HttpServletResponse response, String serverAddress) throws ServletException, IOException {
-        super.handleConnect(baseRequest, request, response, serverAddress);
-    }
     
     @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {

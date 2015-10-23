@@ -94,17 +94,22 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <version>8.1.18.v20150929</version>
+      <version>9.3.5.v20151012</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
-      <version>8.1.18.v20150929</version>
+      <version>9.3.5.v20151012</version>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-proxy</artifactId>
+      <version>9.3.5.v20151012</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlets</artifactId>
-      <version>8.1.18.v20150929</version>
+      <version>9.3.5.v20151012</version>
       <type>jar</type>
     </dependency>
     <dependency>

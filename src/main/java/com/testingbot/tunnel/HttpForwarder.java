@@ -4,7 +4,7 @@ import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.nio.SelectChannelConnector;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletHandler;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
@@ -13,6 +13,8 @@ import com.testingbot.tunnel.proxy.ForwarderServlet;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 /**
  *
  * @author TestingBot
@@ -23,18 +25,19 @@ public class HttpForwarder {
     public HttpForwarder(App app) {
         this.app = app;
         Server httpProxy = new Server();
-        SelectChannelConnector connector = new SelectChannelConnector();
+        HttpConfiguration http_config = new HttpConfiguration();
+        ServerConnector connector = new ServerConnector(httpProxy,
+                new HttpConnectionFactory(http_config));
         connector.setPort(Integer.parseInt(app.getSeleniumPort()));
-        connector.setMaxIdleTime(400000);
-        connector.setThreadPool(new QueuedThreadPool(128));
+        connector.setIdleTimeout(400000);
         
-        httpProxy.setGracefulShutdown(3000);
         httpProxy.setStopAtShutdown(true);
         
         httpProxy.addConnector(connector);
+        
         ServletHandler servletHandler = new ServletHandler();
         servletHandler.addServletWithMapping(new ServletHolder(new ForwarderServlet(app)), "/*");
-        
+ 
         httpProxy.setHandler(servletHandler);
         try {
             httpProxy.start();

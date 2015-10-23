@@ -1,6 +1,7 @@
 package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
+import com.testingbot.tunnel.proxy.ForwarderServlet;
 import com.testingbot.tunnel.proxy.TunnelProxyServlet;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -19,16 +20,19 @@ import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
+import org.eclipse.jetty.server.Connector;
+import org.eclipse.jetty.server.HttpConfiguration;
+import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.AbstractHandler;
-import org.eclipse.jetty.server.nio.SelectChannelConnector;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
-import org.eclipse.jetty.server.handler.ConnectHandler;
 import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.servlet.ServletHandler;
 /**
  *
  * @author TestingBot
@@ -42,47 +46,38 @@ public class HttpProxy {
         this.app = app;
         
         this.httpProxy = new Server();
-        SelectChannelConnector connector = new SelectChannelConnector();
+                HttpConfiguration http_config = new HttpConfiguration();
+        ServerConnector connector = new ServerConnector(httpProxy,
+                new HttpConnectionFactory(http_config));
         connector.setPort(8087);
-        connector.setMaxIdleTime(400000);
-        connector.setThreadPool(new QueuedThreadPool(256));
-        httpProxy.addConnector(connector);
-        
-        httpProxy.setGracefulShutdown(3000);
+        connector.setIdleTimeout(400000);
+        httpProxy.setConnectors(new Connector[] { connector });
         httpProxy.setStopAtShutdown(true);
         
-        HandlerCollection handlers = new HandlerCollection();
-        httpProxy.setHandler(handlers);
-        
-        // Setup proxy servlet
-        ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
-        ServletHolder proxyServlet = new ServletHolder(TunnelProxyServlet.class);
+           ServletHolder servletHolder = new ServletHolder(new TunnelProxyServlet());
+           
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
             for (String domain : app.getFastFail()) {
                 sb.append(domain).append(",");
             }
-            proxyServlet.setInitParameter("blackList", sb.toString());
+            servletHolder.setInitParameter("blackList", sb.toString());
         }
         
         if (app.getUseBoost() == true) {
-            proxyServlet.setInitParameter("proxy", "127.0.0.1:9666");     
+            servletHolder.setInitParameter("proxy", "127.0.0.1:9666");     
         }
         
         if (app.getProxy() != null) {
-            proxyServlet.setInitParameter("proxy", app.getProxy());     
+            servletHolder.setInitParameter("proxy", app.getProxy());     
         }
         
-        context.addServlet(proxyServlet, "/*");
-        
-        // Setup proxy handler to handle CONNECT methods
-        ConnectHandler proxy = new CustomConnectHandler();
-        if (app.getFastFail() != null && app.getFastFail().length > 0) {
-            for (String domain : app.getFastFail()) {
-                proxy.addBlack(domain);
-            }
-        }
-        handlers.addHandler(proxy);
+      ServletContextHandler ctxHandler = new ServletContextHandler(
+            ServletContextHandler.SESSIONS);
+      ctxHandler.setContextPath("/");
+      ctxHandler.addServlet(servletHolder, "/*");
+      
+        httpProxy.setHandler(ctxHandler);
 
         start();
 

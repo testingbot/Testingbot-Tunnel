@@ -1,7 +1,7 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
-import org.eclipse.jetty.servlets.ProxyServlet;
+import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
@@ -11,9 +11,10 @@ import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.client.HttpExchange;
+import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.http.HttpURI;
 
-public class ForwarderServlet extends ProxyServlet {
+public class ForwarderServlet extends AsyncProxyServlet {
     private App app;
     
     public ForwarderServlet(App app) {
@@ -26,33 +27,29 @@ public class ForwarderServlet extends ProxyServlet {
     }
     
     @Override
-    protected HttpURI proxyHttpURI(String scheme, String serverName, int serverPort, String uri) throws MalformedURLException {
-        if (!validateDestination(serverName,uri))
-            return null;
-
-        return new HttpURI("http://127.0.0.1:4446" + uri);
+    protected String rewriteTarget(HttpServletRequest request)
+    {   
+        return "http://127.0.0.1:4446" + request.getRequestURI();
     }
     
     @Override
-    protected void customizeExchange(HttpExchange exchange, HttpServletRequest request) {
-        exchange.addRequestHeader("TB-Tunnel", this.app.getServerIP());
-        exchange.addRequestHeader("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
-        
-        if (this.app.isBypassingSquid()) {
-            exchange.addRequestHeader("TB-Tunnel-Port", "2010");
-        }
-        
-        for (String key : app.getCustomHeaders().keySet()) {
-            exchange.addRequestHeader(key, app.getCustomHeaders().get(key));
-        }
-        
-        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{request.getMethod(), request.getRequestURL()});
-    }
-    
-    @Override
-    protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
+    protected void addProxyHeaders(HttpServletRequest clientRequest, Request proxyRequest)
     {
-        super.handleOnException(ex, request, response);
-        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{ex.getMessage(), ex.getStackTrace().toString()});
+        addViaHeader(proxyRequest);
+        addXForwardedHeaders(clientRequest, proxyRequest);
+        proxyRequest.header("TB-Tunnel", this.app.getServerIP());
+        proxyRequest.header("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
+        if (this.app.isBypassingSquid()) {
+            proxyRequest.header("TB-Tunnel-Port", "2010");
+        }
+       
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
+    }
+
+    @Override
+    protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
+    {
+        super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), failure.getStackTrace().toString()});
     }
 }
