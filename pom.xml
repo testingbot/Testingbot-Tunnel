@@ -3,7 +3,7 @@
 
   <groupId>com.testingbot</groupId>
   <artifactId>TestingBotTunnel</artifactId>
-  <version>1.16-SNAPSHOT</version>
+  <version>1.17</version>
   <packaging>jar</packaging>
 
   <licenses>
@@ -37,6 +37,22 @@
     </distributionManagement>
   <build>
     <plugins>
+      <plugin>
+    <groupId>org.apache.maven.plugins</groupId>
+    <artifactId>maven-javadoc-plugin</artifactId>
+    <version>2.9</version>
+    <executions>
+        <execution>
+            <id>attach-javadocs</id>
+            <goals>
+                <goal>jar</goal>
+            </goals>
+            <configuration>
+                <additionalparam>-Xdoclint:none</additionalparam>
+            </configuration>
+        </execution>
+    </executions>
+</plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
