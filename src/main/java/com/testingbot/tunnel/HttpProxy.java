@@ -54,7 +54,9 @@ public class HttpProxy {
         httpProxy.setStopAtShutdown(true);
         
         ServletHolder servletHolder = new ServletHolder(TunnelProxyServlet.class);
-           
+        servletHolder.setInitParameter("idleTimeout", "120000");
+        servletHolder.setInitParameter("timeout", "120000");
+        
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
             for (String domain : app.getFastFail()) {

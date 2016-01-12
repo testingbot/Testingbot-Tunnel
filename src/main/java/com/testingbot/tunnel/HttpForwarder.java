@@ -37,7 +37,9 @@ public class HttpForwarder {
         httpProxy.addConnector(connector);
         
         ServletHolder servletHolder = new ServletHolder(new ForwarderServlet(app));
-         
+        servletHolder.setInitParameter("idleTimeout", "300000");
+        servletHolder.setInitParameter("timeout", "300000");
+        
         ServletContextHandler ctxHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         ctxHandler.setContextPath("/");
         ctxHandler.addServlet(servletHolder, "/*");
