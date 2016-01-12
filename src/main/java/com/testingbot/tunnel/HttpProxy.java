@@ -57,6 +57,9 @@ public class HttpProxy {
         // Setup proxy servlet
         ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
         ServletHolder proxyServlet = new ServletHolder(TunnelProxyServlet.class);
+        proxyServlet.setInitParameter("idleTimeout", "120000");
+        proxyServlet.setInitParameter("timeout", "120000");
+ 
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
             for (String domain : app.getFastFail()) {
