@@ -72,7 +72,7 @@ public class SSHTunnel {
     public void createPortForwarding() {
         try {
             conn.openSession();
-            conn.requestRemotePortForwarding(server, 2010, "0.0.0.0", 8087);
+            conn.requestRemotePortForwarding(server, 2010, "0.0.0.0", app.getJettyPort());
             String hubHost = "hub.testingbot.com";
             LocalPortForwarder lpf1 = conn.createLocalPortForwarder(4446, hubHost, app.getHubPort());
         } catch (IOException ex) {
