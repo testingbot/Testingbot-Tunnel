@@ -33,6 +33,7 @@ public class App {
     private boolean useBrowserMob = false;
     private int hubPort = 4444;
     private int tunnelID = 0;
+    private int jettyPort = 8087;
     private boolean useBoost = false;
     private boolean noProxy = false;
     private boolean bypassSquid = false;
@@ -75,7 +76,8 @@ public class App {
         options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
         options.addOption("q", "squid", false, "Bypass our Squid proxy running on the tunnel VM.");
-        
+        options.addOption("j", "jettyport", true, "The port to launch the Jetty proxy on (default 8087)");
+
         options.addOption("v", "version", false, "Displays the current version of this program");
         
         CommandLine commandLine;  
@@ -152,6 +154,10 @@ public class App {
            
            if (commandLine.hasOption("noproxy")) {
                app.noProxy = true;
+           }
+
+           if (commandLine.hasOption("jettyport")) {
+            app.jettyPort = Integer.parseInt(commandLine.getOptionValue("jettyport"));
            }
 
            if (commandLine.hasOption("readyfile")) {
@@ -383,6 +389,10 @@ public class App {
     
     public Api getApi() {
         return api;
+    }
+
+    public int getJettyPort() {
+      return jettyPort;
     }
     
     public int getHubPort() {

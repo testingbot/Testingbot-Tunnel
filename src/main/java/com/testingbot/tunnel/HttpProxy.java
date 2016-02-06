@@ -48,7 +48,7 @@ public class HttpProxy {
                 HttpConfiguration http_config = new HttpConfiguration();
         ServerConnector connector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
-        connector.setPort(8087);
+        connector.setPort(app.getJettyPort());
         connector.setIdleTimeout(400000);
         httpProxy.setConnectors(new Connector[] { connector });
         httpProxy.setStopAtShutdown(true);
@@ -72,6 +72,8 @@ public class HttpProxy {
         if (app.getProxy() != null) {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
+
+        servletHolder.setInitParameter("jetty", String.valueOf(app.getJettyPort()));
         
         HandlerCollection handlers = new HandlerCollection();
         httpProxy.setHandler(handlers);
@@ -101,7 +103,7 @@ public class HttpProxy {
         try {
             httpProxy.start();
         } catch (Exception ex) {
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port 8087 on this computer.");
+            Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port " + app.getJettyPort() + " on this computer.");
             Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
