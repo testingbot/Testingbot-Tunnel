@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.18";
+    public static final String VERSION = "1.19";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -32,6 +32,7 @@ public class App {
     private Map<String, String> customHeaders = new HashMap<String, String>();
     private boolean useBrowserMob = false;
     private int hubPort = 4444;
+    private String hubHost = "hub.testingbot.com";
     private int tunnelID = 0;
     private int jettyPort = 8087;
     private boolean useBoost = false;
@@ -71,6 +72,10 @@ public class App {
         Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
         hubPort.setArgName("HUBPORT");
         options.addOption(hubPort);
+        
+        Option hubHost = new Option("h", "hubhost", true, "Use this if you want to connect to a different hub (for example with TestingBot node-seleniumgrid)");
+        hubHost.setArgName("HUBHOST");
+        options.addOption(hubHost);
         
         options.addOption("b", "boost", false, "Will use rabbIT to compress and optimize traffic");
         options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
@@ -174,6 +179,10 @@ public class App {
                if ((app.hubPort != 80) && (app.hubPort != 4444)) {
                    throw new ParseException("The hub port must either be 80 or 4444");
                }
+           }
+           
+           if (commandLine.hasOption("hubhost")) {
+               app.hubHost = commandLine.getOptionValue("hubhost");
            }
                       
            if (commandLine.hasOption("se-port")) {
@@ -465,5 +474,13 @@ public class App {
     
     public boolean isBypassingSquid() {
         return bypassSquid;
+    }
+    
+    public String getVersion() {
+        return VERSION;
+    }
+    
+    public String getHubHost() {
+        return hubHost;
     }
 }

@@ -37,6 +37,7 @@ public class ForwarderServlet extends ProxyServlet {
     protected void customizeExchange(HttpExchange exchange, HttpServletRequest request) {
         exchange.addRequestHeader("TB-Tunnel", this.app.getServerIP());
         exchange.addRequestHeader("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
+        exchange.addRequestHeader("TB-Tunnel-Version", this.app.getVersion());
         
         if (this.app.isBypassingSquid()) {
             exchange.addRequestHeader("TB-Tunnel-Port", "2010");

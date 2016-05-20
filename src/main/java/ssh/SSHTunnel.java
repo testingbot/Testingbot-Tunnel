@@ -73,7 +73,7 @@ public class SSHTunnel {
         try {
             conn.openSession();
             conn.requestRemotePortForwarding(server, 2010, "0.0.0.0", app.getJettyPort());
-            String hubHost = "hub.testingbot.com";
+            String hubHost = app.getHubHost();
             LocalPortForwarder lpf1 = conn.createLocalPortForwarder(4446, hubHost, app.getHubPort());
         } catch (IOException ex) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.");
