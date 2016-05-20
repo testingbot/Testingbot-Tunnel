@@ -1,4 +1,5 @@
 TestingBot.com Tunnel to run Cloud Selenium tests on your local computer or staging environment.
+
 You can find more info on https://testingbot.com/support/other/tunnel
 
 About
@@ -24,27 +25,28 @@ You can obtain a free key and secret from https://testingbot.com
 
 Now point your tests to use localhost and port 4445
 ```ruby
-		require "rubygems"  
-		require 'testingbot'   
-		gem "selenium-client"  
-		gem "selenium-webdriver"  
-		require "selenium-webdriver"   
-		require "selenium/client"  
+require "rubygems"  
+require 'testingbot'   
+gem "selenium-client"  
+gem "selenium-webdriver"  
+require "selenium-webdriver"   
+require "selenium/client"  
   
-		caps = {  
-		  :browserName => "internet explorer",  
-		  :version => "11",  
-		  :platform => "WINDOWS"  
-		}  
+caps = {  
+  :browserName => "internet explorer",  
+  :version => "11",  
+  :platform => "WINDOWS"  
+}  
   
-		urlhub = "http://key:secret@localhost:4445/wd/hub"  
-		client = Selenium::WebDriver::Remote::Http::Default.new  
-		client.timeout = 120  
-  
-		webdriver = Selenium::WebDriver.for :remote, :url => urlhub, :desired_capabilities => caps, :http_client => client  
-		webdriver.navigate.to "http://staging.local"  
-		puts webdriver.title  
-		webdriver.quit
+urlhub = "http://key:secret@localhost:4445/wd/hub"  
+client = Selenium::WebDriver::Remote::Http::Default.new  
+client.timeout = 120  
+
+webdriver = Selenium::WebDriver.for :remote, :url => urlhub, 
+                :desired_capabilities => caps, :http_client => client  
+webdriver.navigate.to "http://staging.local"  
+puts webdriver.title  
+webdriver.quit
 ```
 Compile from Source
 -------------------
