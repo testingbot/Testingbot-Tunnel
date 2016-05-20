@@ -23,7 +23,7 @@ To start the tunnel, enter the following command:
 You can obtain a free key and secret from https://testingbot.com
 
 Now point your tests to use localhost and port 4445
-
+```ruby
 		require "rubygems"  
 		require 'testingbot'   
 		gem "selenium-client"  
@@ -32,8 +32,8 @@ Now point your tests to use localhost and port 4445
 		require "selenium/client"  
   
 		caps = {  
-		  :browserName => "iexplore",  
-		  :version => "9",  
+		  :browserName => "internet explorer",  
+		  :version => "11",  
 		  :platform => "WINDOWS"  
 		}  
   
@@ -41,11 +41,11 @@ Now point your tests to use localhost and port 4445
 		client = Selenium::WebDriver::Remote::Http::Default.new  
 		client.timeout = 120  
   
-		webdriver = Selenium::WebDriver.for :remote,:url => urlhub , :desired_capabilities => caps,:http_client => client  
+		webdriver = Selenium::WebDriver.for :remote, :url => urlhub, :desired_capabilities => caps, :http_client => client  
 		webdriver.navigate.to "http://staging.local"  
 		puts webdriver.title  
 		webdriver.quit
-
+```
 Compile from Source
 -------------------
 
@@ -57,4 +57,4 @@ Copyright
 ---------
 
 Copyright (c) TestingBot.com
-See LICENSE for more information.
+See the LICENSE for more information.
