@@ -117,6 +117,8 @@ public class TunnelProxyServlet extends ProxyServlet {
 
                 CustomHttpExchange exchange = new CustomHttpExchange()
                 {
+                    private int requestSize;
+                    
                     @Override
                     protected void onRequestCommitted() throws IOException
                     {
@@ -133,6 +135,8 @@ public class TunnelProxyServlet extends ProxyServlet {
                         if (debug != 0)
                             _log.debug(debug + " content" + content.length());
                         content.writeTo(out);
+                        
+                        requestSize = content.length();
                     }
 
                     @Override
@@ -157,7 +161,7 @@ public class TunnelProxyServlet extends ProxyServlet {
                     protected void onResponseComplete() throws IOException
                     {
                         long endTime = System.currentTimeMillis();
-                        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
+                        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3} | {4}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms", requestSize + " bytes"});
                         continuation.complete();
                     }
         
@@ -188,12 +192,7 @@ public class TunnelProxyServlet extends ProxyServlet {
                     {
                         handleOnConnectionFailed(ex,request,response);
 
-                        // it is possible this might trigger before the
-                        // continuation.suspend()
-                        if (!continuation.isInitial())
-                        {
-                            continuation.complete();
-                        }
+                        continuation.complete();
                     }
 
                     @Override
@@ -205,13 +204,7 @@ public class TunnelProxyServlet extends ProxyServlet {
                             //return;
                         }
                         handleOnException(ex,request,response);
-
-                        // it is possible this might trigger before the
-                        // continuation.suspend()
-                        if (!continuation.isInitial())
-                        {
-                            continuation.complete();
-                        }
+                        continuation.complete();
                     }
 
                     @Override
