@@ -60,6 +60,9 @@ public class HttpProxy {
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
             for (String domain : app.getFastFail()) {
+                if (!domain.contains(":")) {
+                    domain = domain + ":80"; // default port 80
+                }
                 sb.append(domain).append(",");
             }
             servletHolder.setInitParameter("blackList", sb.toString());
@@ -81,7 +84,15 @@ public class HttpProxy {
         ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
         context.addServlet(servletHolder, "/*");
         
-        ConnectHandler proxy = new CustomConnectHandler();
+        CustomConnectHandler proxy = new CustomConnectHandler();
+        if (app.getFastFail() != null && app.getFastFail().length > 0) {
+            for (String domain : app.getFastFail()) {
+                if (!domain.contains(":")) {
+                    domain = domain + ":443"; // default port 443 (SSL)
+                }
+                proxy.getBlackListHosts().add(domain);
+            }
+        }
         handlers.addHandler(proxy);
         
         start();
