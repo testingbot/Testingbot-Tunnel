@@ -1,3 +1,25 @@
+# TestingBot specific files
 testingbot-tunnel.pid
+
+# General Java files
+*.class
+*.ear
+*.jar
+*.war
+
+# Maven
 dependency-reduced-pom.xml
-target
+target/
+
+# OSX files
+.DS_Store
+
+# eclipse
+.classpath
+.project
+.settings/
+
+# IntelliJ
+*.iml
+*.iws
+.idea/
