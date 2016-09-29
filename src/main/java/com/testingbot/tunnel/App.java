@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.19";
+    public static final String VERSION = "1.20";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -206,10 +206,10 @@ public class App {
     }
     
     private String[] getUserData() {
-        File dataFile = new File(System.getProperty("user.home") + "/.testingbot");
+        File dataFile = new File(System.getProperty("user.home") + File.pathSeparator + ".testingbot");
         if (dataFile.exists()) {
             try {
-              FileInputStream fstream = new FileInputStream(System.getProperty("user.home") + "/.testingbot");
+              FileInputStream fstream = new FileInputStream(System.getProperty("user.home") + File.pathSeparator + ".testingbot");
               // Get the object of DataInputStream
               DataInputStream in = new DataInputStream(fstream);
               BufferedReader br = new BufferedReader(new InputStreamReader(in));
@@ -224,10 +224,10 @@ public class App {
     }
     
     private void saveUserData() {
-        File dataFile = new File(System.getProperty("user.home") + "/.testingbot");
+        File dataFile = new File(System.getProperty("user.home") + File.pathSeparator + ".testingbot");
         if (!dataFile.exists()) {
             try {
-                FileWriter fstream = new FileWriter(System.getProperty("user.home") + "/.testingbot");
+                FileWriter fstream = new FileWriter(System.getProperty("user.home") + File.pathSeparator + ".testingbot");
                 BufferedWriter out = new BufferedWriter(fstream);
                 out.write(this.clientKey + ":" + this.clientSecret);
                 out.close();

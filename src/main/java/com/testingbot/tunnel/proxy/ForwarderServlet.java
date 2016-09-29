@@ -6,6 +6,7 @@ import org.eclipse.jetty.servlets.ProxyServlet;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import java.net.MalformedURLException;
+import java.util.Arrays;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
@@ -14,7 +15,7 @@ import org.eclipse.jetty.client.HttpExchange;
 import org.eclipse.jetty.http.HttpURI;
 
 public class ForwarderServlet extends ProxyServlet {
-    private App app;
+    private final App app;
     
     public ForwarderServlet(App app) {
         this.app = app;
@@ -54,6 +55,6 @@ public class ForwarderServlet extends ProxyServlet {
     protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
     {
         super.handleOnException(ex, request, response);
-        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{ex.getMessage(), ex.getStackTrace().toString()});
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{ex.getMessage(), Arrays.toString(ex.getStackTrace())});
     }
 }

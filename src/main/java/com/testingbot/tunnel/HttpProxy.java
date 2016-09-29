@@ -33,7 +33,7 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  *
  * @author TestingBot
  */
-public class HttpProxy {
+public final class HttpProxy {
     private App app;
     private Server httpProxy;
     private final int randomNumber = (int )(Math.random() * 50 + 1);
@@ -108,7 +108,7 @@ public class HttpProxy {
         try {
             httpProxy.start();
         } catch (Exception ex) {
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port " + app.getJettyPort() + " on this computer.");
+            Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port {0} on this computer.", app.getJettyPort());
             Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
