@@ -59,7 +59,7 @@ public final class HttpProxy {
         ServletHolder proxyServlet = new ServletHolder(TunnelProxyServlet.class);
         proxyServlet.setInitParameter("idleTimeout", "90000");
         proxyServlet.setInitParameter("timeout", "90000");
- 
+        
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
             for (String domain : app.getFastFail()) {
@@ -68,6 +68,9 @@ public final class HttpProxy {
             proxyServlet.setInitParameter("blackList", sb.toString());
         }
         
+        if (app.isDebugMode() == true) {
+            proxyServlet.setInitParameter("tb_debug", "true");
+        }
         if (app.getUseBoost() == true) {
             proxyServlet.setInitParameter("proxy", "127.0.0.1:9666");     
         }
@@ -81,7 +84,9 @@ public final class HttpProxy {
         context.addServlet(proxyServlet, "/*");
         
         // Setup proxy handler to handle CONNECT methods
-        ConnectHandler proxy = new CustomConnectHandler();
+        CustomConnectHandler proxy = new CustomConnectHandler();
+        proxy.setDebugMode(app.isDebugMode());
+        
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             for (String domain : app.getFastFail()) {
                 proxy.addBlack(domain);

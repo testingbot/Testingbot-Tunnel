@@ -165,6 +165,19 @@ public class TunnelProxyServlet extends ProxyServlet {
                     {
                         long endTime = System.currentTimeMillis();
                         Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3} | {4}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms", requestSize + " bytes"});
+                        if (getServletConfig().getInitParameter("tb_debug") != null) {
+                            Enumeration<String> headerNames = request.getHeaderNames();
+                            if (headerNames != null) {
+                                StringBuilder sb = new StringBuilder();
+                                String header;
+
+                                while (headerNames.hasMoreElements()) {
+                                    header = headerNames.nextElement();
+                                    sb.append(header).append(": ").append(request.getHeader(header)).append(System.getProperty("line.separator"));
+                                }
+                                Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, sb.toString());
+                            }
+                        }
                         continuation.complete();
                     }
         
