@@ -83,6 +83,8 @@ public class App {
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
         options.addOption("q", "squid", false, "Bypass our Squid proxy running on the tunnel VM.");
         options.addOption("j", "jettyport", true, "The port to launch the Jetty proxy on (default 8087)");
+        options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
+        options.addOption("j", "jettyport", true, "The port to launch the Jetty proxy on (default 8087)");
         
         options.addOption("v", "version", false, "Displays the current version of this program");
         
@@ -93,7 +95,7 @@ public class App {
            if (commandLine.hasOption("help"))  
            {  
               HelpFormatter help = new HelpFormatter();
-              help.printHelp("java -jar testingbot-tunnel.jar API_KEY API_SECRET [OPTIONS]", options);
+              help.printHelp("java -jar testingbot-tunnel.jar API_KEY AP_ISECRET [OPTIONS]", options);
               System.exit(0);
            } else if (commandLine.hasOption("version")) {
                System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
@@ -110,6 +112,10 @@ public class App {
            String clientKey = null;
            String clientSecret = null;
            
+           if (commandLine.hasOption("doctor")) {
+               app.doctor();
+               return;
+           }
            System.out.println("----------------------------------------------------------------");
            System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
            System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
@@ -237,6 +243,10 @@ public class App {
                 out.close();
             } catch (Exception e){}
         }
+    }
+    
+    public void doctor() {
+        Doctor doctor = new Doctor();
     }
     
     public void boot() throws Exception {

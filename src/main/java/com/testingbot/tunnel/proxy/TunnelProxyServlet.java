@@ -50,7 +50,11 @@ public class TunnelProxyServlet extends ProxyServlet {
     protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
     {
         if (!request.getRequestURL().toString().contains("squid-internal")) {
-            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{ex.getMessage(), request.getMethod() + " - " + request.getRequestURL().toString(), ExceptionUtils.getStackTrace(ex)});
+            if (getServletConfig().getInitParameter("tb_debug") != null) {
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{ex.getMessage(), request.getMethod() + " - " + request.getRequestURL().toString(), ExceptionUtils.getStackTrace(ex)});
+            } else {
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}", new Object[]{ex.getMessage(), request.getMethod() + " - " + request.getRequestURL().toString()});
+            }
         }
         
         if (!response.isCommitted())
