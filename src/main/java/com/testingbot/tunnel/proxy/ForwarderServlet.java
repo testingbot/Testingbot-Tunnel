@@ -5,15 +5,13 @@ import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
-import java.net.MalformedURLException;
 import java.util.Enumeration;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
-import org.eclipse.jetty.client.HttpExchange;
 import org.eclipse.jetty.client.api.Request;
-import org.eclipse.jetty.http.HttpURI;
 
 public class ForwarderServlet extends AsyncProxyServlet {
     private App app;
@@ -28,8 +26,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
     }
     
     @Override
-    protected String rewriteTarget(HttpServletRequest request)
-    {   
+    protected String rewriteTarget(HttpServletRequest request) {   
         return "http://127.0.0.1:4446" + request.getRequestURI();
     }
     
@@ -42,6 +39,12 @@ public class ForwarderServlet extends AsyncProxyServlet {
         proxyRequest.header("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
         if (this.app.isBypassingSquid()) {
             proxyRequest.header("TB-Tunnel-Port", "2010");
+        }
+        
+        if (this.app.getCustomHeaders().size() > 0) {
+            for (Map.Entry<String, String> entry : this.app.getCustomHeaders().entrySet()) {
+                proxyRequest.header(entry.getKey(), entry.getValue());
+            }
         }
        
         Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});

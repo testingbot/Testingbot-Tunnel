@@ -1,7 +1,6 @@
 package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
-import com.testingbot.tunnel.proxy.ForwarderServlet;
 import com.testingbot.tunnel.proxy.TunnelProxyServlet;
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -20,7 +19,6 @@ import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.DefaultHttpClient;
 import org.apache.http.message.BasicNameValuePair;
-import org.eclipse.jetty.proxy.ConnectHandler;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
