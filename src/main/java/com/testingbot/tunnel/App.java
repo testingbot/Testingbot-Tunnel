@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "2.2";
+    public static final String VERSION = "2.3";
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -37,6 +37,7 @@ public class App {
     private boolean useBoost = false;
     private boolean noProxy = false;
     private boolean bypassSquid = false;
+    private boolean debugMode = false;
     private HttpProxy httpProxy;
     private String proxy;
     
@@ -109,6 +110,19 @@ public class App {
            String clientKey = null;
            String clientSecret = null;
            
+           System.out.println("----------------------------------------------------------------");
+           System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
+           System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
+           System.out.println("----------------------------------------------------------------");
+           
+            if (commandLine.hasOption("debug")) {
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Running in debug-mode");
+                Logger.getLogger("").setLevel(Level.ALL);
+                app.setDebugMode(true);
+            } else {
+                 Logger.getLogger("").setLevel(Level.INFO);
+            }
+           
            if (commandLine.getArgs().length < 2) {
                String userdata[] = app.getUserData();
                if (userdata.length == 2) {
@@ -180,11 +194,6 @@ public class App {
                app.seleniumPort = commandLine.getOptionValue("se-port");
            }
            
-           System.out.println("----------------------------------------------------------------");
-           System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
-           System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
-           System.out.println("----------------------------------------------------------------");
-           
            app.boot();
         }  
         catch (ParseException parseException) 
@@ -197,10 +206,10 @@ public class App {
     }
     
     private String[] getUserData() {
-        File dataFile = new File(System.getProperty("user.home") + "/.testingbot");
+        File dataFile = new File(System.getProperty("user.home") + File.separator + ".testingbot");
         if (dataFile.exists()) {
             try {
-              FileInputStream fstream = new FileInputStream(System.getProperty("user.home") + "/.testingbot");
+              FileInputStream fstream = new FileInputStream(dataFile.getAbsolutePath());
               // Get the object of DataInputStream
               DataInputStream in = new DataInputStream(fstream);
               BufferedReader br = new BufferedReader(new InputStreamReader(in));
@@ -215,10 +224,10 @@ public class App {
     }
     
     private void saveUserData() {
-        File dataFile = new File(System.getProperty("user.home") + "/.testingbot");
+        File dataFile = new File(System.getProperty("user.home") + File.separator + ".testingbot");
         if (!dataFile.exists()) {
             try {
-                FileWriter fstream = new FileWriter(System.getProperty("user.home") + "/.testingbot");
+                FileWriter fstream = new FileWriter(dataFile.getAbsolutePath());
                 BufferedWriter out = new BufferedWriter(fstream);
                 out.write(this.clientKey + ":" + this.clientSecret);
                 out.close();
@@ -465,5 +474,19 @@ public class App {
     
     public boolean isBypassingSquid() {
         return bypassSquid;
+    }
+
+    /**
+     * @return the debugMode
+     */
+    public boolean isDebugMode() {
+        return debugMode;
+    }
+
+    /**
+     * @param debugMode the debugMode to set
+     */
+    public void setDebugMode(boolean debugMode) {
+        this.debugMode = debugMode;
     }
 }

@@ -6,6 +6,7 @@ import org.eclipse.jetty.proxy.AsyncProxyServlet;
 import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import java.net.MalformedURLException;
+import java.util.Enumeration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
@@ -44,6 +45,19 @@ public class ForwarderServlet extends AsyncProxyServlet {
         }
        
         Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
+        if (app.isDebugMode()) {
+            Enumeration<String> headerNames = clientRequest.getHeaderNames();
+             if (headerNames != null) {
+                StringBuilder sb = new StringBuilder();
+                String header;
+ 
+                while (headerNames.hasMoreElements()) {
+                    header = headerNames.nextElement();
+                    sb.append(header).append(": ").append(clientRequest.getHeader(header)).append(System.getProperty("line.separator"));
+                }
+                Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, sb.toString());
+            }
+        }
     }
 
     @Override

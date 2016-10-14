@@ -68,6 +68,10 @@ public class HttpProxy {
             servletHolder.setInitParameter("blackList", sb.toString());
         }
         
+        if (app.isDebugMode() == true) {
+            servletHolder.setInitParameter("tb_debug", "true");
+        }
+        
         if (app.getUseBoost() == true) {
             servletHolder.setInitParameter("proxy", "127.0.0.1:9666");     
         }
@@ -85,6 +89,7 @@ public class HttpProxy {
         context.addServlet(servletHolder, "/*");
         
         CustomConnectHandler proxy = new CustomConnectHandler();
+        proxy.setDebugMode(app.isDebugMode());
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             for (String domain : app.getFastFail()) {
                 if (!domain.contains(":")) {
