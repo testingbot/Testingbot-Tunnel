@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "2.3";
+    public static final Float VERSION = 2.3f;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -78,7 +78,7 @@ public class App {
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
         options.addOption("q", "squid", false, "Bypass our Squid proxy running on the tunnel VM.");
         options.addOption("j", "jettyport", true, "The port to launch the Jetty proxy on (default 8087)");
-
+        options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
         
         CommandLine commandLine;  
@@ -109,6 +109,11 @@ public class App {
            App app = new App();
            String clientKey = null;
            String clientSecret = null;
+           
+           if (commandLine.hasOption("doctor")) {
+                app.doctor();
+                return;
+            }
            
            System.out.println("----------------------------------------------------------------");
            System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
@@ -287,7 +292,7 @@ public class App {
             api.setTunnelID(tunnelID);
         }
         
-        if (!tunnelData.getString("version").equals(App.VERSION)) {
+        if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
         
@@ -388,6 +393,10 @@ public class App {
        }
     }
 
+    public void doctor() {
+        Doctor doctor = new Doctor();
+    }
+    
     public HttpProxy getHttpProxy() {
       return httpProxy;
     }
