@@ -1,6 +1,6 @@
 TestingBot.com Tunnel to run Cloud Selenium tests on your local computer or staging environment.
 
-You can find more info on https://testingbot.com/support/other/tunnel
+You can find more information on https://testingbot.com/support/other/tunnel
 
 About
 -------
@@ -8,12 +8,12 @@ About
 Whether you want to test on your local computer (localhost), on a staging server inside your LAN, or on a computer across VPN, our TestingBot Tunnel makes all of this possible in a secure and reliable way.
 
 You will no longer need to open up ports on your firewall or whitelist our IP range to run tests on your staging environment. 
-Below are some of the features of the TestingBot Tunnel.
+Below are some of the features of the TestingBot Tunnel:
 
-Fast: at our end of the tunnel we keep a cache of static content, to reduce traffic inside the tunnel.
-Secure: when you start the Tunnel, a pristine VM server is booted just for you and will last until you end the tunnel.
-Robust: full HTTP(s) support, coded in Java
-Easy to set up and use.
+* Fast: at our end of the tunnel we keep a cache of static content, to reduce traffic inside the tunnel.
+* Secure: when you start the Tunnel, a pristine VM server is booted just for you and will last until you end the tunnel.
+* Robust: full HTTP(s) support, coded in Java
+* Easy to set up and use.
 
 Install
 -------
@@ -34,7 +34,7 @@ require "selenium/client"
   
 caps = {  
   :browserName => "internet explorer",  
-  :version => "11",  
+  :version => "latest",  
   :platform => "WINDOWS"  
 }  
   
@@ -51,7 +51,7 @@ webdriver.quit
 Compile from Source
 -------------------
 
-To compile and test the Jar yourself you can use the following commands:
+To compile and test the Jar yourself you can use the following command:
 
     mvn assembly:assembly
 
