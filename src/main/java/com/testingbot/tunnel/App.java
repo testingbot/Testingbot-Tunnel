@@ -20,7 +20,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final String VERSION = "1.20";
+    public static final Float VERSION = 1.20f;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -95,7 +95,7 @@ public class App {
            if (commandLine.hasOption("help"))  
            {  
               HelpFormatter help = new HelpFormatter();
-              help.printHelp("java -jar testingbot-tunnel.jar API_KEY AP_ISECRET [OPTIONS]", options);
+              help.printHelp("java -jar testingbot-tunnel.jar API_KEY API_SECRET [OPTIONS]", options);
               System.exit(0);
            } else if (commandLine.hasOption("version")) {
                System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
@@ -301,7 +301,7 @@ public class App {
             api.setTunnelID(tunnelID);
         }
         
-        if (!tunnelData.getString("version").equals(App.VERSION)) {
+        if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
         
@@ -491,7 +491,7 @@ public class App {
     }
     
     public String getVersion() {
-        return VERSION;
+        return VERSION.toString();
     }
     
     public String getHubHost() {
