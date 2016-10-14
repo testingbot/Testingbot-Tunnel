@@ -1,6 +1,38 @@
+1.20
+* updated dependencies to their latest versions
+* added --doctor option to detect misconfigurations
+* debugmode (-d) will now also output HTTP headers
+
+1.19
+* improve timeout handling in proxy
+* unknownhost exception
+* override hubhost for node-seleniumgrid
+
+1.18
+* improve timeout handling in proxy
+
+1.17
+* fix -b (boost) and add an upstream proxy option (-Y)
+* updated depdencies to their latest versions
+
+1.16
+* updated dependencies to their latest versions
+* add retry mechanism when the tunnel fails
+
+1.15
+* updated dependencies to their latest versions
+* when tunnel VM connection is interrupted, make sure we stop the local proxy. Upon successful retry, start the local proxy again
+
 1.14
-* remove region
-* update dependencies
+* updated dependencies to their latest versions
+* removed region option
+
+1.13
+* updated dependencies to their latest versions
+
+1.12
+* add -q option to bypass Squid running on our Tunnel VMs
+* added option to disable the proxy server, so you can use your own
 
 1.11
 * ssh compression (zlib)
