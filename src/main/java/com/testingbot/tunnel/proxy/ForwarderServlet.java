@@ -21,6 +21,11 @@ public class ForwarderServlet extends ProxyServlet {
     }
     
     @Override
+    public void init(ServletConfig config) throws ServletException {
+        super.init(config);
+    }
+    
+    @Override
     protected HttpURI proxyHttpURI(String scheme, String serverName, int serverPort, String uri) throws MalformedURLException {
         if (!validateDestination(serverName,uri))
             return null;
