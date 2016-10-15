@@ -42,11 +42,6 @@ public class TunnelProxyServlet extends ProxyServlet {
     }
     
     @Override
-    public void init(ServletConfig config) throws ServletException {
-        super.init(config);
-    }
-    
-    @Override
     protected void handleOnException(Throwable ex, HttpServletRequest request, HttpServletResponse response)
     {
         if (!request.getRequestURL().toString().contains("squid-internal")) {
@@ -127,44 +122,6 @@ public class TunnelProxyServlet extends ProxyServlet {
                     private int requestSize;
                     
                     @Override
-                    protected void onRequestCommitted() throws IOException
-                    {
-                    }
-
-                    @Override
-                    protected void onRequestComplete() throws IOException
-                    {
-                    }
-
-                    @Override
-                    protected void onResponseContent(Buffer content) throws IOException
-                    {
-                        if (debug != 0)
-                            _log.debug(debug + " content" + content.length());
-                        content.writeTo(out);
-                        
-                        requestSize = content.length();
-                    }
-
-                    @Override
-                    protected void onResponseHeaderComplete() throws IOException
-                    {
-                    }
-
-                    @Override
-                    protected void onResponseStatus(Buffer version, int status, Buffer reason) throws IOException
-                    {
-                        if (debug != 0)
-                            _log.debug(debug + " " + version + " " + status + " " + reason);
-
-                        if (reason != null && reason.length() > 0)
-                            response.setStatus(status,reason.toString());
-                        else
-                            response.setStatus(status);
-                    }
-
-                    
-                    @Override
                     protected void onResponseComplete() throws IOException
                     {
                         long endTime = System.currentTimeMillis();
@@ -184,56 +141,6 @@ public class TunnelProxyServlet extends ProxyServlet {
                         }
                         continuation.complete();
                     }
-        
-                    @Override
-                    protected void onResponseHeader(Buffer name, Buffer value) throws IOException
-                    {
-                        String nameString = name.toString();
-                        String s = nameString.toLowerCase(Locale.ENGLISH);
-                        if (!_DontProxyHeaders.contains(s) || (HttpHeaders.CONNECTION_BUFFER.equals(name) && HttpHeaderValues.CLOSE_BUFFER.equals(value)))
-                        {
-                            if (debug != 0)
-                                _log.debug(debug + " " + name + ": " + value);
-
-                            String filteredHeaderValue = filterResponseHeaderValue(nameString,value.toString(),request);
-                            if (filteredHeaderValue != null && filteredHeaderValue.trim().length() > 0)
-                            {
-                                if (debug != 0)
-                                    _log.debug(debug + " " + name + ": (filtered): " + filteredHeaderValue);
-                                response.addHeader(nameString,filteredHeaderValue);
-                            }
-                        }
-                        else if (debug != 0)
-                            _log.debug(debug + " " + name + "! " + value);
-                    }
-
-                    @Override
-                    protected void onConnectionFailed(Throwable ex)
-                    {
-                        handleOnConnectionFailed(ex,request,response);
-
-                        continuation.complete();
-                    }
-
-                    @Override
-                    protected void onException(Throwable ex)
-                    {
-                        if (ex instanceof EofException)
-                        {
-                            _log.ignore(ex);
-                            //return;
-                        }
-                        handleOnException(ex,request,response);
-                        continuation.complete();
-                    }
-
-                    @Override
-                    protected void onExpire()
-                    {
-                        handleOnExpire(request,response);
-                        continuation.complete();
-                    }
-
                 };
 
                 exchange.setScheme(HttpSchemes.HTTPS.equals(request.getScheme())?HttpSchemes.HTTPS_BUFFER:HttpSchemes.HTTP_BUFFER);

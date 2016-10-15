@@ -22,11 +22,6 @@ public class CustomConnectHandler extends ConnectHandler {
     }
     
     @Override
-    public void handleConnect(Request baseRequest, HttpServletRequest request, HttpServletResponse response, String serverAddress) throws ServletException, IOException {
-        super.handleConnect(baseRequest, request, response, serverAddress);
-    }
-    
-    @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         String method = request.getMethod();
         if (method.equalsIgnoreCase("CONNECT")) {
