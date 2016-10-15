@@ -3,7 +3,6 @@ package com.testingbot.tunnel.proxy;
 
 import org.eclipse.jetty.servlets.ProxyServlet;
 
-import javax.servlet.ServletConfig;
 import javax.servlet.ServletException;
 import javax.servlet.ServletRequest;
 import java.io.IOException;
@@ -22,12 +21,9 @@ import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpExchange;
 import org.eclipse.jetty.continuation.Continuation;
 import org.eclipse.jetty.continuation.ContinuationSupport;
-import org.eclipse.jetty.http.HttpHeaderValues;
 import org.eclipse.jetty.http.HttpHeaders;
 import org.eclipse.jetty.http.HttpSchemes;
 import org.eclipse.jetty.http.HttpURI;
-import org.eclipse.jetty.io.Buffer;
-import org.eclipse.jetty.io.EofException;
 
 public class TunnelProxyServlet extends ProxyServlet {
     

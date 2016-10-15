@@ -3,8 +3,6 @@ package com.testingbot.tunnel.proxy;
 import com.testingbot.tunnel.App;
 import org.eclipse.jetty.servlets.ProxyServlet;
 
-import javax.servlet.ServletConfig;
-import javax.servlet.ServletException;
 import java.net.MalformedURLException;
 import java.util.Arrays;
 import java.util.Enumeration;
