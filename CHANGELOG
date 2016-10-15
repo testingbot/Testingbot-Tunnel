@@ -1,3 +1,14 @@
+This jetty-9-update branch receives the same bugfixes like master but has a newer Jetty proxy embedded, which requires Java 8.
+
+2.3
+* Add --doctor to troubleshoot misconfigurations
+* Update pom.xml dependencies
+* Debugmode will now output HTTP headers
+* Cleanup: remove unused imports and code
+
+2.2
+* Fix the fast-fail domain blacklist feature to work with the new Jetty 9 proxies
+
 1.14
 * remove region
 * update dependencies
