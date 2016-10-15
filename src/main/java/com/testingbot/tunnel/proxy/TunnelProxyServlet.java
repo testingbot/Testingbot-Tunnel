@@ -1,8 +1,6 @@
 package com.testingbot.tunnel.proxy;
 
 import java.util.Enumeration;
-import javax.servlet.ServletConfig;
-import javax.servlet.ServletException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
@@ -62,18 +60,14 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         }
     }
     
-    
-    @Override
-    public void init(ServletConfig config) throws ServletException {
-        super.init(config);
-    }
-    
     @Override
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
         if (clientRequest.getRequestURL().toString().indexOf("squid-internal") == -1) {
             Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
         }
+        
+        super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
     }
     
     @Override

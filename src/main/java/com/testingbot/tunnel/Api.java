@@ -75,7 +75,7 @@ public class Api {
             try {
                 String jsonData = sb.toString().replaceAll("\\\\", "");
                 if (!jsonData.startsWith("{")) {
-                    jsonData = jsonData.substring(1, (jsonData.toString().length() - 1));
+                    jsonData = jsonData.substring(1, (jsonData.length() - 1));
                 }
                 
                 JSONObject jsonObject = (JSONObject) JSONSerializer.toJSON(jsonData);
@@ -136,7 +136,7 @@ public class Api {
             try {
                 String jsonData = sb.toString().replaceAll("\\\\", "");
                 if (!jsonData.startsWith("{")) {
-                    jsonData = jsonData.substring(1, (jsonData.toString().length() - 1));
+                    jsonData = jsonData.substring(1, (jsonData.length() - 1));
                 }
                 
                 JSONObject jsonObject = (JSONObject) JSONSerializer.toJSON(jsonData);

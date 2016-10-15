@@ -3,8 +3,6 @@ package com.testingbot.tunnel.proxy;
 import com.testingbot.tunnel.App;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
-import javax.servlet.ServletConfig;
-import javax.servlet.ServletException;
 import java.util.Enumeration;
 import java.util.Map;
 import java.util.logging.Level;
@@ -21,11 +19,6 @@ public class ForwarderServlet extends AsyncProxyServlet {
     }
     
     @Override
-    public void init(ServletConfig config) throws ServletException {
-        super.init(config);
-    }
-    
-    @Override
     protected String rewriteTarget(HttpServletRequest request) {   
         return "http://127.0.0.1:4446" + request.getRequestURI();
     }
@@ -33,8 +26,8 @@ public class ForwarderServlet extends AsyncProxyServlet {
     @Override
     protected void addProxyHeaders(HttpServletRequest clientRequest, Request proxyRequest)
     {
-        addViaHeader(proxyRequest);
-        addXForwardedHeaders(clientRequest, proxyRequest);
+        super.addProxyHeaders(clientRequest, proxyRequest);
+        
         proxyRequest.header("TB-Tunnel", this.app.getServerIP());
         proxyRequest.header("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
         if (this.app.isBypassingSquid()) {
