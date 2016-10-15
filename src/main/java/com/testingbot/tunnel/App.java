@@ -98,7 +98,7 @@ public class App {
               help.printHelp("java -jar testingbot-tunnel.jar API_KEY API_SECRET [OPTIONS]", options);
               System.exit(0);
            } else if (commandLine.hasOption("version")) {
-               System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
+               System.out.println("Version: testingbot-tunnel.jar " + String.format("%.2f", App.VERSION));
                System.exit(0);
            }
            
@@ -117,7 +117,7 @@ public class App {
                return;
            }
            System.out.println("----------------------------------------------------------------");
-           System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
+           System.out.println("  TestingBot Tunnel v" + String.format("%.2f", App.VERSION) + "                        ");
            System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
            System.out.println("----------------------------------------------------------------");
            
@@ -302,7 +302,7 @@ public class App {
         }
         
         if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
-            System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
+            System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + String.format("%.2f", App.VERSION));
         }
         
         if (tunnelData.getString("state").equals("READY")) {
