@@ -1,3 +1,5 @@
+# This Branch requires Java 8
+
 TestingBot.com Tunnel to run Cloud Selenium tests on your local computer or staging environment.
 
 You can find more information on https://testingbot.com/support/other/tunnel
