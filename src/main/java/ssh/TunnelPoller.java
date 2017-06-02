@@ -24,6 +24,10 @@ public class TunnelPoller {
         timer.schedule(new PollTask(), 5000, 5000);
     }
     
+    public void cancel() {
+        timer.cancel();
+    }
+    
     class PollTask extends TimerTask {
         public void run() {
             Api api = app.getApi();

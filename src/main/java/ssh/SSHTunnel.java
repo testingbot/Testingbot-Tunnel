@@ -20,6 +20,7 @@ public class SSHTunnel {
     private Timer timer;
     private boolean authenticated = false;
     private boolean shuttingDown = false;
+    private LocalPortForwarder lpf1;
     
     public SSHTunnel(App app, String server) throws Exception {
         /* Create a connection instance */
@@ -67,6 +68,11 @@ public class SSHTunnel {
     public void stop() {
         timer.cancel();
         conn.close();
+        try {
+            lpf1.close();
+        } catch (IOException ex) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, null, ex);
+        }
     }
     
     public void createPortForwarding() {
@@ -74,7 +80,7 @@ public class SSHTunnel {
             conn.openSession();
             conn.requestRemotePortForwarding(server, 2010, "0.0.0.0", app.getJettyPort());
             String hubHost = "hub.testingbot.com";
-            LocalPortForwarder lpf1 = conn.createLocalPortForwarder(4446, hubHost, app.getHubPort());
+            lpf1 = conn.createLocalPortForwarder(4446, hubHost, app.getHubPort());
         } catch (IOException ex) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.");
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, null, ex);
