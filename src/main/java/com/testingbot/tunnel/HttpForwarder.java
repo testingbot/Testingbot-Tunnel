@@ -20,10 +20,11 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  */
 public class HttpForwarder {
     private App app;
+    private final Server httpProxy;
     
     public HttpForwarder(App app) {
         this.app = app;
-        Server httpProxy = new Server();
+        httpProxy = new Server();
         HttpConfiguration http_config = new HttpConfiguration();
         ServerConnector connector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
@@ -48,6 +49,14 @@ public class HttpForwarder {
             httpProxy.start();
         } catch (Exception ex) {
             Logger.getLogger(HttpForwarder.class.getName()).log(Level.INFO, "Could not set up local forwarder. Please make sure this program can open port 4445 on this computer.");
+            Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
+        }
+    }
+    
+    public void stop() {
+        try {
+            httpProxy.stop();
+        } catch (Exception ex) {
             Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
         }
     }

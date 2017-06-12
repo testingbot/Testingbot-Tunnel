@@ -69,7 +69,9 @@ public class SSHTunnel {
         timer.cancel();
         conn.close();
         try {
-            lpf1.close();
+            if (lpf1 != null) {
+                lpf1.close();
+            }
         } catch (IOException ex) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, null, ex);
         }

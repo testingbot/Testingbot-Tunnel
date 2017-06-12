@@ -1,5 +1,5 @@
 /*
- * Copyright 2015 testingbot.
+ * Copyright TestingBot.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,12 +33,24 @@ public class PidPoller {
     private App app;
     private File pidFile;
     private Timer timer;
+    private final Thread cleanupThread;
     
     public PidPoller(App app) {
         this.app = app;
         
         // create a "pid" file which we'll watch, when deleted, shutdown the tunnel
         final String fileName = "testingbot-tunnel.pid";
+        
+        cleanupThread = new Thread() {
+          @Override
+          public void run() {
+              File f = new File(fileName);
+              if (f.exists()) {
+                    f.delete();
+              }
+          }
+        };
+
         pidFile = new File(fileName);
         if (!pidFile.exists()) {
             try {
@@ -53,16 +65,6 @@ public class PidPoller {
             }
         }
         
-        Thread cleanupThread = new Thread() {
-          @Override
-          public void run() {
-              File f = new File(fileName);
-              if (f.exists()) {
-                    f.delete();
-              }
-          }
-        };
-
         Runtime.getRuntime().addShutdownHook(cleanupThread);
         
         timer = new Timer();
@@ -70,7 +72,8 @@ public class PidPoller {
     }
     
     public void cancel() {
-        timer.cancel();
+       Runtime.getRuntime().removeShutdownHook(cleanupThread);
+       timer.cancel();
     }
     
     class PollTask extends TimerTask {

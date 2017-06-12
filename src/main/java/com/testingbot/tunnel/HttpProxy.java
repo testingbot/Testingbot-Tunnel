@@ -38,6 +38,7 @@ public class HttpProxy {
     private App app;
     private Server httpProxy;
     private final int randomNumber = (int )(Math.random() * 50 + 1);
+    private final Thread shutDownHook;
     
     public HttpProxy(App app) {
         this.app = app;
@@ -100,12 +101,14 @@ public class HttpProxy {
         
         start();
 
-        Thread shutDownHook = new Thread(new ShutDownHook(httpProxy));
+        shutDownHook = new Thread(new ShutDownHook(httpProxy));
 
         Runtime.getRuntime().addShutdownHook(shutDownHook);
     }
 
     public void stop() {
+        Runtime.getRuntime().removeShutdownHook(shutDownHook);
+        
         try {
             httpProxy.stop();
         } catch (Exception ex) {

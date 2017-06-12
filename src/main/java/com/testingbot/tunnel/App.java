@@ -73,6 +73,10 @@ public class App {
         Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
         hubPort.setArgName("HUBPORT");
         options.addOption(hubPort);
+        
+        Option dns = new Option("dns", "dns", true, "Use a custom DNS server. For example: 8.8.8.8");
+        dns.setArgName("server");
+        options.addOption(dns);
 
         options.addOption("b", "boost", false, "Will use rabbIT to compress and optimize traffic");
         options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
@@ -193,11 +197,17 @@ public class App {
                     throw new ParseException("The hub port must either be 80 or 4444");
                 }
             }
+            
+            if (commandLine.hasOption("dns")) {
+                System.setProperty("sun.net.spi.nameservice.nameservers", commandLine.getOptionValue("dns"));
+                System.setProperty("sun.net.spi.nameservice.provider.1", "dns,sun");
+            }
 
             if (commandLine.hasOption("se-port")) {
                 app.seleniumPort = commandLine.getOptionValue("se-port");
             }
-
+            
+            app.init();
             app.boot();
         } catch (ParseException parseException) {
             System.err.println(parseException.getMessage());
@@ -208,6 +218,7 @@ public class App {
     }
     private PidPoller pidPoller;
     private TunnelPoller poller;
+    private HttpForwarder httpForwarder;
 
     private String[] getUserData() {
         File dataFile = new File(System.getProperty("user.home") + File.separator + ".testingbot");
@@ -241,10 +252,17 @@ public class App {
         }
     }
 
-    public void boot() throws Exception {
+    public void init() {
         Thread cleanupThread = new Thread() {
             @Override
             public void run() {
+                if (readyFile != null) {
+                    File f = new File(readyFile);
+                    if (f.exists()) {
+                        f.delete();
+                    }
+                }
+                    
                 if (tunnel != null) {
                     tunnel.stop();
                 }
@@ -258,7 +276,9 @@ public class App {
         };
 
         Runtime.getRuntime().addShutdownHook(cleanupThread);
-
+    }
+    
+    public void boot() throws Exception {
         if (useBoost == true) {
             File rabbitFile = new File(System.getProperty("user.dir") + "/lib/rabbit/jars/rabbit4.jar");
             if (!rabbitFile.exists()) {
@@ -314,9 +334,13 @@ public class App {
             tunnel.stop(true);
         }
         
-        if (pidPoller != null) {
-            pidPoller.cancel();
+        if (httpForwarder != null) {
+            httpForwarder.stop();
         }
+        
+//        if (pidPoller != null) {
+//            pidPoller.cancel();
+//        }
         
         if (poller != null) {
             poller.cancel();
@@ -360,7 +384,7 @@ public class App {
     }
 
     private void startProxies() {
-        HttpForwarder httpForwarder = new HttpForwarder(this);
+        httpForwarder = new HttpForwarder(this);
 
         if (httpForwarder.testForwarding() == false) {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", getSeleniumPort());
@@ -387,18 +411,6 @@ public class App {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
-
-            Thread cleanupThread = new Thread() {
-                @Override
-                public void run() {
-                    File f = new File(readyFile);
-                    if (f.exists()) {
-                        f.delete();
-                    }
-                }
-            };
-
-            Runtime.getRuntime().addShutdownHook(cleanupThread);
         }
     }
 
