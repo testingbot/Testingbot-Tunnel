@@ -221,6 +221,9 @@ public class App {
     private HttpForwarder httpForwarder;
 
     private String[] getUserData() {
+        if (System.getenv("TESTINGBOT_KEY") != null && System.getenv("TESTINGBOT_SECRET") != null) {
+          return new String[] { System.getenv("TESTINGBOT_KEY"), System.getenv("TESTINGBOT_SECRET") };
+        }
         File dataFile = new File(System.getProperty("user.home") + File.separator + ".testingbot");
         if (dataFile.exists()) {
             try {
