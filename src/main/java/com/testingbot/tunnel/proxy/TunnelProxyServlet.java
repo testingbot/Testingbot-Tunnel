@@ -1,6 +1,8 @@
 package com.testingbot.tunnel.proxy;
 
 import java.util.Enumeration;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
@@ -74,6 +76,18 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     protected Response.Listener newProxyResponseListener(HttpServletRequest request, HttpServletResponse response)
     {
         return new TunnelProxyResponseListener(request, response);
+    }
+    
+    @Override
+    protected void addProxyHeaders(HttpServletRequest clientRequest, Request proxyRequest)
+    {
+        super.addProxyHeaders(clientRequest, proxyRequest);
+        if (getServletContext().getAttribute("extra_headers") != null) {
+            HashMap<String, String> headers = (HashMap<String, String>) getServletContext().getAttribute("extra_headers");
+            for (Map.Entry<String, String> entry : headers.entrySet()) {
+                proxyRequest.header(entry.getKey(), entry.getValue());
+            }
+        }
     }
     
     @Override

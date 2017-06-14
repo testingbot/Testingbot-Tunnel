@@ -78,7 +78,6 @@ public class App {
         dns.setArgName("server");
         options.addOption(dns);
 
-        options.addOption("b", "boost", false, "Will use rabbIT to compress and optimize traffic");
         options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
         options.addOption("q", "squid", false, "Bypass our Squid proxy running on the tunnel VM.");
@@ -168,10 +167,6 @@ public class App {
 
             if (commandLine.hasOption("ssl")) {
                 app.useBrowserMob = true;
-            }
-
-            if (commandLine.hasOption("boost")) {
-                app.useBoost = true;
             }
 
             if (commandLine.hasOption("noproxy")) {

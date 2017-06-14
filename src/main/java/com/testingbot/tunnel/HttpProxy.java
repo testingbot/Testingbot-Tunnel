@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -86,7 +87,7 @@ public class HttpProxy {
         
         ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
         context.addServlet(servletHolder, "/*");
-        
+        context.setAttribute("custom_headers", new HashMap<String, String>());
         CustomConnectHandler proxy = new CustomConnectHandler();
         proxy.setDebugMode(app.isDebugMode());
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
