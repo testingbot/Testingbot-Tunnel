@@ -77,6 +77,10 @@ public class App {
         Option dns = new Option("dns", "dns", true, "Use a custom DNS server. For example: 8.8.8.8");
         dns.setArgName("server");
         options.addOption(dns);
+        
+        Option localweb = new Option("web", "w", true, "Point to a directory for testing. Creates a local webserver.");
+        localweb.setArgName("directory");
+        options.addOption(localweb);
 
         options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
         options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
@@ -197,6 +201,10 @@ public class App {
                 System.setProperty("sun.net.spi.nameservice.nameservers", commandLine.getOptionValue("dns"));
                 System.setProperty("sun.net.spi.nameservice.provider.1", "dns,sun");
             }
+            
+            if (commandLine.hasOption("web")) {
+                LocalWebServer local = new LocalWebServer(commandLine.getOptionValue("web"));
+            }
 
             if (commandLine.hasOption("se-port")) {
                 app.seleniumPort = commandLine.getOptionValue("se-port");
@@ -314,11 +322,12 @@ public class App {
         if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
-
+           
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
+           
         if (tunnelData.getString("state").equals("READY")) {
             this.tunnelReady(tunnelData);
         } else {
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
             poller = new TunnelPoller(this, tunnelData.getString("id"));
         }
     }
