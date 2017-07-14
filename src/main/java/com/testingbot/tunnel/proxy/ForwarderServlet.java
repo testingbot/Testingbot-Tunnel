@@ -9,6 +9,9 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
+import org.eclipse.jetty.client.HttpClient;
+import org.eclipse.jetty.client.HttpProxy;
+import org.eclipse.jetty.client.ProxyConfiguration;
 import org.eclipse.jetty.client.api.Request;
 
 public class ForwarderServlet extends AsyncProxyServlet {
@@ -61,5 +64,21 @@ public class ForwarderServlet extends AsyncProxyServlet {
     {
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
         Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), failure.getStackTrace().toString()});
+    }
+    
+    @Override
+    protected HttpClient newHttpClient()
+    {
+        HttpClient client = new HttpClient();
+        
+        String proxy = getServletConfig().getInitParameter("proxy");
+        if (proxy != null && !proxy.isEmpty())
+        {
+            String[] splitted = proxy.split(":");
+            ProxyConfiguration proxyConfig = client.getProxyConfiguration();
+            proxyConfig.getProxies().add(new HttpProxy(splitted[0], Integer.parseInt(splitted[1])));
+        }
+        
+        return client;
     }
 }
