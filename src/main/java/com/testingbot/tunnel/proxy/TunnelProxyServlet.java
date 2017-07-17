@@ -1,5 +1,7 @@
 package com.testingbot.tunnel.proxy;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
@@ -11,9 +13,13 @@ import org.apache.commons.lang.exception.ExceptionUtils;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
 import org.eclipse.jetty.client.ProxyConfiguration;
+import org.eclipse.jetty.client.api.Authentication;
+import org.eclipse.jetty.client.api.AuthenticationStore;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.client.api.Result;
+import org.eclipse.jetty.client.util.BasicAuthentication;
+import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
 
@@ -95,12 +101,27 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     {
         HttpClient client = new HttpClient();
         
-        String proxy = getServletConfig().getInitParameter("proxy");
+        final String proxy = getServletConfig().getInitParameter("proxy");
         if (proxy != null && !proxy.isEmpty())
         {
+            String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
+            if (proxyAuth != null && !proxyAuth.isEmpty())
+            {
+                String[] credentials = proxyAuth.split(":");
+                
+                AuthenticationStore auth = client.getAuthenticationStore();
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, "Proxy auth " + credentials[0] + " : " + credentials[1]);
+                try {
+                    auth.addAuthentication(new CustomAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
+                } catch (URISyntaxException ex) {
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
+                }
+            }
+            
             String[] splitted = proxy.split(":");
             ProxyConfiguration proxyConfig = client.getProxyConfiguration();
             proxyConfig.getProxies().add(new HttpProxy(splitted[0], Integer.parseInt(splitted[1])));
+            
         }
         
         return client;

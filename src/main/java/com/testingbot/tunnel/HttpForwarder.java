@@ -42,6 +42,10 @@ public class HttpForwarder {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
         
+        if (app.getProxyAuth()!= null) {
+            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());     
+        }
+        
         ServletContextHandler ctxHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         ctxHandler.setContextPath("/");
         ctxHandler.addServlet(servletHolder, "/*");

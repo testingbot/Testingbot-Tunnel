@@ -1,5 +1,6 @@
 package com.testingbot.tunnel;
 
+import com.testingbot.tunnel.proxy.ProxyAuth;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.DataInputStream;
@@ -8,6 +9,7 @@ import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.net.Authenticator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.FileHandler;
@@ -40,7 +42,8 @@ public class App {
     private boolean bypassSquid = false;
     private boolean debugMode = false;
     private HttpProxy httpProxy;
-    private String proxy;
+    private String proxy = "localhost:3128";
+    private String proxyAuth = "test:test";
 
     public static void main(String... args) throws Exception {
 
@@ -65,6 +68,10 @@ public class App {
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
+        
+        Option proxyAuth = new Option("z", "proxy-userpwd", true, "Username and password required to access the proxy configured with --proxy.");
+        proxyAuth.setArgName("user:pwd");
+        options.addOption(proxyAuth);
 
         Option logfile = new Option("l", "logfile", true, "Write logging to a file.");
         logfile.setArgName("FILE");
@@ -167,6 +174,11 @@ public class App {
             if (commandLine.hasOption("proxy")) {
                 String line = commandLine.getOptionValue("proxy");
                 app.setProxy(line);
+            }
+            
+            if (commandLine.hasOption("proxy-userpwd")) {
+                String line = commandLine.getOptionValue("proxy-userpwd");
+                app.setProxyAuth(line);
             }
 
             if (commandLine.hasOption("ssl")) {
@@ -469,6 +481,12 @@ public class App {
 
     public void setProxy(String p) {
         proxy = p;
+        String[] splitted = proxy.split(":");
+        System.getProperties().put("http.proxySet", "true");
+        System.setProperty("http.proxyHost", splitted[0]);
+        System.setProperty("https.proxyHost", splitted[0]);
+        System.setProperty("http.proxyPort", splitted[1]);
+        System.setProperty("https.proxyPort", splitted[1]);
     }
 
     public String getProxy() {
@@ -525,5 +543,15 @@ public class App {
      */
     public void setDebugMode(boolean debugMode) {
         this.debugMode = debugMode;
+    }
+
+    public String getProxyAuth() {
+        return proxyAuth;
+    }
+
+    public void setProxyAuth(String proxyAuth) {
+        this.proxyAuth = proxyAuth;
+        String[] splitted = proxyAuth.split(":");
+        Authenticator.setDefault(new ProxyAuth(splitted[0], splitted[1]));
     }
 }

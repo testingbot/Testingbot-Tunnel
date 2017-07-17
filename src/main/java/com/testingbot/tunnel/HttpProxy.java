@@ -79,6 +79,10 @@ public class HttpProxy {
         if (app.getProxy() != null) {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
+        
+        if (app.getProxyAuth()!= null) {
+            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());     
+        }
 
         servletHolder.setInitParameter("jetty", String.valueOf(app.getJettyPort()));
         

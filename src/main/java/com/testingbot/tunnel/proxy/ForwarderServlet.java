@@ -1,6 +1,8 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
+import java.net.URI;
+import java.net.URISyntaxException;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
 import java.util.Enumeration;
@@ -12,7 +14,9 @@ import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
 import org.eclipse.jetty.client.ProxyConfiguration;
+import org.eclipse.jetty.client.api.AuthenticationStore;
 import org.eclipse.jetty.client.api.Request;
+import org.eclipse.jetty.client.util.BasicAuthentication;
 
 public class ForwarderServlet extends AsyncProxyServlet {
     private App app;
@@ -77,6 +81,19 @@ public class ForwarderServlet extends AsyncProxyServlet {
             String[] splitted = proxy.split(":");
             ProxyConfiguration proxyConfig = client.getProxyConfiguration();
             proxyConfig.getProxies().add(new HttpProxy(splitted[0], Integer.parseInt(splitted[1])));
+            
+            String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
+            if (proxyAuth != null && !proxyAuth.isEmpty())
+            {
+                String[] credentials = proxyAuth.split(":");
+                
+                AuthenticationStore auth = client.getAuthenticationStore();
+                try {
+                    auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), "ProxyRealm", credentials[0], credentials[1]));
+                } catch (URISyntaxException ex) {
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
+                }
+            }
         }
         
         return client;
