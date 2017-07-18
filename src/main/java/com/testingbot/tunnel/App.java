@@ -316,16 +316,23 @@ public class App {
             }
         }
 
-        trackPid();
-
         api = new Api(this);
-        JSONObject tunnelData = api.createTunnel();
+        JSONObject tunnelData = new JSONObject();
+        
+        try {
+            tunnelData = api.createTunnel();
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            System.exit(1);
+        }
 
         if (tunnelData.has("error")) {
             System.err.println("An error ocurred: " + tunnelData.getString("error"));
-            return;
+            System.exit(1);
         }
 
+        trackPid();
+        
         if (tunnelData.has("id")) {
             this.tunnelID = Integer.parseInt(tunnelData.getString("id"));
             api.setTunnelID(tunnelID);
