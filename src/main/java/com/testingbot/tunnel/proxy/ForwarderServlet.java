@@ -7,16 +7,24 @@ import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
 import java.util.Enumeration;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.servlet.ServletConfig;
+import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
+import org.eclipse.jetty.client.ProtocolHandlers;
 import org.eclipse.jetty.client.ProxyConfiguration;
+import org.eclipse.jetty.client.api.Authentication;
 import org.eclipse.jetty.client.api.AuthenticationStore;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.client.util.BasicAuthentication;
+import org.eclipse.jetty.proxy.AbstractProxyServlet;
+import org.eclipse.jetty.util.HttpCookieStore;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
 public class ForwarderServlet extends AsyncProxyServlet {
     private App app;
@@ -28,6 +36,77 @@ public class ForwarderServlet extends AsyncProxyServlet {
     @Override
     protected String rewriteTarget(HttpServletRequest request) {   
         return "http://127.0.0.1:4446" + request.getRequestURI();
+    }
+    
+    protected HttpClient createHttpClient() throws ServletException
+    {
+        ServletConfig config = getServletConfig();
+
+        HttpClient client = newHttpClient();
+
+        // Redirects must be proxied as is, not followed.
+        client.setFollowRedirects(false);
+
+        // Must not store cookies, otherwise cookies of different clients will mix.
+        client.setCookieStore(new HttpCookieStore.Empty());
+
+        Executor executor;
+        String value = config.getInitParameter("maxThreads");
+        if (value == null || "-".equals(value))
+        {
+            executor = (Executor)getServletContext().getAttribute("org.eclipse.jetty.server.Executor");
+            if (executor==null)
+                throw new IllegalStateException("No server executor for proxy");
+        }
+        else
+        {
+            QueuedThreadPool qtp= new QueuedThreadPool(Integer.parseInt(value));
+            String servletName = config.getServletName();
+            int dot = servletName.lastIndexOf('.');
+            if (dot >= 0)
+                servletName = servletName.substring(dot + 1);
+            qtp.setName(servletName);
+            executor=qtp;
+        }
+
+        client.setExecutor(executor);
+
+        value = config.getInitParameter("maxConnections");
+        if (value == null)
+            value = "256";
+        client.setMaxConnectionsPerDestination(Integer.parseInt(value));
+
+        value = config.getInitParameter("idleTimeout");
+        if (value == null)
+            value = "30000";
+        client.setIdleTimeout(Long.parseLong(value));
+
+        value = config.getInitParameter("timeout");
+        if (value == null)
+            value = "60000";
+        setTimeout(Long.parseLong(value));
+
+        value = config.getInitParameter("requestBufferSize");
+        if (value != null)
+            client.setRequestBufferSize(Integer.parseInt(value));
+
+        value = config.getInitParameter("responseBufferSize");
+        if (value != null)
+            client.setResponseBufferSize(Integer.parseInt(value));
+
+        try
+        {
+            client.start();
+
+            // Content must not be decoded, otherwise the client gets confused.
+            client.getContentDecoderFactories().clear();
+
+            return client;
+        }
+        catch (Exception x)
+        {
+            throw new ServletException(x);
+        }
     }
     
     @Override
@@ -89,7 +168,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
                 
                 AuthenticationStore auth = client.getAuthenticationStore();
                 try {
-                    auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), "ProxyRealm", credentials[0], credentials[1]));
+                    auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
                 } catch (URISyntaxException ex) {
                     Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
                 }
