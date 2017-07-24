@@ -124,7 +124,6 @@ public class Api {
             
             postRequest.addHeader("accept", "application/json");
             postRequest.setHeader("Authorization", "Basic " + encoding);
-            System.out.println("Basic " + encoding);
             postRequest.setEntity(new UrlEncodedFormEntity(postData));
             
             HttpResponse response = httpClient.execute(postRequest);

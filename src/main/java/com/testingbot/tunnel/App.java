@@ -10,6 +10,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Authenticator;
+import java.nio.file.NoSuchFileException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.ConsoleHandler;
@@ -134,10 +135,15 @@ public class App {
             }
 
             if (commandLine.hasOption("logfile")) {
-                Handler handlerFile = new FileHandler(commandLine.getOptionValue("logfile"));
-                handlerFile.setFormatter(new LogFormatter());
-                handlerFile.setLevel(Level.ALL);
-                Logger.getLogger("").addHandler(handlerFile);
+                try {
+                    Handler handlerFile = new FileHandler(commandLine.getOptionValue("logfile"));
+                    handlerFile.setFormatter(new LogFormatter());
+                    handlerFile.setLevel(Level.ALL);
+                    Logger.getLogger(App.class.getName()).addHandler(handlerFile);
+                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Logging to file " + commandLine.getOptionValue("logfile"));
+                } catch (Exception e) {
+                    System.err.println("Cannot write logfile to " + commandLine.getOptionValue("logfile") + ".\nMake sure the directory exists and that we have the proper rights to write to this directory.");
+                }
             }
 
             String clientKey = null;
