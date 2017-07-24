@@ -23,5 +23,4 @@ public class CustomAuthentication extends BasicAuthentication {
     {
         return super.authenticate(request, response, headerInfo, context);
     }
-    
 }

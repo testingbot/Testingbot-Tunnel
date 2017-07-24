@@ -16,13 +16,11 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
-import org.eclipse.jetty.client.ProtocolHandlers;
 import org.eclipse.jetty.client.ProxyConfiguration;
 import org.eclipse.jetty.client.api.Authentication;
 import org.eclipse.jetty.client.api.AuthenticationStore;
 import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.client.util.BasicAuthentication;
-import org.eclipse.jetty.proxy.AbstractProxyServlet;
 import org.eclipse.jetty.util.HttpCookieStore;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
@@ -126,7 +124,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
             }
         }
        
-        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
+        Logger.getLogger(App.class.getName()).log(Level.INFO, " >> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
         if (app.isDebugMode()) {
             Enumeration<String> headerNames = clientRequest.getHeaderNames();
              if (headerNames != null) {
@@ -137,7 +135,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
                     header = headerNames.nextElement();
                     sb.append(header).append(": ").append(clientRequest.getHeader(header)).append(System.getProperty("line.separator"));
                 }
-                Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, sb.toString());
+                Logger.getLogger(App.class.getName()).log(Level.INFO, sb.toString());
             }
         }
     }
@@ -146,7 +144,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
-        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), failure.getStackTrace().toString()});
+        Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), failure.getStackTrace().toString()});
     }
     
     @Override
@@ -170,7 +168,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
                 try {
                     auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
                 } catch (URISyntaxException ex) {
-                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
         }

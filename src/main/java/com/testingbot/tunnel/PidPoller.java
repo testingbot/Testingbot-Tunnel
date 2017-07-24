@@ -79,7 +79,7 @@ public class PidPoller {
     class PollTask extends TimerTask {
         public void run() {
             if (!pidFile.exists()) {
-                Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
                 timer.cancel();
                 System.exit(0);
             }

@@ -12,6 +12,7 @@ import java.io.InputStreamReader;
 import java.net.Authenticator;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -42,8 +43,8 @@ public class App {
     private boolean bypassSquid = false;
     private boolean debugMode = false;
     private HttpProxy httpProxy;
-    private String proxy = "localhost:3128";
-    private String proxyAuth = "test:test";
+    private String proxy;
+    private String proxyAuth;
 
     public static void main(String... args) throws Exception {
 
@@ -107,19 +108,29 @@ public class App {
                 System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
                 System.exit(0);
             }
+            
+            
+            Logger logger = Logger.getLogger(App.class.getName());
+            logger.setUseParentHandlers(false);
+            ConsoleHandler handler = new ConsoleHandler();
+            handler.setFormatter(new LogFormatter());
+            logger.addHandler(handler);
+            
+            App app = new App();
             if (commandLine.hasOption("debug")) {
-                Logger.getLogger("").setLevel(Level.ALL);
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Running in debug-mode");
+                Logger.getLogger(App.class.getName()).setLevel(Level.ALL);
+                app.setDebugMode(true);
             } else {
-                Logger.getLogger("").setLevel(Level.INFO);
+                Logger.getLogger(App.class.getName()).setLevel(Level.INFO);
             }
 
             if (commandLine.hasOption("logfile")) {
-                Handler handler = new FileHandler(commandLine.getOptionValue("logfile"));
-                handler.setLevel(Level.ALL);
-                Logger.getLogger("").addHandler(handler);
+                Handler handlerFile = new FileHandler(commandLine.getOptionValue("logfile"));
+                handlerFile.setLevel(Level.ALL);
+                Logger.getLogger("").addHandler(handlerFile);
             }
 
-            App app = new App();
             String clientKey = null;
             String clientSecret = null;
 
@@ -132,15 +143,7 @@ public class App {
             System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
             System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
             System.out.println("----------------------------------------------------------------");
-
-            if (commandLine.hasOption("debug")) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Running in debug-mode");
-                Logger.getLogger("").setLevel(Level.ALL);
-                app.setDebugMode(true);
-            } else {
-                Logger.getLogger("").setLevel(Level.INFO);
-            }
-
+            
             if (commandLine.getArgs().length < 2) {
                 String userdata[] = app.getUserData();
                 if (userdata.length == 2) {

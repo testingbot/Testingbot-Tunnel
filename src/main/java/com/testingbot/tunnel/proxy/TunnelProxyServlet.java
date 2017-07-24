@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.proxy;
 
+import com.testingbot.tunnel.App;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Enumeration;
@@ -54,7 +55,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         public void onComplete(Result result)
         {
             long endTime = System.currentTimeMillis();
-            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
             if (getServletConfig().getInitParameter("tb_debug") != null) {
                 Enumeration<String> headerNames = request.getHeaderNames();
                 if (headerNames != null) {
@@ -66,7 +67,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                         sb.append(header).append(": ").append(request.getHeader(header)).append(System.getProperty("line.separator"));
                     }
                     
-                    Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, sb.toString());
+                    Logger.getLogger(App.class.getName()).log(Level.INFO, sb.toString());
                 }
             }
             super.onComplete(result);
@@ -77,7 +78,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
         if (clientRequest.getRequestURL().toString().indexOf("squid-internal") == -1) {
-            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
+            Logger.getLogger(App.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
         }
         
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
@@ -190,11 +191,11 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                 String[] credentials = proxyAuth.split(":");
                 
                 AuthenticationStore auth = client.getAuthenticationStore();
-                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, "Proxy auth " + credentials[0] + " : " + credentials[1]);
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Proxy auth " + credentials[0] + " : " + credentials[1]);
                 try {
                     auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
                 } catch (URISyntaxException ex) {
-                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
             

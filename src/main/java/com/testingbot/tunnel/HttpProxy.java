@@ -117,7 +117,7 @@ public class HttpProxy {
         try {
             httpProxy.stop();
         } catch (Exception ex) {
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 
@@ -125,8 +125,8 @@ public class HttpProxy {
         try {
             httpProxy.start();
         } catch (Exception ex) {
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port " + app.getJettyPort() + " on this computer.");
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "Could not set up local http proxy. Please make sure this program can open port " + app.getJettyPort() + " on this computer.");
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
     
