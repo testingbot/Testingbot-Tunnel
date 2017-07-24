@@ -133,6 +133,11 @@ public class App {
             } else {
                 Logger.getLogger(App.class.getName()).setLevel(Level.INFO);
             }
+            
+            String javaVersion = System.getProperty("java.version");
+            if (!javaVersion.isEmpty() && !javaVersion.substring(0, 3).equals("1.8") && !javaVersion.substring(0, 3).equals("1.9")) {
+                System.err.println("Please make sure to use Java 8 with this version of TestingBot Tunnel.");
+            }
 
             if (commandLine.hasOption("logfile")) {
                 try {
