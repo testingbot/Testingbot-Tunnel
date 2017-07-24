@@ -101,6 +101,9 @@ public class App {
         options.addOption("j", "jettyport", true, "The port to launch the Jetty proxy on (default 8087)");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
+        
+        System.setProperty("org.eclipse.jetty.util.log.class", "org.eclipse.jetty.util.log.StdErrLog");
+        System.setProperty("org.eclipse.jetty.LEVEL", "OFF");
 
         CommandLine commandLine;
         try {
@@ -132,6 +135,7 @@ public class App {
 
             if (commandLine.hasOption("logfile")) {
                 Handler handlerFile = new FileHandler(commandLine.getOptionValue("logfile"));
+                handlerFile.setFormatter(new LogFormatter());
                 handlerFile.setLevel(Level.ALL);
                 Logger.getLogger("").addHandler(handlerFile);
             }
