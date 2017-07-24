@@ -39,12 +39,17 @@ public class PidPoller {
         this.app = app;
         
         // create a "pid" file which we'll watch, when deleted, shutdown the tunnel
-        final String fileName = "testingbot-tunnel.pid";
+        String fileName = "testingbot-tunnel.pid";
+        if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
+            fileName = "testingbot-tunnel-" + app.getTunnelIdentifier() + ".pid";
+        }
+        
+        final String pidFileName = fileName;
         
         cleanupThread = new Thread() {
           @Override
           public void run() {
-              File f = new File(fileName);
+              File f = new File(pidFileName);
               if (f.exists()) {
                     f.delete();
               }
@@ -58,6 +63,7 @@ public class PidPoller {
                 BufferedWriter bw = new BufferedWriter(fw);
                 bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
                 bw.close();
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Pid file: " + pidFile.getAbsoluteFile().toString());
             } catch (IOException ex) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory");
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);

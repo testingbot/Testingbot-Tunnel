@@ -32,6 +32,7 @@ public class App {
     private String seleniumPort = "4445";
     private String[] fastFail;
     private SSHTunnel tunnel;
+    private String tunnelIdentifier;
     private String serverIP;
     private Map<String, String> customHeaders = new HashMap<String, String>();
     private boolean useBrowserMob = false;
@@ -77,6 +78,10 @@ public class App {
         Option logfile = new Option("l", "logfile", true, "Write logging to a file.");
         logfile.setArgName("FILE");
         options.addOption(logfile);
+        
+        Option identifier = new Option("i", "tunnel-identifier", true, "Add an identifier to this tunnel connection.\n In case of multiple tunnels, specify this identifier in your desired capabilities to use this specific tunnel connection.");
+        identifier.setArgName("id");
+        options.addOption(identifier);
 
         Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
         hubPort.setArgName("HUBPORT");
@@ -177,6 +182,10 @@ public class App {
             if (commandLine.hasOption("proxy")) {
                 String line = commandLine.getOptionValue("proxy");
                 app.setProxy(line);
+            }
+            
+            if (commandLine.hasOption("tunnel-identifier")) {
+                app.setTunnelIdentifier(commandLine.getOptionValue("tunnel-identifier").substring(0, 50));
             }
             
             if (commandLine.hasOption("proxy-userpwd")) {
@@ -325,6 +334,7 @@ public class App {
         try {
             tunnelData = api.createTunnel();
         } catch (Exception e) {
+            System.err.println("Creating a new tunnel failed, please make sure you're supplying correct credentials and that you can connect to the TestingBot network.\nUse --doctor to verify if everything is set up correctly.");
             System.err.println(e.getMessage());
             System.exit(1);
         }
@@ -563,5 +573,19 @@ public class App {
         this.proxyAuth = proxyAuth;
         String[] splitted = proxyAuth.split(":");
         Authenticator.setDefault(new ProxyAuth(splitted[0], splitted[1]));
+    }
+
+    /**
+     * @return the tunnelIdentifier
+     */
+    public String getTunnelIdentifier() {
+        return tunnelIdentifier;
+    }
+
+    /**
+     * @param tunnelIdentifier the tunnelIdentifier to set
+     */
+    public void setTunnelIdentifier(String tunnelIdentifier) {
+        this.tunnelIdentifier = tunnelIdentifier;
     }
 }
