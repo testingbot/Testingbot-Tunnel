@@ -117,9 +117,14 @@ public class Api {
     private JSONObject _post(String url, List<NameValuePair> postData)  throws Exception {
         try {
             DefaultHttpClient httpClient = new DefaultHttpClient();
+            String auth = this.clientKey + ":" + this.clientSecret;
+            String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
+            
             HttpPost postRequest = new HttpPost(url);
             
-            
+            postRequest.addHeader("accept", "application/json");
+            postRequest.setHeader("Authorization", "Basic " + encoding);
+            System.out.println("Basic " + encoding);
             postRequest.setEntity(new UrlEncodedFormEntity(postData));
             
             HttpResponse response = httpClient.execute(postRequest);
