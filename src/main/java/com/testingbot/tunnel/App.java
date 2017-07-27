@@ -25,6 +25,20 @@ import ssh.TunnelPoller;
 
 public class App {
 
+    /**
+     * @return the metricsPort
+     */
+    public int getMetricsPort() {
+        return metricsPort;
+    }
+
+    /**
+     * @param metricsPort the metricsPort to set
+     */
+    public void setMetricsPort(int metricsPort) {
+        this.metricsPort = metricsPort;
+    }
+
     public static final Float VERSION = 2.4f;
     private Api api;
     private String clientKey;
@@ -47,6 +61,7 @@ public class App {
     private HttpProxy httpProxy;
     private String proxy;
     private String proxyAuth;
+    private int metricsPort = 8003;
 
     public static void main(String... args) throws Exception {
 
@@ -67,7 +82,10 @@ public class App {
         Option fastFail = new Option("F", "fast-fail-regexps", true, "Specify domains you don't want to proxy, comma separated.");
         fastFail.setArgName("OPTIONS");
         options.addOption(fastFail);
-
+        
+        Option metrics = OptionBuilder.withLongOpt("metrics-port").hasArg().withValueSeparator().withDescription("Use the specified port to access metrics. Default port 8003").create();
+        options.addOption(metrics);
+        
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
@@ -92,20 +110,21 @@ public class App {
         dns.setArgName("server");
         options.addOption(dns);
         
-        Option localweb = new Option("web", "w", true, "Point to a directory for testing. Creates a local webserver.");
+        Option localweb = new Option("w", "web", true, "Point to a directory for testing. Creates a local webserver.");
         localweb.setArgName("directory");
         options.addOption(localweb);
 
-        options.addOption("x", "noproxy", false, "Do not start a Jetty proxy (requires user provided proxy server on port 8087)");
-        options.addOption("s", "ssl", false, "Will use a browsermob-proxy to fix self-signed certificates");
-        options.addOption("q", "squid", false, "Bypass our Squid proxy running on the tunnel VM.");
-        options.addOption("j", "jettyport", true, "The port to launch the Jetty proxy on (default 8087)");
+        options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087)");
+        options.addOption("q", "squid", false, "Bypass our Caching Proxy running on our tunnel VM.");
+        options.addOption("j", "jettyport", true, "The port to launch the local proxy on (default 8087)");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
         
         System.setProperty("org.eclipse.jetty.util.log.class", "org.eclipse.jetty.util.log.StdErrLog");
         System.setProperty("org.eclipse.jetty.LEVEL", "OFF");
 
+        Statistics.setStartTime(System.currentTimeMillis());
+        
         CommandLine commandLine;
         try {
             commandLine = cmdLinePosixParser.parse(options, args);
@@ -199,8 +218,14 @@ public class App {
                 app.setProxy(line);
             }
             
+            if (commandLine.hasOption("metrics-port")) {
+                String line = commandLine.getOptionValue("metrics-port");
+                app.setMetricsPort(Integer.parseInt(line));
+            }
+            
             if (commandLine.hasOption("tunnel-identifier")) {
-                app.setTunnelIdentifier(commandLine.getOptionValue("tunnel-identifier").substring(0, 50));
+                String identifierValue = commandLine.getOptionValue("tunnel-identifier");
+                app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
             }
             
             if (commandLine.hasOption("proxy-userpwd")) {
@@ -361,6 +386,8 @@ public class App {
 
         trackPid();
         
+        startInsightServer();
+        
         if (tunnelData.has("id")) {
             this.tunnelID = Integer.parseInt(tunnelData.getString("id"));
             api.setTunnelID(tunnelID);
@@ -377,6 +404,10 @@ public class App {
         } else {
             poller = new TunnelPoller(this, tunnelData.getString("id"));
         }
+    }
+    
+    public void startInsightServer() {
+        InsightServer insight = new InsightServer(this);
     }
 
     public void trackPid() {
@@ -462,7 +493,7 @@ public class App {
                     bw.write("TestingBot Tunnel Ready");
                     bw.close();
                 } catch (IOException ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the director exists and we can write to this directory." , ex);
                 }
             }
         }

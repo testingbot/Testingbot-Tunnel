@@ -1,6 +1,7 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.Statistics;
 import java.io.IOException;
 import java.util.Enumeration;
 import java.util.logging.Level;
@@ -25,6 +26,9 @@ public class CustomConnectHandler extends ConnectHandler {
     @Override
     public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         String method = request.getMethod();
+        
+        Statistics.addRequest();
+            
         if (method.equalsIgnoreCase("CONNECT")) {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, request.getRequestURL().toString(), response.toString().substring(9, 12)});
         }

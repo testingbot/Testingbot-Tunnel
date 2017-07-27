@@ -1,8 +1,10 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.Statistics;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
@@ -25,6 +27,7 @@ import org.eclipse.jetty.client.api.Result;
 import org.eclipse.jetty.client.util.BasicAuthentication;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
+import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.HttpCookieStore;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
@@ -55,6 +58,8 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         public void onComplete(Result result)
         {
             long endTime = System.currentTimeMillis();
+            Statistics.addRequest();
+            
             Logger.getLogger(App.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
             if (getServletConfig().getInitParameter("tb_debug") != null) {
                 Enumeration<String> headerNames = request.getHeaderNames();
@@ -72,6 +77,13 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
             }
             super.onComplete(result);
         }
+    }
+    
+    @Override
+    protected void onResponseContent(HttpServletRequest request, HttpServletResponse response, Response proxyResponse, byte[] buffer, int offset, int length, Callback callback)
+    {
+        Statistics.addBytesTransfered(length);
+        super.onResponseContent(request, response, proxyResponse, buffer, offset, length, callback);
     }
     
     @Override
