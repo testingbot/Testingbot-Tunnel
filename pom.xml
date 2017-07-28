@@ -24,8 +24,8 @@
   <description>Tunnel to run TestingBot Selenium tests on your local machine</description>
   <url>http://testingbot.com</url>
   <scm>
-      <connection>scm:git:git@github.com:testingbot/Testingbot-Tunnel.git</connection>
-      <developerConnection>scm:git:git@github.com:testingbot/Testingbot-Tunnel.git</developerConnection>
+      <connection>scm:git:https://github.com/testingbot/Testingbot-Tunnel.git</connection>
+      <developerConnection>scm:git:https://github.com/testingbot/Testingbot-Tunnel.git</developerConnection>
       <url>https://github.com/testingbot/Testingbot-Tunnel.git</url>
     </scm>
 
