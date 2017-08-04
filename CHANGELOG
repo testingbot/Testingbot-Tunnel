@@ -1,3 +1,10 @@
+1.21
+* Add --tunnel-identifier to identify different tunnels for the same account
+* Improved logging (formatting, log to file, debug levels, ...)
+* Improved handling of connection errors (re-establish connection to tunnel VM upon connection failures)
+* Added option where you can specify a local directory to be set up as a webserver, for example to test static files
+* Added an embedded statistics REST api to fetch details about the running instance, by default runs on port 8003
+
 1.20
 * updated dependencies to their latest versions
 * added --doctor option to detect misconfigurations

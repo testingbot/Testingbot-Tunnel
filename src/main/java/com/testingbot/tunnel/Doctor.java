@@ -39,7 +39,7 @@ public class Doctor {
             uris.add(new URI("https://api.testingbot.com/v1/browsers"));
             uris.add(new URI("https://www.google.com/"));
         } catch (Exception e) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, e.getMessage());
         }
         
         performChecks(uris);
@@ -51,7 +51,7 @@ public class Doctor {
                 performCheck(uri);
             }
         } catch (Exception e) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, e.getMessage());
         }
     }
     
@@ -61,13 +61,13 @@ public class Doctor {
             dnsServer = ResolverConfiguration.open().nameservers().get(0);
         } catch (Exception ignore) {}
         
-        Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "Resolving {0} using DNS server {1}", new Object[]{ uri.toString(), dnsServer });
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "Resolving {0} using DNS server {1}", new Object[]{ uri.toString(), dnsServer });
         InetAddress address = InetAddress.getByName(uri.getHost()); 
-        Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "Resolved {0} to {1}", new Object[]{ uri.toString(), address.getHostAddress() });
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "Resolved {0} to {1}", new Object[]{ uri.toString(), address.getHostAddress() });
         if (checkConnection(uri)) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "URL {0} can be reached.", uri.toString());
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "URL {0} can be reached.", uri.toString());
         } else {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "URL {0} can not be reached.", uri.toString());
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "URL {0} can not be reached.", uri.toString());
         }
     }
     

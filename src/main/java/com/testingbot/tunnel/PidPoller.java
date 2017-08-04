@@ -1,5 +1,5 @@
 /*
- * Copyright testingbot.
+ * Copyright TestingBot.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,12 +33,29 @@ public class PidPoller {
     private App app;
     private File pidFile;
     private Timer timer;
+    private final Thread cleanupThread;
     
     public PidPoller(App app) {
         this.app = app;
         
         // create a "pid" file which we'll watch, when deleted, shutdown the tunnel
-        final String fileName = "testingbot-tunnel.pid";
+        String fileName = "testingbot-tunnel.pid";
+        if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
+            fileName = "testingbot-tunnel-" + app.getTunnelIdentifier() + ".pid";
+        }
+        
+        final String pidFileName = fileName;
+        
+        cleanupThread = new Thread() {
+          @Override
+          public void run() {
+              File f = new File(pidFileName);
+              if (f.exists()) {
+                    f.delete();
+              }
+          }
+        };
+
         pidFile = new File(fileName);
         if (!pidFile.exists()) {
             try {
@@ -46,6 +63,7 @@ public class PidPoller {
                 BufferedWriter bw = new BufferedWriter(fw);
                 bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
                 bw.close();
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Pid file: " + pidFile.getAbsoluteFile().toString());
             } catch (IOException ex) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory");
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
@@ -53,26 +71,21 @@ public class PidPoller {
             }
         }
         
-        Thread cleanupThread = new Thread() {
-          @Override
-          public void run() {
-              File f = new File(fileName);
-              if (f.exists()) {
-                    f.delete();
-              }
-          }
-        };
-
         Runtime.getRuntime().addShutdownHook(cleanupThread);
         
         timer = new Timer();
         timer.schedule(new PollTask(), 5000, 5000);
     }
     
+    public void cancel() {
+       Runtime.getRuntime().removeShutdownHook(cleanupThread);
+       timer.cancel();
+    }
+    
     class PollTask extends TimerTask {
         public void run() {
             if (!pidFile.exists()) {
-                Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
                 timer.cancel();
                 System.exit(0);
             }
