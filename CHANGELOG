@@ -1,4 +1,11 @@
-This jetty-9-update branch receives the same bugfixes like master but has a newer Jetty proxy embedded, which requires Java 8.
+This branch requires Java 8.
+
+2.4
+* Add --tunnel-identifier to identify different tunnels for the same account
+* Improved logging (formatting, log to file, debug levels, ...)
+* Improved handling of connection errors (re-establish connection to tunnel VM upon connection failures)
+* Added option where you can specify a local directory to be set up as a webserver, for example to test static files
+* Added an embedded statistics REST api to fetch details about the running instance, by default runs on port 8003
 
 2.3
 * Add --doctor to troubleshoot misconfigurations
