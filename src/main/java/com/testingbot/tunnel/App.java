@@ -10,7 +10,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Authenticator;
-import java.nio.file.NoSuchFileException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.logging.ConsoleHandler;
@@ -44,7 +43,7 @@ public class App {
     private String clientKey;
     private String clientSecret;
     private String readyFile;
-    private String seleniumPort = "4445";
+    private int seleniumPort = 4445;
     private String[] fastFail;
     private SSHTunnel tunnel;
     private String tunnelIdentifier;
@@ -61,6 +60,7 @@ public class App {
     private HttpProxy httpProxy;
     private String proxy;
     private String proxyAuth;
+    private String pac = null;
     private int metricsPort = 8003;
 
     public static void main(String... args) throws Exception {
@@ -89,6 +89,9 @@ public class App {
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
+        
+        Option pac = OptionBuilder.withLongOpt("pac").hasArg().withDescription("Proxy autoconfiguration. Should be a http(s) URL").create();
+        options.addOption(pac);
         
         Option proxyAuth = new Option("z", "proxy-userpwd", true, "Username and password required to access the proxy configured with --proxy.");
         proxyAuth.setArgName("user:pwd");
@@ -240,9 +243,13 @@ public class App {
             if (commandLine.hasOption("noproxy")) {
                 app.noProxy = true;
             }
+            
+            if (commandLine.hasOption("pac")) {
+                app.pac = commandLine.getOptionValue("pac");
+            }
 
             if (commandLine.hasOption("jettyport")) {
-                app.jettyPort = Integer.parseInt(commandLine.getOptionValue("jettyport"));
+                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("jettyport")));
             }
 
             if (commandLine.hasOption("readyfile")) {
@@ -271,7 +278,7 @@ public class App {
             }
 
             if (commandLine.hasOption("se-port")) {
-                app.seleniumPort = commandLine.getOptionValue("se-port");
+                app.seleniumPort = Integer.parseInt(commandLine.getOptionValue("se-port"));
             }
             
             app.init();
@@ -472,7 +479,7 @@ public class App {
         httpForwarder = new HttpForwarder(this);
 
         if (httpForwarder.testForwarding() == false) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", getSeleniumPort());
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", Integer.toString(getSeleniumPort()));
         }
 
         if (!this.noProxy) {
@@ -500,7 +507,7 @@ public class App {
     }
 
     public void doctor() {
-        Doctor doctor = new Doctor();
+        Doctor doctor = new Doctor(this);
     }
 
     public HttpProxy getHttpProxy() {
@@ -585,7 +592,7 @@ public class App {
     /**
      * @return the seleniumPort
      */
-    public String getSeleniumPort() {
+    public int getSeleniumPort() {
         return seleniumPort;
     }
 
@@ -633,5 +640,19 @@ public class App {
      */
     public void setTunnelIdentifier(String tunnelIdentifier) {
         this.tunnelIdentifier = tunnelIdentifier;
+    }
+
+    /**
+     * @return the pac
+     */
+    public String getPac() {
+        return pac;
+    }
+
+    /**
+     * @param jettyPort the jettyPort to set
+     */
+    public void setJettyPort(int jettyPort) {
+        this.jettyPort = jettyPort;
     }
 }
