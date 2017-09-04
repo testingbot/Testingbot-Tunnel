@@ -28,7 +28,7 @@ public class HttpForwarder {
         HttpConfiguration http_config = new HttpConfiguration();
         ServerConnector connector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
-        connector.setPort(Integer.parseInt(app.getSeleniumPort()));
+        connector.setPort(app.getSeleniumPort());
         connector.setIdleTimeout(400000);
         
         httpProxy.setStopAtShutdown(true);

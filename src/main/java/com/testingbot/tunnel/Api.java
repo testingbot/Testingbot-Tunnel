@@ -44,6 +44,7 @@ public class Api {
     public JSONObject createTunnel() throws Exception {
         try {
             List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);
+            nameValuePairs.add(new BasicNameValuePair("tunnel_version", App.VERSION.toString()));
             if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
                 nameValuePairs.add(new BasicNameValuePair("tunnel_identifier", app.getTunnelIdentifier()));
             }

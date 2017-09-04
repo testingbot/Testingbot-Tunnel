@@ -113,9 +113,14 @@ public class ForwarderServlet extends AsyncProxyServlet {
         super.addProxyHeaders(clientRequest, proxyRequest);
         
         proxyRequest.header("TB-Tunnel", this.app.getServerIP());
+        proxyRequest.header("TB-Tunnel-Version", App.VERSION.toString());
         proxyRequest.header("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
         if (this.app.isBypassingSquid()) {
             proxyRequest.header("TB-Tunnel-Port", "2010");
+        }
+        
+        if (this.app.getPac() != null) {
+            proxyRequest.header("TB-Tunnel-Pac", this.app.getPac());
         }
         
         if (this.app.getCustomHeaders().size() > 0) {

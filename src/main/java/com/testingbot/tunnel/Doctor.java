@@ -17,6 +17,7 @@ package com.testingbot.tunnel;
 
 import java.io.IOException;
 import java.net.InetAddress;
+import java.net.ServerSocket;
 import java.net.URI;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
@@ -32,7 +33,10 @@ import sun.net.dns.ResolverConfiguration;
  * @author testingbot
  */
 public class Doctor {
-    public Doctor() {
+
+    private final App app;
+    public Doctor(App app) {
+        this.app = app;
         ArrayList<URI> uris = new ArrayList<URI>();
         try {
             uris.add(new URI("https://testingbot.com"));
@@ -53,6 +57,37 @@ public class Doctor {
         } catch (Exception e) {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, e.getMessage());
         }
+        
+        checkOpenPorts();
+    }
+    
+    public void checkOpenPorts() {
+        // check jetty port
+        boolean canOpenJetty = checkPortOpen(app.getJettyPort());
+        if (!canOpenJetty) {
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Cannot open proxy port {0}", Integer.toString(app.getJettyPort()));
+        } else {
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "OK - Proxy port {0} can be opened", Integer.toString(app.getJettyPort()));
+        }
+        
+        boolean canOpenSEPort = checkPortOpen(app.getSeleniumPort());
+        if (!canOpenSEPort) {
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Cannot open Selenium port {0}", Integer.toString(app.getSeleniumPort()));
+        } else {
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "OK - Selenium port {0} can be opened", Integer.toString(app.getJettyPort()));
+        }
+    }
+    
+    private boolean checkPortOpen(int port) {
+        try {
+            ServerSocket socket = new ServerSocket(port);
+            socket.getLocalPort();
+            socket.close();
+            return true;
+        } catch (IOException ex) {
+        }
+        
+        return false;
     }
     
     public void performCheck(final URI uri) throws UnknownHostException {
@@ -63,9 +98,9 @@ public class Doctor {
         
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Resolving {0} using DNS server {1}", new Object[]{ uri.toString(), dnsServer });
         InetAddress address = InetAddress.getByName(uri.getHost()); 
-        Logger.getLogger(App.class.getName()).log(Level.INFO, "Resolved {0} to {1}", new Object[]{ uri.toString(), address.getHostAddress() });
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "OK - Resolved {0} to {1}", new Object[]{ uri.toString(), address.getHostAddress() });
         if (checkConnection(uri)) {
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "URL {0} can be reached.", uri.toString());
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "OK - URL {0} can be reached.", uri.toString());
         } else {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, "URL {0} can not be reached.", uri.toString());
         }

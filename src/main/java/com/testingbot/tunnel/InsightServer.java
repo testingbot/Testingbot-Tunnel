@@ -22,7 +22,7 @@ public class InsightServer {
         try {
             server.start();
         } catch (Exception ex) {
-            Logger.getLogger(InsightServer.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(InsightServer.class.getName()).log(Level.SEVERE, null, "Could not set up metrics service. Make sure port " + app.getMetricsPort() + " is available or change with --metrics-port");
         }
         this.app = app;
     }
