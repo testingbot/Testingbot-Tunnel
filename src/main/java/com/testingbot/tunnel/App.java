@@ -38,7 +38,7 @@ public class App {
         this.metricsPort = metricsPort;
     }
 
-    public static final Float VERSION = 2.4f;
+    public static final Float VERSION = 2.5f;
     private Api api;
     private String clientKey;
     private String clientSecret;
