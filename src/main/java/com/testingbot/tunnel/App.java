@@ -82,17 +82,17 @@ public class App {
         Option fastFail = new Option("F", "fast-fail-regexps", true, "Specify domains you don't want to proxy, comma separated.");
         fastFail.setArgName("OPTIONS");
         options.addOption(fastFail);
-        
+
         Option metrics = OptionBuilder.withLongOpt("metrics-port").hasArg().withValueSeparator().withDescription("Use the specified port to access metrics. Default port 8003").create();
         options.addOption(metrics);
-        
+
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
-        
+
         Option pac = OptionBuilder.withLongOpt("pac").hasArg().withDescription("Proxy autoconfiguration. Should be a http(s) URL").create();
         options.addOption(pac);
-        
+
         Option proxyAuth = new Option("z", "proxy-userpwd", true, "Username and password required to access the proxy configured with --proxy.");
         proxyAuth.setArgName("user:pwd");
         options.addOption(proxyAuth);
@@ -100,7 +100,7 @@ public class App {
         Option logfile = new Option("l", "logfile", true, "Write logging to a file.");
         logfile.setArgName("FILE");
         options.addOption(logfile);
-        
+
         Option identifier = new Option("i", "tunnel-identifier", true, "Add an identifier to this tunnel connection.\n In case of multiple tunnels, specify this identifier in your desired capabilities to use this specific tunnel connection.");
         identifier.setArgName("id");
         options.addOption(identifier);
@@ -108,11 +108,11 @@ public class App {
         Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
         hubPort.setArgName("HUBPORT");
         options.addOption(hubPort);
-        
+
         Option dns = new Option("dns", "dns", true, "Use a custom DNS server. For example: 8.8.8.8");
         dns.setArgName("server");
         options.addOption(dns);
-        
+
         Option localweb = new Option("w", "web", true, "Point to a directory for testing. Creates a local webserver.");
         localweb.setArgName("directory");
         options.addOption(localweb);
@@ -122,12 +122,12 @@ public class App {
         options.addOption("j", "jettyport", true, "The port to launch the local proxy on (default 8087)");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
-        
+
         System.setProperty("org.eclipse.jetty.util.log.class", "org.eclipse.jetty.util.log.StdErrLog");
         System.setProperty("org.eclipse.jetty.LEVEL", "OFF");
 
         Statistics.setStartTime(System.currentTimeMillis());
-        
+
         CommandLine commandLine;
         try {
             commandLine = cmdLinePosixParser.parse(options, args);
@@ -139,14 +139,14 @@ public class App {
                 System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
                 System.exit(0);
             }
-            
-            
+
+
             Logger logger = Logger.getLogger(App.class.getName());
             logger.setUseParentHandlers(false);
             ConsoleHandler handler = new ConsoleHandler();
             handler.setFormatter(new LogFormatter());
             logger.addHandler(handler);
-            
+
             App app = new App();
             if (commandLine.hasOption("debug")) {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Running in debug-mode");
@@ -154,11 +154,6 @@ public class App {
                 app.setDebugMode(true);
             } else {
                 Logger.getLogger(App.class.getName()).setLevel(Level.INFO);
-            }
-            
-            String javaVersion = System.getProperty("java.version");
-            if (!javaVersion.isEmpty() && !javaVersion.substring(0, 3).equals("1.8") && !javaVersion.substring(0, 3).equals("1.9")) {
-                System.err.println("Please make sure to use Java 8 with this version of TestingBot Tunnel.");
             }
 
             if (commandLine.hasOption("logfile")) {
@@ -185,7 +180,7 @@ public class App {
             System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
             System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
             System.out.println("----------------------------------------------------------------");
-            
+
             if (commandLine.getArgs().length < 2) {
                 String userdata[] = app.getUserData();
                 if (userdata.length == 2) {
@@ -220,17 +215,17 @@ public class App {
                 String line = commandLine.getOptionValue("proxy");
                 app.setProxy(line);
             }
-            
+
             if (commandLine.hasOption("metrics-port")) {
                 String line = commandLine.getOptionValue("metrics-port");
                 app.setMetricsPort(Integer.parseInt(line));
             }
-            
+
             if (commandLine.hasOption("tunnel-identifier")) {
                 String identifierValue = commandLine.getOptionValue("tunnel-identifier");
                 app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
             }
-            
+
             if (commandLine.hasOption("proxy-userpwd")) {
                 String line = commandLine.getOptionValue("proxy-userpwd");
                 app.setProxyAuth(line);
@@ -243,7 +238,7 @@ public class App {
             if (commandLine.hasOption("noproxy")) {
                 app.noProxy = true;
             }
-            
+
             if (commandLine.hasOption("pac")) {
                 app.pac = commandLine.getOptionValue("pac");
             }
@@ -267,12 +262,12 @@ public class App {
                     throw new ParseException("The hub port must either be 80 or 4444");
                 }
             }
-            
+
             if (commandLine.hasOption("dns")) {
                 System.setProperty("sun.net.spi.nameservice.nameservers", commandLine.getOptionValue("dns"));
                 System.setProperty("sun.net.spi.nameservice.provider.1", "dns,sun");
             }
-            
+
             if (commandLine.hasOption("web")) {
                 LocalWebServer local = new LocalWebServer(commandLine.getOptionValue("web"));
             }
@@ -280,7 +275,7 @@ public class App {
             if (commandLine.hasOption("se-port")) {
                 app.seleniumPort = Integer.parseInt(commandLine.getOptionValue("se-port"));
             }
-            
+
             app.init();
             app.boot();
         } catch (ParseException parseException) {
@@ -339,7 +334,7 @@ public class App {
                         f.delete();
                     }
                 }
-                    
+
                 if (tunnel != null) {
                     tunnel.stop();
                 }
@@ -354,7 +349,7 @@ public class App {
 
         Runtime.getRuntime().addShutdownHook(cleanupThread);
     }
-    
+
     public void boot() throws Exception {
         if (useBoost == true) {
             File rabbitFile = new File(System.getProperty("user.dir") + "/lib/rabbit/jars/rabbit4.jar");
@@ -377,7 +372,7 @@ public class App {
 
         api = new Api(this);
         JSONObject tunnelData = new JSONObject();
-        
+
         try {
             tunnelData = api.createTunnel();
         } catch (Exception e) {
@@ -392,9 +387,9 @@ public class App {
         }
 
         trackPid();
-        
+
         startInsightServer();
-        
+
         if (tunnelData.has("id")) {
             this.tunnelID = Integer.parseInt(tunnelData.getString("id"));
             api.setTunnelID(tunnelID);
@@ -403,16 +398,16 @@ public class App {
         if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
-           
+
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
-           
+
         if (tunnelData.getString("state").equals("READY")) {
             this.tunnelReady(tunnelData);
         } else {
             poller = new TunnelPoller(this, tunnelData.getString("id"));
         }
     }
-    
+
     public void startInsightServer() {
         InsightServer insight = new InsightServer(this);
     }
@@ -425,15 +420,15 @@ public class App {
         if (tunnel != null) {
             tunnel.stop(true);
         }
-        
+
         if (httpForwarder != null) {
             httpForwarder.stop();
         }
-        
+
 //        if (pidPoller != null) {
 //            pidPoller.cancel();
 //        }
-        
+
         if (poller != null) {
             poller.cancel();
         }
