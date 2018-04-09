@@ -53,7 +53,6 @@ public class App {
     private int hubPort = 4444;
     private int tunnelID = 0;
     private int jettyPort = 8087;
-    private boolean useBoost = false;
     private boolean noProxy = false;
     private boolean bypassSquid = false;
     private boolean debugMode = false;
@@ -351,25 +350,6 @@ public class App {
     }
 
     public void boot() throws Exception {
-        if (useBoost == true) {
-            File rabbitFile = new File(System.getProperty("user.dir") + "/lib/rabbit/jars/rabbit4.jar");
-            if (!rabbitFile.exists()) {
-                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Can not use rabbit, not found in {0}", rabbitFile.toString());
-            } else {
-                ProcessBuilder pb = new ProcessBuilder("java", "-jar", rabbitFile.toString());
-                pb.directory(new File(System.getProperty("user.dir") + "/lib/rabbit/"));
-                pb.start();
-                Process proc = Runtime.getRuntime().exec("java -jar " + rabbitFile.toString());
-                System.getProperties().put("http.proxySet", "true");
-                System.setProperty("http.proxyHost", "127.0.0.1");
-                System.setProperty("https.proxyHost", "127.0.0.1");
-                System.setProperty("http.proxyPort", "9666");
-                System.setProperty("https.proxyPort", "9666");
-                System.getProperties().put("http.nonProxyHosts", "testingbot.com|api.testingbot.com|hub.testingbot.com");
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Boost mode is activated");
-            }
-        }
-
         api = new Api(this);
         JSONObject tunnelData = new JSONObject();
 
@@ -479,7 +459,7 @@ public class App {
 
         if (!this.noProxy) {
             this.httpProxy = new HttpProxy(this);
-            if (!this.getUseBoost() && this.httpProxy.testProxy() == false) {
+            if (this.httpProxy.testProxy() == false) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Tunnel might not work properly, test failed");
             }
         }
@@ -578,10 +558,6 @@ public class App {
 
     public void addCustomHeader(String key, String value) {
         customHeaders.put(key, value);
-    }
-
-    public boolean getUseBoost() {
-        return useBoost;
     }
 
     /**

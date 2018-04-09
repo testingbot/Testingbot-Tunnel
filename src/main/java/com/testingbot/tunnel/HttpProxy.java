@@ -72,10 +72,6 @@ public class HttpProxy {
             servletHolder.setInitParameter("tb_debug", "true");
         }
         
-        if (app.getUseBoost() == true) {
-            servletHolder.setInitParameter("proxy", "127.0.0.1:9666");     
-        }
-        
         if (app.getProxy() != null) {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
