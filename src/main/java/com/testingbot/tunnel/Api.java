@@ -68,37 +68,6 @@ public class Api {
         }
     }
     
-    public void setupBrowserMob(JSONObject apiResponse) {
-        DefaultHttpClient httpClient = new DefaultHttpClient();
-        HttpPost postRequest = new HttpPost("http://" + apiResponse.getString("ip") + ":9090/proxy?httpProxy=" + apiResponse.getString("private_ip") + ":2009");
-        try {
-            HttpResponse response = httpClient.execute(postRequest);
-            BufferedReader br = new BufferedReader(
-                     new InputStreamReader((response.getEntity().getContent()), "UTF8"));
-
-            String output;
-            StringBuilder sb = new StringBuilder();
-            while ((output = br.readLine()) != null) {
-                    sb.append(output);
-            }
-            
-            try {
-                String jsonData = sb.toString().replaceAll("\\\\", "");
-                if (!jsonData.startsWith("{")) {
-                    jsonData = jsonData.substring(1, (jsonData.length() - 1));
-                }
-                
-                JSONObject jsonObject = (JSONObject) JSONSerializer.toJSON(jsonData);
-                app.addCustomHeader("TB-Tunnel-Port", jsonObject.getString("port"));
-            }
-            catch (JSONException ex) {
-                Logger.getLogger(Api.class.getName()).log(Level.SEVERE, null, ex);
-            }
-        } catch (IOException ex) {
-            Logger.getLogger(Api.class.getName()).log(Level.SEVERE, null, ex);
-        }
-    }
-    
     public void destroyTunnel() throws Exception {
         DefaultHttpClient httpClient = new DefaultHttpClient();
         HttpParams params = httpClient.getParams();

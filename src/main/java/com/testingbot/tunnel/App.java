@@ -49,7 +49,6 @@ public class App {
     private String tunnelIdentifier;
     private String serverIP;
     private Map<String, String> customHeaders = new HashMap<String, String>();
-    private boolean useBrowserMob = false;
     private int hubPort = 4444;
     private int tunnelID = 0;
     private int jettyPort = 8087;
@@ -229,11 +228,6 @@ public class App {
                 String line = commandLine.getOptionValue("proxy-userpwd");
                 app.setProxyAuth(line);
             }
-
-            if (commandLine.hasOption("ssl")) {
-                app.useBrowserMob = true;
-            }
-
             if (commandLine.hasOption("noproxy")) {
                 app.noProxy = true;
             }
@@ -404,11 +398,7 @@ public class App {
         if (httpForwarder != null) {
             httpForwarder.stop();
         }
-
-//        if (pidPoller != null) {
-//            pidPoller.cancel();
-//        }
-
+        
         if (poller != null) {
             poller.cancel();
         }
@@ -431,14 +421,6 @@ public class App {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 this.startProxies();
-                if (useBrowserMob == true) {
-                    try {
-                        Thread.sleep(10000);
-                    } catch (InterruptedException ex) {
-                        Thread.currentThread().interrupt();
-                    }
-                    api.setupBrowserMob(apiResponse);
-                }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
 
@@ -546,10 +528,6 @@ public class App {
      */
     public String[] getFastFail() {
         return fastFail;
-    }
-
-    public boolean getUseBrowserMob() {
-        return useBrowserMob;
     }
 
     public Map<String, String> getCustomHeaders() {
