@@ -118,7 +118,7 @@ public class App {
         options.addOption(localweb);
 
         options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087)");
-        options.addOption("q", "squid", false, "Bypass our Caching Proxy running on our tunnel VM.");
+        options.addOption("q", "nocache", false, "Bypass our Caching Proxy running on our tunnel VM.");
         options.addOption("j", "jettyport", true, "The port to launch the local proxy on (default 8087)");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
@@ -251,8 +251,8 @@ public class App {
                 app.readyFile = commandLine.getOptionValue("readyfile").trim();
             }
 
-            if (commandLine.hasOption("squid")) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Bypassing Squid on the tunnel VM");
+            if (commandLine.hasOption("nocache")) {
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable Caching. All requests will go through the tunnel.");
                 app.bypassSquid = true;
             }
 
