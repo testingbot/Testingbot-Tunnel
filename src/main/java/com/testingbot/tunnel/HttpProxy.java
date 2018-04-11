@@ -7,7 +7,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -35,9 +34,9 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  *
  * @author TestingBot
  */
-public class HttpProxy {
-    private App app;
-    private Server httpProxy;
+public final class HttpProxy {
+    private final App app;
+    private final Server httpProxy;
     private final int randomNumber = (int )(Math.random() * 50 + 1);
     private final Thread shutDownHook;
     
@@ -76,8 +75,12 @@ public class HttpProxy {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
         
-        if (app.getProxyAuth()!= null) {
+        if (app.getProxyAuth() != null) {
             servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());     
+        }
+        
+        if (app.getBasicAuth() != null) {
+            servletHolder.setInitParameter("basicAuth", String.join(",", app.getBasicAuth())); 
         }
 
         servletHolder.setInitParameter("jetty", String.valueOf(app.getJettyPort()));

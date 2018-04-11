@@ -24,21 +24,6 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-
-    /**
-     * @return the metricsPort
-     */
-    public int getMetricsPort() {
-        return metricsPort;
-    }
-
-    /**
-     * @param metricsPort the metricsPort to set
-     */
-    public void setMetricsPort(int metricsPort) {
-        this.metricsPort = metricsPort;
-    }
-
     public static final Float VERSION = 2.5f;
     private Api api;
     private String clientKey;
@@ -59,6 +44,7 @@ public class App {
     private HttpProxy httpProxy;
     private String proxy;
     private String proxyAuth;
+    private String[] basicAuth;
     private String pac = null;
     private int metricsPort = 8003;
 
@@ -88,6 +74,11 @@ public class App {
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
+        
+        Option basicAuth = new Option("a", "auth", true, "Performs Basic Authentication for specific hosts.");
+        basicAuth.setArgs(Option.UNLIMITED_VALUES);
+        basicAuth.setArgName("host:port:user:passwd");
+        options.addOption(basicAuth);
 
         Option pac = OptionBuilder.withLongOpt("pac").hasArg().withDescription("Proxy autoconfiguration. Should be a http(s) URL").create();
         options.addOption(pac);
@@ -239,6 +230,10 @@ public class App {
             if (commandLine.hasOption("tunnel-identifier")) {
                 String identifierValue = commandLine.getOptionValue("tunnel-identifier");
                 app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
+            }
+            
+            if (commandLine.hasOption("auth")) {
+                app.setBasicAuth(commandLine.getOptionValues("auth"));
             }
 
             if (commandLine.hasOption("proxy-userpwd")) {
@@ -621,4 +616,33 @@ public class App {
     public void setJettyPort(int jettyPort) {
         this.jettyPort = jettyPort;
     }
+    
+    /**
+     * @return the metricsPort
+     */
+    public int getMetricsPort() {
+        return metricsPort;
+    }
+
+    /**
+     * @param metricsPort the metricsPort to set
+     */
+    public void setMetricsPort(int metricsPort) {
+        this.metricsPort = metricsPort;
+    }
+
+    /**
+     * @return the basicAuth
+     */
+    public String[] getBasicAuth() {
+        return basicAuth;
+    }
+
+    /**
+     * @param basicAuth the basicAuth to set
+     */
+    public void setBasicAuth(String[] basicAuth) {
+        this.basicAuth = basicAuth;
+    }
+
 }
