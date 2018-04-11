@@ -11,6 +11,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Authenticator;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.Map;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
@@ -106,6 +107,10 @@ public class App {
         Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
         hubPort.setArgName("HUBPORT");
         options.addOption(hubPort);
+
+        Option extraHeaders = new Option(null, "extra-headers", true, "Inject extra headers in the requests the tunnel makes.");
+        extraHeaders.setArgName("JSON Map with Header Key and Value");
+        options.addOption(extraHeaders);
 
         Option dns = new Option("dns", "dns", true, "Use a custom DNS server. For example: 8.8.8.8");
         dns.setArgName("server");
@@ -212,6 +217,18 @@ public class App {
             if (commandLine.hasOption("proxy")) {
                 String line = commandLine.getOptionValue("proxy");
                 app.setProxy(line);
+            }
+
+            if (commandLine.hasOption("extra-headers")) {
+                String extraHeadersValue = commandLine.getOptionValue("extra-headers");
+                JSONObject obj = JSONObject.fromObject(extraHeadersValue);
+
+                Iterator<String> keyIterator = obj.keys();
+                while (keyIterator.hasNext()) {
+                    String key = keyIterator.next();
+                    String value = obj.getString(key);
+                    app.addCustomHeader(key, value);
+                }
             }
 
             if (commandLine.hasOption("metrics-port")) {

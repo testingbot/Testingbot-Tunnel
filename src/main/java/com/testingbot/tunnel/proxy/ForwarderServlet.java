@@ -122,12 +122,6 @@ public class ForwarderServlet extends AsyncProxyServlet {
         if (this.app.getPac() != null) {
             proxyRequest.header("TB-Tunnel-Pac", this.app.getPac());
         }
-        
-        if (this.app.getCustomHeaders().size() > 0) {
-            for (Map.Entry<String, String> entry : this.app.getCustomHeaders().entrySet()) {
-                proxyRequest.header(entry.getKey(), entry.getValue());
-            }
-        }
        
         Logger.getLogger(App.class.getName()).log(Level.INFO, ">> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
         if (app.isDebugMode()) {
