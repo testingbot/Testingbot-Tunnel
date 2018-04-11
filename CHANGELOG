@@ -1,5 +1,17 @@
 This branch requires Java 8.
 
+2.6
+* Update pom.xml dependencies
+* Remove incorrect Java version check
+* Remove deprecated features: --boost and --ssl
+* Add option to supply extra HTTP headers during requests
+* Add option to supply basic auth credentials for various hosts, which the tunnel will automatically use
+* Make the --nocache option clearer: Do not cache any HTTP requests
+
+2.5
+* Send Tunnel version to TestingBot
+* Add Proxy PAC support
+
 2.4
 * Add --tunnel-identifier to identify different tunnels for the same account
 * Improved logging (formatting, log to file, debug levels, ...)
