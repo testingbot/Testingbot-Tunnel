@@ -1,3 +1,6 @@
+1.22
+* Remove incorrect Java version check
+
 1.21
 * Add --tunnel-identifier to identify different tunnels for the same account
 * Improved logging (formatting, log to file, debug levels, ...)

@@ -24,8 +24,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-
-    public static final Float VERSION = 1.21f;
+    public static final Float VERSION = 1.22f;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -116,6 +115,7 @@ public class App {
             commandLine = cmdLinePosixParser.parse(options, args);
             if (commandLine.hasOption("help")) {
                 HelpFormatter help = new HelpFormatter();
+                help.setWidth(180);
                 help.printHelp("java -jar testingbot-tunnel.jar API_KEY API_SECRET [OPTIONS]", options);
                 System.exit(0);
             } else if (commandLine.hasOption("version")) {
