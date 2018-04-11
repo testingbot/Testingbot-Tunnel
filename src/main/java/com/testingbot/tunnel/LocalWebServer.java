@@ -15,13 +15,10 @@ public class LocalWebServer {
 
         ResourceHandler resource_handler = new ResourceHandler();
 
-        // Configure the ResourceHandler. Setting the resource base indicates where the files should be served out of.
-        // In this example it is the current directory but it can be configured to anything that the jvm has access to.
         resource_handler.setDirectoriesListed(true);
-        resource_handler.setWelcomeFiles(new String[]{ "index.html" });
+        resource_handler.setWelcomeFiles(new String[]{ "index.html", "index.htm" });
         resource_handler.setResourceBase(directoryPath);
 
-        // Add the ResourceHandler to the server.
         HandlerList handlers = new HandlerList();
         handlers.setHandlers(new Handler[] { resource_handler, new DefaultHandler() });
         server.setHandler(handlers);

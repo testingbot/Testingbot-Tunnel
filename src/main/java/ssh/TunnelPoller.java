@@ -13,9 +13,9 @@ import net.sf.json.JSONObject;
  * @author TestingBot
  */
 public class TunnelPoller {
-    private App app;
-    private Timer timer;
-    private String tunnelID;
+    private final App app;
+    private final Timer timer;
+    private final String tunnelID;
     
     public TunnelPoller(App app, String tunnelID) {
         this.app = app;

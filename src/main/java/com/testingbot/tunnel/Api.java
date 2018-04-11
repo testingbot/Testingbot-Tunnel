@@ -5,8 +5,6 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.logging.Level;
-import java.util.logging.Logger;
 import net.iharder.Base64;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.ClientProtocolException;
@@ -28,10 +26,10 @@ import org.apache.http.params.HttpParams;
  */
 public class Api {
     
-    private String clientKey;
-    private String clientSecret;
+    private final String clientKey;
+    private final String clientSecret;
     private String apiHost = "api.testingbot.com";
-    private App app;
+    private final App app;
     private int tunnelID;
     
     public Api(App app) {

@@ -3,10 +3,10 @@ package com.testingbot.tunnel.proxy;
 import com.testingbot.tunnel.App;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Arrays;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
 import java.util.Enumeration;
-import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -25,7 +25,7 @@ import org.eclipse.jetty.util.HttpCookieStore;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
 public class ForwarderServlet extends AsyncProxyServlet {
-    private App app;
+    private final App app;
     
     public ForwarderServlet(App app) {
         this.app = app;
@@ -143,7 +143,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
-        Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), failure.getStackTrace().toString()});
+        Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), Arrays.toString(failure.getStackTrace())});
     }
     
     @Override

@@ -14,9 +14,9 @@ import java.util.logging.Logger;
  * @author TestingBot
  */
 public class SSHTunnel {
-    private App app;
-    private Connection conn;
-    private String server;
+    private final App app;
+    private final Connection conn;
+    private final String server;
     private Timer timer;
     private boolean authenticated = false;
     private boolean shuttingDown = false;

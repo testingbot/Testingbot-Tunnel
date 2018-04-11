@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.logging.Level;
@@ -32,7 +33,7 @@ import sun.net.dns.ResolverConfiguration;
  *
  * @author testingbot
  */
-public class Doctor {
+public final class Doctor {
 
     private final App app;
     public Doctor(App app) {
@@ -42,7 +43,7 @@ public class Doctor {
             uris.add(new URI("https://testingbot.com"));
             uris.add(new URI("https://api.testingbot.com/v1/browsers"));
             uris.add(new URI("https://www.google.com/"));
-        } catch (Exception e) {
+        } catch (URISyntaxException e) {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, e.getMessage());
         }
         
@@ -54,7 +55,7 @@ public class Doctor {
             for (URI uri : uris) {
                 performCheck(uri);
             }
-        } catch (Exception e) {
+        } catch (UnknownHostException e) {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, e.getMessage());
         }
         

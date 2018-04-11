@@ -57,7 +57,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
                     Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully re-established SSH Connection");
                     return;
                 }
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Attempts " + retryAttempts);
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Attempts {0}", retryAttempts);
             } catch (Exception ex) {
                 Logger.getLogger(App.class.getName()).log(Level.WARNING, ex.getMessage());
             }
