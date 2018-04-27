@@ -46,6 +46,9 @@ public class Api {
             if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
                 nameValuePairs.add(new BasicNameValuePair("tunnel_identifier", app.getTunnelIdentifier()));
             }
+            if (app.isBypassingSquid()) {
+                nameValuePairs.add(new BasicNameValuePair("no_cache", String.valueOf(app.isBypassingSquid())));
+            }
             return this._post("https://" + apiHost + "/v1/tunnel/create", nameValuePairs);
         } 
         catch (Exception e) {
