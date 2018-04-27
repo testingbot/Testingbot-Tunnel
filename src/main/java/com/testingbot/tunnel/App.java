@@ -113,7 +113,7 @@ public class App {
 
         options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087)");
         options.addOption("q", "nocache", false, "Bypass our Caching Proxy running on our tunnel VM.");
-        options.addOption("j", "jettyport", true, "The port to launch the local proxy on (default 8087)");
+        options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default 8087)");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
 
@@ -249,8 +249,8 @@ public class App {
                 app.pac = commandLine.getOptionValue("pac");
             }
 
-            if (commandLine.hasOption("jettyport")) {
-                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("jettyport")));
+            if (commandLine.hasOption("localport")) {
+                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localport")));
             }
 
             if (commandLine.hasOption("readyfile")) {
@@ -524,12 +524,6 @@ public class App {
 
     public void setProxy(String p) {
         proxy = p;
-        String[] splitted = proxy.split(":");
-        System.getProperties().put("http.proxySet", "true");
-        System.setProperty("http.proxyHost", splitted[0]);
-        System.setProperty("https.proxyHost", splitted[0]);
-        System.setProperty("http.proxyPort", splitted[1]);
-        System.setProperty("https.proxyPort", splitted[1]);
     }
 
     public String getProxy() {
