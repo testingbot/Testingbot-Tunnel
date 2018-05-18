@@ -35,6 +35,8 @@ Options
 
 The tunnel comes with various options:
 
+|Command|Description|
+|---------|-------------|
 |-a,--auth <host:port:user:passwd>|Performs Basic Authentication for specific hosts.|
 |-d,--debug|Enables debug messages. Will output request/response headers.|
 |-dns,--dns|Use a custom DNS server. For example: 8.8.8.8|
@@ -56,6 +58,7 @@ The tunnel comes with various options:
 |-x,--noproxy|Do not start a local proxy (requires user provided proxy server on port 8087)|
 |-Y,--proxy <PROXYHOST:PROXYPORT>|Specify an upstream proxy.|
 |-z,--proxy-userpwd <user:pwd>|Username and password required to access the proxy configured with --proxy.|
+
 
 
 Example
