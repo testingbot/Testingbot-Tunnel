@@ -20,7 +20,7 @@ Below are some of the features of the TestingBot Tunnel:
 Prerequisites
 -------
 
-This version of the tunnel requires Java 8 or higher. If you'd like to run on Java < 8, please use [https://github.com/testingbot/Testingbot-Tunnel/tree/TestingBotTunnel-1.21](TestingBot Tunnel 1.21) (no longer maintained)
+This version of the tunnel requires Java 8 or higher. If you'd like to run on Java < 8, please use [TestingBot Tunnel 1.21](https://github.com/testingbot/Testingbot-Tunnel/tree/TestingBotTunnel-1.21) (no longer maintained)
 
 Install
 -------
@@ -95,7 +95,7 @@ webdriver.quit
 Other
 -------
 We have created a NodeJS based launcher which you can use in your NodeJS tests and projects: 
-[https://github.com/testingbot/testingbot-tunnel-launcher](testingbot-tunnel-launcher)
+[testingbot-tunnel-launcher](https://github.com/testingbot/testingbot-tunnel-launcher)
 
 More documentation about this tunnel is available on https://testingbot.com/support/other/tunnel
 
