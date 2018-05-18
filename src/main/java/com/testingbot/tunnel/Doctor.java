@@ -38,6 +38,7 @@ public final class Doctor {
     private final App app;
     public Doctor(App app) {
         this.app = app;
+        app.setFreeJettyPort();
         ArrayList<URI> uris = new ArrayList<URI>();
         try {
             uris.add(new URI("https://testingbot.com"));

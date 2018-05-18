@@ -10,6 +10,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Authenticator;
+import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -37,7 +38,7 @@ public class App {
     private Map<String, String> customHeaders = new HashMap<String, String>();
     private int hubPort = 4444;
     private int tunnelID = 0;
-    private int jettyPort = 8087;
+    private int jettyPort = 0;
     private boolean noProxy = false;
     private boolean bypassSquid = false;
     private boolean debugMode = false;
@@ -251,6 +252,8 @@ public class App {
 
             if (commandLine.hasOption("localport")) {
                 app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localport")));
+            } else {
+                app.setFreeJettyPort();
             }
 
             if (commandLine.hasOption("readyfile")) {
@@ -496,6 +499,33 @@ public class App {
         return jettyPort;
     }
 
+    public void setFreeJettyPort() {
+        ServerSocket serverSocket;
+        int port;
+        try {
+            serverSocket = _findAvailableSocket();
+            if (serverSocket == null) {
+                return;
+            }
+            
+            port = serverSocket.getLocalPort();
+            serverSocket.close();
+            setJettyPort(port);
+        } catch (IOException ex) {
+        }  
+    }
+    
+    private ServerSocket _findAvailableSocket() {
+        for (int i = 8087; i < 8099; i++) {
+            try {
+                return new ServerSocket(i);
+            } catch (IOException ex) {
+            }
+        }
+        
+        return null;
+    }
+    
     public int getHubPort() {
         return hubPort;
     }
