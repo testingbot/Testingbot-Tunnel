@@ -91,7 +91,7 @@ public final class HttpProxy {
         ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
         context.addServlet(servletHolder, "/*");
         context.setAttribute("extra_headers", app.getCustomHeaders());
-        CustomConnectHandler proxy = new CustomConnectHandler();
+        CustomConnectHandler proxy = new CustomConnectHandler(app);
         proxy.setDebugMode(app.isDebugMode());
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             for (String domain : app.getFastFail()) {
