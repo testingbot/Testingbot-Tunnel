@@ -25,7 +25,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final Float VERSION = 2.6f;
+    public static final Float VERSION = 2.7f;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -158,8 +158,10 @@ public class App {
                     handlerFile.setFormatter(new LogFormatter());
                     handlerFile.setLevel(Level.ALL);
                     Logger.getLogger(App.class.getName()).addHandler(handlerFile);
-                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Logging to file " + commandLine.getOptionValue("logfile"));
-                } catch (Exception e) {
+                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Logging to file {0}", commandLine.getOptionValue("logfile"));
+                } catch (IOException e) {
+                    System.err.println("Cannot write logfile to " + commandLine.getOptionValue("logfile") + ".\nMake sure the directory exists and that we have the proper rights to write to this directory.");
+                } catch (SecurityException e) {
                     System.err.println("Cannot write logfile to " + commandLine.getOptionValue("logfile") + ".\nMake sure the directory exists and that we have the proper rights to write to this directory.");
                 }
             }

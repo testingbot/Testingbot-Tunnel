@@ -13,14 +13,12 @@ public class CustomAuthentication extends BasicAuthentication {
     }
     
     @Override
-    public boolean matches(String type, URI uri, String realm)
-    {
+    public boolean matches(String type, URI uri, String realm) {
         return true;
     }
     
     @Override
-    public Result authenticate(Request request, ContentResponse response, HeaderInfo headerInfo, Attributes context)
-    {
+    public Result authenticate(Request request, ContentResponse response, HeaderInfo headerInfo, Attributes context) {
         return super.authenticate(request, response, headerInfo, context);
     }
 }

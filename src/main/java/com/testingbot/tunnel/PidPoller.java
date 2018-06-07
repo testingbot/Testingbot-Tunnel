@@ -62,7 +62,7 @@ public class PidPoller {
                 BufferedWriter bw = new BufferedWriter(fw);
                 bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
                 bw.close();
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Pid file: " + pidFile.getAbsoluteFile().toString());
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Pid file: {0}", pidFile.getAbsoluteFile().toString());
             } catch (IOException ex) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory");
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);

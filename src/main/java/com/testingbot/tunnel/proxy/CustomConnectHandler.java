@@ -83,7 +83,6 @@ public class CustomConnectHandler extends ConnectHandler {
             }
         }
 
-        Logger.getLogger(App.class.getName()).log(Level.INFO, "Target=" + target);
         super.handle(target, baseRequest, request, response);
     }
 
@@ -161,12 +160,12 @@ public class CustomConnectHandler extends ConnectHandler {
                 }
             }
         }
-        catch (Throwable x) {
+        catch (IOException x) {
             if (channel != null) {
                 try {
                     channel.close();
                 }
-                catch (Throwable t) {
+                catch (IOException t) {
                     LOG.ignore(t);
                 }
             }
