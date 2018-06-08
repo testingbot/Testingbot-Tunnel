@@ -66,7 +66,7 @@ public class CustomConnectHandler extends ConnectHandler {
         Statistics.addRequest();
 
         if (HttpMethod.CONNECT.is(request.getMethod())) {
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, request.getRequestURL().toString(), response.toString().substring(9, 12)});
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2})", new Object[]{method, request.getRequestURL().toString().split(":443")[0].replaceAll("http:", "https:"), response.toString().substring(9, 12)});
         }
 
         if (debugMode == true) {

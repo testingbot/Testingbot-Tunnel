@@ -146,33 +146,4 @@ public class ForwarderServlet extends AsyncProxyServlet {
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
         Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), Arrays.toString(failure.getStackTrace())});
     }
-    
-    @Override
-    protected HttpClient newHttpClient()
-    {
-        HttpClient client = new HttpClient();
-        
-        String proxy = getServletConfig().getInitParameter("proxy");
-        if (proxy != null && !proxy.isEmpty())
-        {
-            String[] splitted = proxy.split(":");
-            ProxyConfiguration proxyConfig = client.getProxyConfiguration();
-            proxyConfig.getProxies().add(new HttpProxy(splitted[0], Integer.parseInt(splitted[1])));
-            
-            String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
-            if (proxyAuth != null && !proxyAuth.isEmpty())
-            {
-                String[] credentials = proxyAuth.split(":");
-                
-                AuthenticationStore auth = client.getAuthenticationStore();
-                try {
-                    auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
-                } catch (URISyntaxException ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
-                }
-            }
-        }
-        
-        return client;
-    }
 }

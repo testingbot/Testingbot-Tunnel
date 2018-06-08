@@ -42,7 +42,7 @@ public final class HttpProxy {
     
     public HttpProxy(App app) {
         this.app = app;
-        
+            
         this.httpProxy = new Server();
                 HttpConfiguration http_config = new HttpConfiguration();
         ServerConnector connector = new ServerConnector(httpProxy,

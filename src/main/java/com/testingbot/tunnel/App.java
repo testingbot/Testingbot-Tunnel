@@ -459,7 +459,7 @@ public class App {
 
         if (!this.noProxy) {
             this.httpProxy = new HttpProxy(this);
-            if (this.httpProxy.testProxy() == false) {
+            if (this.getProxy() == null && this.httpProxy.testProxy() == false) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Tunnel might not work properly, test failed");
             }
         }
@@ -641,6 +641,7 @@ public class App {
      * @param jettyPort the jettyPort to set
      */
     public void setJettyPort(int jettyPort) {
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "Setting up Local Proxy Port {0}", Integer.toString(jettyPort));
         this.jettyPort = jettyPort;
     }
     
