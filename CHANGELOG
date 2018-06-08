@@ -1,8 +1,9 @@
-This branch requires Java 8.
-
 2.7-SNAPSHOT
 * Rename jettyport option to localport
 * If started with --nocache, send to API for Manual Testing
+* Implemented upstream proxying for HTTPs via CONNECT (--proxy)
+* Updated pom.xml depndencies
+* No more hardcoded ports to listen to
 
 2.6
 * Update pom.xml dependencies
