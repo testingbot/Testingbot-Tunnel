@@ -1,8 +1,6 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
-import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Arrays;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 
@@ -15,12 +13,7 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.HttpProxy;
-import org.eclipse.jetty.client.ProxyConfiguration;
-import org.eclipse.jetty.client.api.Authentication;
-import org.eclipse.jetty.client.api.AuthenticationStore;
 import org.eclipse.jetty.client.api.Request;
-import org.eclipse.jetty.client.util.BasicAuthentication;
 import org.eclipse.jetty.util.HttpCookieStore;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
