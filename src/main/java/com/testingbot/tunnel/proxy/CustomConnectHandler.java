@@ -33,7 +33,7 @@ public class CustomConnectHandler extends ConnectHandler {
 
     private final String proxyHost;
     private final int proxyPort;
-    private final String proxyAuth;
+    private String proxyAuth = null;
 
     public CustomConnectHandler(final App app) {
       final String proxy = app.getProxy();
@@ -53,7 +53,9 @@ public class CustomConnectHandler extends ConnectHandler {
         proxyPort = -1;
       }
 
-      proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes());
+      if (app.getProxyAuth() != null) {
+        proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes());
+      }
     }
 
     public void setDebugMode(boolean mode) {

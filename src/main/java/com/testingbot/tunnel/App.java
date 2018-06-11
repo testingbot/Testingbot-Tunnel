@@ -25,7 +25,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final Float VERSION = 2.7f;
+    public static final Float VERSION = 2.8f;
     private Api api;
     private String clientKey;
     private String clientSecret;

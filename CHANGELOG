@@ -1,3 +1,6 @@
+2.8
+* Fix NPE in CONNECT handling
+
 2.7
 * Rename jettyport option to localport
 * If started with --nocache, send to API for Manual Testing
