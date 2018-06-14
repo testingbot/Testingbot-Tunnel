@@ -27,7 +27,6 @@ import java.util.logging.Logger;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.impl.client.DefaultHttpClient;
-import sun.net.dns.ResolverConfiguration;
 
 /**
  *
@@ -39,7 +38,7 @@ public final class Doctor {
     public Doctor(App app) {
         this.app = app;
         app.setFreeJettyPort();
-        ArrayList<URI> uris = new ArrayList<URI>();
+        ArrayList<URI> uris = new ArrayList<>();
         try {
             uris.add(new URI("https://testingbot.com"));
             uris.add(new URI("https://api.testingbot.com/v1/browsers"));
@@ -82,9 +81,9 @@ public final class Doctor {
     
     private boolean checkPortOpen(int port) {
         try {
-            ServerSocket socket = new ServerSocket(port);
-            socket.getLocalPort();
-            socket.close();
+            try (ServerSocket socket = new ServerSocket(port)) {
+                socket.getLocalPort();
+            }
             return true;
         } catch (IOException ex) {
         }
@@ -93,12 +92,7 @@ public final class Doctor {
     }
     
     public void performCheck(final URI uri) throws UnknownHostException {
-        String dnsServer = "";
-        try {
-            dnsServer = ResolverConfiguration.open().nameservers().get(0);
-        } catch (Exception ignore) {}
-        
-        Logger.getLogger(App.class.getName()).log(Level.INFO, "Resolving {0} using DNS server {1}", new Object[]{ uri.toString(), dnsServer });
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "Resolving {0}", new Object[]{ uri.toString() });
         InetAddress address = InetAddress.getByName(uri.getHost()); 
         Logger.getLogger(App.class.getName()).log(Level.INFO, "OK - Resolved {0} to {1}", new Object[]{ uri.toString(), address.getHostAddress() });
         if (checkConnection(uri)) {
