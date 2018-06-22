@@ -237,6 +237,11 @@ public class App {
             }
             
             if (commandLine.hasOption("auth")) {
+                for (String optionValue : commandLine.getOptionValues("auth")) {
+                    if (optionValue.split(":").length < 4) {
+                        throw new ParseException("ERROR: Auth value must contain host:port:user:password value: " + optionValue);
+                    }
+                }
                 app.setBasicAuth(commandLine.getOptionValues("auth"));
             }
 
@@ -291,8 +296,6 @@ public class App {
             app.boot();
         } catch (ParseException parseException) {
             System.err.println(parseException.getMessage());
-            HelpFormatter help = new HelpFormatter();
-            help.printHelp("java -jar testingbot-tunnel.jar API_KEY API_SECRET [OPTIONS]", options);
             System.exit(0);
         }
     }
