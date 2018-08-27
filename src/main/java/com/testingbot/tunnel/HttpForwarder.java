@@ -29,15 +29,15 @@ public class HttpForwarder {
         ServerConnector connector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
         connector.setPort(app.getSeleniumPort());
-        connector.setIdleTimeout(400000);
+        connector.setIdleTimeout(440000);
         
         httpProxy.setStopAtShutdown(true);
         
         httpProxy.addConnector(connector);
         
         ServletHolder servletHolder = new ServletHolder(new ForwarderServlet(app));
-        servletHolder.setInitParameter("idleTimeout", "300000");
-        servletHolder.setInitParameter("timeout", "300000");
+        servletHolder.setInitParameter("idleTimeout", "440000");
+        servletHolder.setInitParameter("timeout", "440000");
         if (app.getProxy() != null) {
             servletHolder.setInitParameter("proxy", app.getProxy());     
         }
