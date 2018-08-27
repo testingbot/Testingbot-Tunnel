@@ -120,28 +120,28 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <version>9.4.10.v20180503</version>
+      <version>9.4.11.v20180605</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
-      <version>9.4.10.v20180503</version>
+      <version>9.4.11.v20180605</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-proxy</artifactId>
-      <version>9.4.10.v20180503</version>
+      <version>9.4.11.v20180605</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlets</artifactId>
-      <version>9.4.10.v20180503</version>
+      <version>9.4.11.v20180605</version>
       <type>jar</type>
     </dependency>
     <dependency>
       <groupId>org.apache.httpcomponents</groupId>
       <artifactId>httpclient</artifactId>
-      <version>4.5.5</version>
+      <version>4.5.6</version>
     </dependency>
     <dependency>
       <groupId>net.iharder</groupId>
