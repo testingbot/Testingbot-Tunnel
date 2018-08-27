@@ -41,6 +41,7 @@ public final class Doctor {
         ArrayList<URI> uris = new ArrayList<>();
         try {
             uris.add(new URI("https://testingbot.com"));
+            uris.add(new URI("http://hub.testingbot.com"));
             uris.add(new URI("https://api.testingbot.com/v1/browsers"));
             uris.add(new URI("https://www.google.com/"));
         } catch (URISyntaxException e) {
