@@ -188,11 +188,11 @@ public class App {
             }
 
             if ((commandLine.getArgs().length == 0) && (clientKey == null)) {
-                throw new ParseException("Missing required arguments API_KEY API_SECRET");
+                throw new ParseException("Missing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit");
             }
 
             if ((commandLine.getArgs().length == 1) && (clientKey == null)) {
-                throw new ParseException("Missing required argument API_SECRET");
+                throw new ParseException("Missing required argument API_SECRET\nYou can get this from https://testingbot.com/members/user/edit");
             }
 
             if ((clientKey != null) && (clientSecret != null)) {
@@ -378,6 +378,9 @@ public class App {
 
         if (tunnelData.has("error")) {
             System.err.println("An error ocurred: " + tunnelData.getString("error"));
+            if (tunnelData.getString("error").contains("401")) {
+            	System.err.println("Missing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit");
+            }
             System.exit(1);
         }
 

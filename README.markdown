@@ -28,7 +28,7 @@ Install
 To start the tunnel, enter the following command:
     java -jar testingbot-tunnel.jar key secret
 
-You can obtain a free key and secret from https://testingbot.com
+You can obtain a free key and secret from https://testingbot.com/members/user/edit
 
 Options
 -------
@@ -46,7 +46,7 @@ The tunnel comes with various options:
 |-F,--fast-fail-regexps <OPTIONS>|Specify domains you don't want to proxy, comma separated.|
 |-h,--help|Displays help text|
 |-i,--tunnel-identifier <id>|Add an identifier to this tunnel connection. In case of multiple tunnels, specify this identifier in your desired capabilities to use this specific tunnel.|
-|-j,--jettyport <port>|The port to launch the local proxy on (default 8087).|
+|-j,--localproxy <port>|The port to launch the local proxy on (default 8087).|
 |-l,--logfile <FILE>|Write logging to a file.|
 |--metrics-port <port>|Use the specified port to access metrics. Default port 8003|
 |-P,--se-port <PORT>|The local port your Selenium test should connect to. Default port is 4445|
