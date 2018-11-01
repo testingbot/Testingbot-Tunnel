@@ -257,8 +257,8 @@ public class App {
                 app.pac = commandLine.getOptionValue("pac");
             }
 
-            if (commandLine.hasOption("localport")) {
-                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localport")));
+            if (commandLine.hasOption("localproxy")) {
+                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localproxy")));
             } else {
                 app.setFreeJettyPort();
             }
