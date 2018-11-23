@@ -24,6 +24,8 @@ import net.sf.json.JSONObject;
 import org.apache.commons.cli.*;
 import ssh.SSHTunnel;
 import ssh.TunnelPoller;
+import org.eclipse.jetty.util.log.Log;
+import org.eclipse.jetty.util.log.JavaUtilLog;
 
 public class App {
     public static final Float VERSION = 2.8f;
@@ -119,7 +121,7 @@ public class App {
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
 
-        System.setProperty("org.eclipse.jetty.util.log.class", "org.eclipse.jetty.util.log.Slf4jLog");
+        Log.setLog(new JavaUtilLog());
         System.setProperty("org.eclipse.jetty.LEVEL", "OFF");
 
         Statistics.setStartTime(System.currentTimeMillis());
