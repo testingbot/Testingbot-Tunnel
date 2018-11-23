@@ -331,19 +331,6 @@ public class App {
         return empty;
     }
 
-    private void saveUserData() {
-        File dataFile = new File(System.getProperty("user.home") + File.separator + ".testingbot");
-        if (!dataFile.exists()) {
-            try {
-                FileWriter fstream = new FileWriter(dataFile.getAbsolutePath());
-                BufferedWriter out = new BufferedWriter(fstream);
-                out.write(this.clientKey + ":" + this.clientSecret);
-                out.close();
-            } catch (Exception e) {
-            }
-        }
-    }
-
     public void init() {
         Thread cleanupThread = new Thread() {
             @Override
@@ -453,8 +440,6 @@ public class App {
                 this.startProxies();
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
-
-                this.saveUserData();
             }
         } catch (Exception ex) {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Something went wrong while setting up the Tunnel.");
