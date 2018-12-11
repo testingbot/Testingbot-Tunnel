@@ -55,8 +55,7 @@ public class HttpForwarder {
         try {
             httpProxy.start();
         } catch (Exception ex) {
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "Could not set up local forwarder. Please make sure this program can open port 4445 on this computer.");
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not set up local forwarder. Please make sure this program can open port 4445 on this computer.");
         }
     }
     
