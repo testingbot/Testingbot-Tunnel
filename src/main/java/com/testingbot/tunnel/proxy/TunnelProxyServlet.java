@@ -58,7 +58,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
             long endTime = System.currentTimeMillis();
             Statistics.addRequest();
             
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
+            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
             if (getServletConfig().getInitParameter("tb_debug") != null) {
                 Enumeration<String> headerNames = request.getHeaderNames();
                 if (headerNames != null) {
@@ -70,7 +70,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                         sb.append(header).append(": ").append(request.getHeader(header)).append(System.getProperty("line.separator"));
                     }
                     
-                    Logger.getLogger(App.class.getName()).log(Level.INFO, sb.toString());
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, sb.toString());
                 }
             }
             super.onComplete(result);
@@ -88,7 +88,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
         if (!clientRequest.getRequestURL().toString().contains("squid-internal")) {
-            Logger.getLogger(App.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
+            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
         }
         
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
@@ -203,11 +203,11 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                 String[] credentials = proxyAuth.split(":");
                 
                 auth = client.getAuthenticationStore();
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Proxy auth {0} : {1}", new Object[]{credentials[0], credentials[1]});
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Proxy auth {0} : {1}", new Object[]{credentials[0], credentials[1]});
                 try {
                     auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
                 } catch (URISyntaxException ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
         }
@@ -219,11 +219,11 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                 for (String authCredentials : basicAuth) {
                     String[] credentials = authCredentials.split(":");
                     auth = client.getAuthenticationStore();
-                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Adding Basic Auth for {0} : {1} : {2}", new Object[]{credentials[0] + ":" + credentials[1], credentials[2], credentials[3]});
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Adding Basic Auth for {0} : {1} : {2}", new Object[]{credentials[0] + ":" + credentials[1], credentials[2], credentials[3]});
                     try {
                         auth.addAuthentication(new BasicAuthentication(new URI("http://" + credentials[0] + ":" + credentials[1]), Authentication.ANY_REALM, credentials[2], credentials[3]));
                     } catch (URISyntaxException ex) {
-                        Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+                        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
                     }
                 }
             }

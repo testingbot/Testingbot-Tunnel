@@ -39,20 +39,20 @@ public class SSHTunnel {
             /* Now connect */
             conn.connect();
         } catch (IOException ex) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, ex.getMessage(), ex);
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, ex.getMessage(), ex);
         }
         
         try {
             // authenticate
             this.authenticated = conn.authenticateWithPassword(app.getClientKey(), app.getClientSecret());
         } catch (IOException ex) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.");
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.");
             throw new Exception("Authentication failed: " + ex.getMessage());
         }
         
        
         if (this.authenticated == false) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.");
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.");
             throw new Exception("Authentication failed");
         }
         
@@ -73,7 +73,7 @@ public class SSHTunnel {
                 lpf1.close();
             }
         } catch (IOException ex) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
     
@@ -84,8 +84,7 @@ public class SSHTunnel {
             String hubHost = "hub.testingbot.com";
             lpf1 = conn.createLocalPortForwarder(4446, hubHost, app.getHubPort());
         } catch (IOException ex) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.");
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.");
         }
     }
 

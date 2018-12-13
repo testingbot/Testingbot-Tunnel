@@ -25,9 +25,9 @@ public class LocalWebServer {
         
         try {
             server.start();
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "Local webserver now running on port 8080");
+            Logger.getLogger(LocalWebServer.class.getName()).log(Level.INFO, "Local webserver now running on port 8080");
         } catch (Exception ex) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(LocalWebServer.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
 }

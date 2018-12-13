@@ -30,7 +30,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
 
         app.getHttpProxy().stop();
 
-        Logger.getLogger(App.class.getName()).log(Level.SEVERE, "SSH Connection lost! {0}", reason.getMessage());
+        Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE, "SSH Connection lost! {0}", reason.getMessage());
 
         if (this.retrying == false) {
             this.retrying = true;
@@ -43,7 +43,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
         private int retryAttempts = 0;
         public void run() {
             try {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Trying to re-establish SSH Connection");
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Trying to re-establish SSH Connection");
                 retryAttempts += 1;
                 tunnel.stop();
                 tunnel.connect();
@@ -54,15 +54,15 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
                     timer.cancel();
                     app.getHttpProxy().start();
                     tunnel.createPortForwarding();
-                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully re-established SSH Connection");
+                    Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Successfully re-established SSH Connection");
                     return;
                 }
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Attempts {0}", retryAttempts);
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Attempts {0}", retryAttempts);
             } catch (Exception ex) {
-                Logger.getLogger(App.class.getName()).log(Level.WARNING, ex.getMessage());
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.WARNING, ex.getMessage());
             }
             if (retryAttempts >= 3) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Giving up retrying this Connection. Creating a new Tunnel Connection.");
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Giving up retrying this Connection. Creating a new Tunnel Connection.");
                 // give up connecting to this tunnel VM, try another one
                 timer.cancel();
                 retrying = false;
@@ -71,7 +71,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
                 try {
                     app.boot();
                 } catch (Exception ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE, null, ex);
                 }
             }
         }

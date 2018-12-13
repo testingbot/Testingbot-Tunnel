@@ -117,7 +117,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
             proxyRequest.header("TB-Tunnel-Pac", this.app.getPac());
         }
        
-        Logger.getLogger(App.class.getName()).log(Level.INFO, ">> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, ">> [{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
         if (app.isDebugMode()) {
             Enumeration<String> headerNames = clientRequest.getHeaderNames();
              if (headerNames != null) {
@@ -128,7 +128,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
                     header = headerNames.nextElement();
                     sb.append(header).append(": ").append(clientRequest.getHeader(header)).append(System.getProperty("line.separator"));
                 }
-                Logger.getLogger(App.class.getName()).log(Level.INFO, sb.toString());
+                Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, sb.toString());
             }
         }
     }
@@ -137,6 +137,6 @@ public class ForwarderServlet extends AsyncProxyServlet {
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure)
     {
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
-        Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), Arrays.toString(failure.getStackTrace())});
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), Arrays.toString(failure.getStackTrace())});
     }
 }

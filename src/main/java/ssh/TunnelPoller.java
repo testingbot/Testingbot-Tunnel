@@ -39,11 +39,10 @@ public class TunnelPoller {
                    timer.cancel();
                    app.tunnelReady(response);
                 } else {
-                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.getString("state"));
+                    Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.getString("state"));
                 }
             } catch (Exception ex) {
-                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Unable to poll for tunnel status.");
-                Logger.getLogger(App.class.getName()).log(Level.SEVERE, ex.toString());
+                Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, "Unable to poll for tunnel status.");
             }
         }
     }
