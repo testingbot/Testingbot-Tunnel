@@ -26,7 +26,7 @@ public class ForwarderServlet extends AsyncProxyServlet {
     
     @Override
     protected String rewriteTarget(HttpServletRequest request) {   
-        return "http://127.0.0.1:4446" + request.getRequestURI();
+        return "http://127.0.0.1:" + app.getSSHPort() + request.getRequestURI();
     }
     
     @Override

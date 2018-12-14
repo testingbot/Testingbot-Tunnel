@@ -51,6 +51,7 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private int metricsPort = 8003;
+    private int sshPort = 0;
 
     public static void main(String... args) throws Exception {
 
@@ -188,7 +189,7 @@ public class App {
             System.out.println("----------------------------------------------------------------");
 
             if (commandLine.getArgs().length < 2) {
-                String userdata[] = app.getUserData();
+                String[] userdata = app.getUserData();
                 if (userdata.length == 2) {
                     clientKey = userdata[0];
                     clientSecret = userdata[1];
@@ -517,14 +518,11 @@ public class App {
     }
     
     private ServerSocket _findAvailableSocket() {
-        for (int i = 8087; i < 8099; i++) {
-            try {
-                return new ServerSocket(i);
-            } catch (IOException ex) {
-            }
+        try {
+            return new ServerSocket(0);
+        } catch (IOException ex) {
+            return null;
         }
-        
-        return null;
     }
     
     public int getHubPort() {
@@ -670,6 +668,28 @@ public class App {
      */
     public void setBasicAuth(String[] basicAuth) {
         this.basicAuth = basicAuth;
+    }
+
+    public int getSSHPort() {
+        if (sshPort == 0) {
+            // find available port
+            ServerSocket serverSocket;
+            int port;
+            try {
+                serverSocket = _findAvailableSocket();
+                if (serverSocket == null) {
+                    sshPort = 4446;
+                    return sshPort;
+                }
+
+                port = serverSocket.getLocalPort();
+                serverSocket.close();
+                sshPort = port;
+            } catch (IOException ex) {
+            }
+        }
+        Logger.getLogger(App.class.getName()).log(Level.INFO, "SSH Port {0}", Integer.toString(sshPort));
+        return sshPort;
     }
 
 }
