@@ -28,7 +28,7 @@ import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.JavaUtilLog;
 
 public class App {
-    public static final Float VERSION = 2.8f;
+    public static final Float VERSION = 2.9f;
     private Api api;
     private String clientKey;
     private String clientSecret;
