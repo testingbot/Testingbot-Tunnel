@@ -22,6 +22,8 @@ Prerequisites
 
 This version of the tunnel requires Java 8 or higher. If you'd like to run on Java < 8, please use [TestingBot Tunnel 1.21](https://github.com/testingbot/Testingbot-Tunnel/tree/TestingBotTunnel-1.21) (no longer maintained)
 
+**NOTE:** If you use the containerized tunnel, Java is not needed. See below under the *Docker*-header. 
+
 Install
 -------
 
@@ -29,6 +31,8 @@ To start the tunnel, enter the following command:
     java -jar testingbot-tunnel.jar key secret
 
 You can obtain a free key and secret from https://testingbot.com/members/user/edit
+
+**Hint:** Instead of passing the key and secret to the command, you can have them as environment variables `${TESTINGBOT_KEY}` and `${TESTINGBOT_SECRET}`.
 
 Options
 -------
@@ -63,8 +67,10 @@ The tunnel comes with various options:
 Example
 -------
 To use the tunnel, simply start it:
-    java -jar testingbot-tunnel.jar key secret
 
+```
+$ java -jar testingbot-tunnel.jar <key> <secret>
+```
 
 Now point your tests to use the tunnel's IP (localhost if the .jar is running on your local computer) and port 4445
 ```ruby
@@ -92,12 +98,26 @@ puts webdriver.title
 webdriver.quit
 ```
 
-Other
+Node
 -------
 We have created a NodeJS based launcher which you can use in your NodeJS tests and projects: 
 [testingbot-tunnel-launcher](https://github.com/testingbot/testingbot-tunnel-launcher)
 
 More documentation about this tunnel is available on https://testingbot.com/support/other/tunnel
+
+Docker
+------
+For those who don't want to deal with Java, we also provide a containerized version of the tunnel.
+
+To start the tunnel, run:
+```
+$ docker run -p 4445:4445 testingbot/tunnel:2.9 <key> <secret> <options>
+```
+
+Alternatively:
+```
+$ docker run -p 4445:4445 -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRET=<secret> testingbot/tunnel:2.9 <options>
+```
 
 Compile from Source
 -------------------
