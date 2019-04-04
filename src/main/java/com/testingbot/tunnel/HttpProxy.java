@@ -10,14 +10,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
+import org.apache.http.client.HttpClient;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.message.BasicNameValuePair;
 import org.eclipse.jetty.server.Connector;
 import org.eclipse.jetty.server.HttpConfiguration;
@@ -169,7 +169,7 @@ public final class HttpProxy {
         }
         
         try {
-            DefaultHttpClient httpClient = new DefaultHttpClient();
+            HttpClient httpClient = HttpClientBuilder.create().build();
             String url = "https://api.testingbot.com/v1/tunnel/test";
             HttpPost postRequest = new HttpPost(url);
             
@@ -207,12 +207,12 @@ public final class HttpProxy {
                        Request baseRequest,
                        HttpServletRequest request,
                        HttpServletResponse response) 
-        throws IOException, ServletException
+        throws IOException
         {
             response.setContentType("text/html;charset=utf-8");
             response.setStatus(HttpServletResponse.SC_OK);
             baseRequest.setHandled(true);
-            response.getWriter().println("test=" + Integer.toString(randomNumber));
+            response.getWriter().println("test=" + randomNumber);
         }
     }
     

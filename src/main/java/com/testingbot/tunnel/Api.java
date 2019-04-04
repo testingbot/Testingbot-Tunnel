@@ -8,17 +8,17 @@ import java.util.List;
 import net.iharder.Base64;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpDelete;
-import org.apache.http.impl.client.DefaultHttpClient;
+import org.apache.http.impl.client.CloseableHttpClient;
 
 import net.sf.json.*;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.message.BasicNameValuePair;
-import org.apache.http.params.HttpConnectionParams;
-import org.apache.http.params.HttpParams;
 
 /**
  *
@@ -36,7 +36,6 @@ public class Api {
         this.app = app;
         this.clientKey = app.getClientKey();
         this.clientSecret = app.getClientSecret();
-        this.apiHost = "api.testingbot.com";
     }
     
     public JSONObject createTunnel() throws Exception {
@@ -70,10 +69,14 @@ public class Api {
     }
     
     public void destroyTunnel() throws Exception {
-        DefaultHttpClient httpClient = new DefaultHttpClient();
-        HttpParams params = httpClient.getParams();
-        HttpConnectionParams.setConnectionTimeout(params, 1000);
-        HttpConnectionParams.setSoTimeout(params, 1000);
+        RequestConfig.Builder requestBuilder = RequestConfig.custom();
+        requestBuilder.setConnectTimeout(1000);
+        requestBuilder.setConnectionRequestTimeout(1000);
+
+        HttpClientBuilder builder = HttpClientBuilder.create();
+        builder.setDefaultRequestConfig(requestBuilder.build());
+
+        CloseableHttpClient httpClient = builder.build();
         String auth = this.clientKey + ":" + this.clientSecret;
         String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
 
@@ -81,13 +84,13 @@ public class Api {
         deleteRequest.addHeader("accept", "application/json");
         deleteRequest.setHeader("Authorization", "Basic " + encoding);
 
-        HttpResponse response = httpClient.execute(deleteRequest);
-        httpClient.getConnectionManager().shutdown();
+        httpClient.execute(deleteRequest);
+        httpClient.close();
     }
     
     private JSONObject _post(String url, List<NameValuePair> postData)  throws Exception {
         try {
-            DefaultHttpClient httpClient = new DefaultHttpClient();
+            CloseableHttpClient httpClient = HttpClientBuilder.create().build();
             String auth = this.clientKey + ":" + this.clientSecret;
             String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
             
@@ -106,7 +109,7 @@ public class Api {
             while ((output = br.readLine()) != null) {
                     sb.append(output);
             }
-            httpClient.getConnectionManager().shutdown();
+            httpClient.close();
             
             try {
                 String jsonData = sb.toString().replaceAll("\\\\", "");
@@ -131,7 +134,7 @@ public class Api {
     
     private JSONObject _get(String url) throws Exception {
         try {
-            DefaultHttpClient httpClient = new DefaultHttpClient();
+            CloseableHttpClient httpClient = HttpClientBuilder.create().build();
             String auth = this.clientKey + ":" + this.clientSecret;
             String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
             
@@ -155,7 +158,7 @@ public class Api {
                     sb.append(output);
             }
 
-            httpClient.getConnectionManager().shutdown();
+            httpClient.close();
             
             try {
                 String jsonData = sb.toString().replaceAll("\\\\", "");

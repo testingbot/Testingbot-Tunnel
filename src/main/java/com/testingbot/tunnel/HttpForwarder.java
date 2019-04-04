@@ -3,6 +3,9 @@ package com.testingbot.tunnel;
 import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+
+import org.apache.http.client.HttpClient;
+import org.apache.http.impl.client.HttpClientBuilder;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -10,10 +13,10 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import com.testingbot.tunnel.proxy.ForwarderServlet;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.DefaultHttpClient;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+
 /**
  *
  * @author TestingBot
@@ -68,7 +71,7 @@ public class HttpForwarder {
     }
     
     public boolean testForwarding() {
-        DefaultHttpClient httpClient = new DefaultHttpClient();
+        HttpClient httpClient = HttpClientBuilder.create().build();
         HttpGet getRequest = new HttpGet("http://127.0.0.1:" + app.getSeleniumPort());
         
         HttpResponse response;
