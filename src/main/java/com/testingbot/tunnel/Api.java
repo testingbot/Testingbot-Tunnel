@@ -6,11 +6,16 @@ import java.io.InputStreamReader;
 import java.util.ArrayList;
 import java.util.List;
 import net.iharder.Base64;
+import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
+import org.apache.http.auth.AuthScope;
+import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.ClientProtocolException;
+import org.apache.http.client.CredentialsProvider;
 import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.methods.HttpGet;
 import org.apache.http.client.methods.HttpDelete;
+import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 
 import net.sf.json.*;
@@ -18,6 +23,7 @@ import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.client.ProxyAuthenticationStrategy;
 import org.apache.http.message.BasicNameValuePair;
 
 /**
@@ -76,6 +82,23 @@ public class Api {
         HttpClientBuilder builder = HttpClientBuilder.create();
         builder.setDefaultRequestConfig(requestBuilder.build());
 
+        if (app.getProxy() != null) {
+            String[] splitted = app.getProxy().split(":");
+            int port = splitted.length > 1 ? Integer.valueOf(splitted[1]) : 80;
+            if (app.getProxyAuth() != null) {
+                String[] credentials = app.getProxyAuth().split(":");
+                CredentialsProvider credsProvider = new BasicCredentialsProvider();
+                credsProvider.setCredentials(new AuthScope(splitted[0], port),
+                    new UsernamePasswordCredentials(credentials[0], credentials[1]));
+
+                builder.setProxyAuthenticationStrategy(new ProxyAuthenticationStrategy())
+                    .setDefaultCredentialsProvider(credsProvider);
+            }
+
+            HttpHost proxy = new HttpHost(splitted[0], port, "http");
+            builder.setProxy(proxy);
+        }
+
         CloseableHttpClient httpClient = builder.build();
         String auth = this.clientKey + ":" + this.clientSecret;
         String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
@@ -90,7 +113,26 @@ public class Api {
     
     private JSONObject _post(String url, List<NameValuePair> postData)  throws Exception {
         try {
-            CloseableHttpClient httpClient = HttpClientBuilder.create().build();
+            HttpClientBuilder builder = HttpClientBuilder.create();
+
+            if (app.getProxy() != null) {
+                String[] splitted = app.getProxy().split(":");
+                int port = splitted.length > 1 ? Integer.valueOf(splitted[1]) : 80;
+                if (app.getProxyAuth() != null) {
+                    String[] credentials = app.getProxyAuth().split(":");
+                    CredentialsProvider credsProvider = new BasicCredentialsProvider();
+                    credsProvider.setCredentials(new AuthScope(splitted[0], port),
+                        new UsernamePasswordCredentials(credentials[0], credentials[1]));
+
+                    builder.setProxyAuthenticationStrategy(new ProxyAuthenticationStrategy())
+                        .setDefaultCredentialsProvider(credsProvider);
+                }
+
+                HttpHost proxy = new HttpHost(splitted[0], port, "http");
+                builder.setProxy(proxy);
+            }
+
+            CloseableHttpClient httpClient = builder.build();
             String auth = this.clientKey + ":" + this.clientSecret;
             String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
             
@@ -134,7 +176,25 @@ public class Api {
     
     private JSONObject _get(String url) throws Exception {
         try {
-            CloseableHttpClient httpClient = HttpClientBuilder.create().build();
+            HttpClientBuilder builder = HttpClientBuilder.create();
+            if (app.getProxy() != null) {
+                String[] splitted = app.getProxy().split(":");
+                int port = splitted.length > 1 ? Integer.valueOf(splitted[1]) : 80;
+                if (app.getProxyAuth() != null) {
+                    String[] credentials = app.getProxyAuth().split(":");
+                    CredentialsProvider credsProvider = new BasicCredentialsProvider();
+                    credsProvider.setCredentials(new AuthScope(splitted[0], port),
+                        new UsernamePasswordCredentials(credentials[0], credentials[1]));
+
+                    builder.setProxyAuthenticationStrategy(new ProxyAuthenticationStrategy())
+                        .setDefaultCredentialsProvider(credsProvider);
+                }
+
+                HttpHost proxy = new HttpHost(splitted[0], port, "http");
+                builder.setProxy(proxy);
+            }
+
+            CloseableHttpClient httpClient = builder.build();
             String auth = this.clientKey + ":" + this.clientSecret;
             String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
             
