@@ -58,7 +58,8 @@ public class HttpForwarder {
         try {
             httpProxy.start();
         } catch (Exception ex) {
-            Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, "Could not set up local forwarder. Please make sure this program can open port {0} on this computer.", Integer.toString(app.getSeleniumPort()));
+            Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, "Could not set up local forwarder. Please make sure this program can open port {0} on this computer.\nPerhaps another tunnel process is already running on this machine?", Integer.toString(app.getSeleniumPort()));
+            Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
     

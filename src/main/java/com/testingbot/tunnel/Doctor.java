@@ -68,16 +68,16 @@ public final class Doctor {
         // check jetty port
         boolean canOpenJetty = checkPortOpen(app.getJettyPort());
         if (!canOpenJetty) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open proxy port {0}", Integer.toString(app.getJettyPort()));
+            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open proxy port {0}.\nDoes this process have the correct permissions?", Integer.toString(app.getJettyPort()));
         } else {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Proxy port {0} can be opened", Integer.toString(app.getJettyPort()));
         }
         
         boolean canOpenSEPort = checkPortOpen(app.getSeleniumPort());
         if (!canOpenSEPort) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open Selenium port {0}", Integer.toString(app.getSeleniumPort()));
+            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open Selenium port {0}.\nPerhaps another process is using this port? Or this process does not have the correct permission?", Integer.toString(app.getSeleniumPort()));
         } else {
-            Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Selenium port {0} can be opened", Integer.toString(app.getJettyPort()));
+            Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Selenium port {0} can be opened", Integer.toString(app.getSeleniumPort()));
         }
     }
     
