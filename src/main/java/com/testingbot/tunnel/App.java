@@ -324,7 +324,7 @@ public class App {
                 BufferedReader br = new BufferedReader(new InputStreamReader(in));
                 String strLine = br.readLine();
                 return strLine.split(":");
-            } catch (Exception e) {
+            } catch (IOException e) {
             }
         }
 

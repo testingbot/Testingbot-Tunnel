@@ -18,14 +18,9 @@
 
 package com.testingbot.tunnel;
 
-import java.net.URL;
-import java.security.AccessController;
-import java.security.PrivilegedAction;
 import java.util.logging.Level;
-import java.util.logging.LogManager;
 import java.util.logging.LogRecord;
 
-import org.eclipse.jetty.util.Loader;
 import org.eclipse.jetty.util.log.AbstractLogger;
 import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.Logger;

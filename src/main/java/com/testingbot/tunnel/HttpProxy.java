@@ -223,6 +223,7 @@ public final class HttpProxy {
           this.proxy = proxy;
         }
 
+        @Override
         public void run() {
             try {
                 proxy.stop();

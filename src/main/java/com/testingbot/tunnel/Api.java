@@ -34,7 +34,7 @@ public class Api {
     
     private final String clientKey;
     private final String clientSecret;
-    private String apiHost = "api.testingbot.com";
+    private final String apiHost = "api.testingbot.com";
     private final App app;
     private int tunnelID;
     
@@ -46,7 +46,7 @@ public class Api {
     
     public JSONObject createTunnel() throws Exception {
         try {
-            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);
+            List<NameValuePair> nameValuePairs = new ArrayList<>(2);
             nameValuePairs.add(new BasicNameValuePair("tunnel_version", App.VERSION.toString()));
             if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
                 nameValuePairs.add(new BasicNameValuePair("tunnel_identifier", app.getTunnelIdentifier()));
@@ -99,16 +99,16 @@ public class Api {
             builder.setProxy(proxy);
         }
 
-        CloseableHttpClient httpClient = builder.build();
-        String auth = this.clientKey + ":" + this.clientSecret;
-        String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
-
-        HttpDelete deleteRequest = new HttpDelete("https://" + apiHost + "/v1/tunnel/" + this.tunnelID);
-        deleteRequest.addHeader("accept", "application/json");
-        deleteRequest.setHeader("Authorization", "Basic " + encoding);
-
-        httpClient.execute(deleteRequest);
-        httpClient.close();
+        try (CloseableHttpClient httpClient = builder.build()) {
+            String auth = this.clientKey + ":" + this.clientSecret;
+            String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
+            
+            HttpDelete deleteRequest = new HttpDelete("https://" + apiHost + "/v1/tunnel/" + this.tunnelID);
+            deleteRequest.addHeader("accept", "application/json");
+            deleteRequest.setHeader("Authorization", "Basic " + encoding);
+            
+            httpClient.execute(deleteRequest);
+        }
     }
     
     private JSONObject _post(String url, List<NameValuePair> postData)  throws Exception {
@@ -132,26 +132,23 @@ public class Api {
                 builder.setProxy(proxy);
             }
 
-            CloseableHttpClient httpClient = builder.build();
-            String auth = this.clientKey + ":" + this.clientSecret;
-            String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
-            
-            HttpPost postRequest = new HttpPost(url);
-            
-            postRequest.addHeader("accept", "application/json");
-            postRequest.setHeader("Authorization", "Basic " + encoding);
-            postRequest.setEntity(new UrlEncodedFormEntity(postData));
-            
-            HttpResponse response = httpClient.execute(postRequest);
-            BufferedReader br = new BufferedReader(
-                     new InputStreamReader((response.getEntity().getContent()), "UTF8"));
-
-            String output;
-            StringBuilder sb = new StringBuilder();
-            while ((output = br.readLine()) != null) {
+            StringBuilder sb;
+            try (CloseableHttpClient httpClient = builder.build()) {
+                String auth = this.clientKey + ":" + this.clientSecret;
+                String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
+                HttpPost postRequest = new HttpPost(url);
+                postRequest.addHeader("accept", "application/json");
+                postRequest.setHeader("Authorization", "Basic " + encoding);
+                postRequest.setEntity(new UrlEncodedFormEntity(postData));
+                HttpResponse response = httpClient.execute(postRequest);
+                BufferedReader br = new BufferedReader(
+                        new InputStreamReader((response.getEntity().getContent()), "UTF8"));
+                String output;
+                sb = new StringBuilder();
+                while ((output = br.readLine()) != null) {
                     sb.append(output);
+                }
             }
-            httpClient.close();
             
             try {
                 String jsonData = sb.toString().replaceAll("\\\\", "");
@@ -194,31 +191,25 @@ public class Api {
                 builder.setProxy(proxy);
             }
 
-            CloseableHttpClient httpClient = builder.build();
-            String auth = this.clientKey + ":" + this.clientSecret;
-            String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
-            
-            HttpGet getRequest = new HttpGet(url);
-            getRequest.addHeader("accept", "application/json");
-            getRequest.setHeader("Authorization", "Basic " + encoding);
-
-            HttpResponse response = httpClient.execute(getRequest);
-
-            if (response.getStatusLine().getStatusCode() != 200) {
+            StringBuilder sb;
+            try (CloseableHttpClient httpClient = builder.build()) {
+                String auth = this.clientKey + ":" + this.clientSecret;
+                String encoding = Base64.encodeBytes(auth.getBytes("UTF-8"));
+                HttpGet getRequest = new HttpGet(url);
+                getRequest.addHeader("accept", "application/json");
+                getRequest.setHeader("Authorization", "Basic " + encoding);
+                HttpResponse response = httpClient.execute(getRequest);
+                if (response.getStatusLine().getStatusCode() != 200) {
                     throw new RuntimeException("Failed : HTTP error code : "
-                       + response.getStatusLine().getStatusCode());
-            }
-
-            BufferedReader br = new BufferedReader(
-                     new InputStreamReader((response.getEntity().getContent()), "UTF8"));
-
-            String output;
-            StringBuilder sb = new StringBuilder();
-            while ((output = br.readLine()) != null) {
+                            + response.getStatusLine().getStatusCode());
+                }   BufferedReader br = new BufferedReader(
+                        new InputStreamReader((response.getEntity().getContent()), "UTF8"));
+                String output;
+                sb = new StringBuilder();
+                while ((output = br.readLine()) != null) {
                     sb.append(output);
+                }
             }
-
-            httpClient.close();
             
             try {
                 String jsonData = sb.toString().replaceAll("\\\\", "");

@@ -14,13 +14,11 @@ import java.util.logging.Logger;
  * @author testingbot
  */
 public class PidPoller {
-    private App app;
     private File pidFile;
     private Timer timer;
     private final Thread cleanupThread;
     
     public PidPoller(App app) {
-        this.app = app;
         
         // create a "pid" file which we'll watch, when deleted, shutdown the tunnel
         String fileName = "testingbot-tunnel.pid";
@@ -44,9 +42,9 @@ public class PidPoller {
         if (!pidFile.exists()) {
             try {
                 FileWriter fw = new FileWriter(pidFile.getAbsoluteFile());
-                BufferedWriter bw = new BufferedWriter(fw);
-                bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
-                bw.close();
+                try (BufferedWriter bw = new BufferedWriter(fw)) {
+                    bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
+                }
                 Logger.getLogger(PidPoller.class.getName()).log(Level.INFO, "Pid file: {0}", pidFile.getAbsoluteFile().toString());
             } catch (IOException ex) {
                 Logger.getLogger(PidPoller.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory");
@@ -66,6 +64,7 @@ public class PidPoller {
     }
     
     class PollTask extends TimerTask {
+        @Override
         public void run() {
             if (!pidFile.exists()) {
                 Logger.getLogger(PidPoller.class.getName()).log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
