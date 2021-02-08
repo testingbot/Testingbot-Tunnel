@@ -1,3 +1,15 @@
+3.2
+* Update Dependencies
+
+3.1
+* Update Dependencies
+* Fix tunnel poller, polling indefinitely
+
+3.0
+* Optimize logging
+* Docker version
+* Add Proxy Support
+
 2.9
 * Various minor fixes (timeouts, doctor checks, ..)
 
