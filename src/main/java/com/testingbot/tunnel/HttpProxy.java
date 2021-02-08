@@ -173,7 +173,7 @@ public final class HttpProxy {
             String url = "https://api.testingbot.com/v1/tunnel/test";
             HttpPost postRequest = new HttpPost(url);
             
-            List<NameValuePair> nameValuePairs = new ArrayList<NameValuePair>(2);
+            List<NameValuePair> nameValuePairs = new ArrayList<>(2);
             nameValuePairs.add(new BasicNameValuePair("client_key", app.getClientKey()));
             nameValuePairs.add(new BasicNameValuePair("client_secret", app.getClientSecret()));
             nameValuePairs.add(new BasicNameValuePair("tunnel_id", Integer.toString(app.getTunnelID())));
@@ -203,6 +203,7 @@ public final class HttpProxy {
     }
     
     private class TestHandler extends AbstractHandler {
+        @Override
         public void handle(String target,
                        Request baseRequest,
                        HttpServletRequest request,

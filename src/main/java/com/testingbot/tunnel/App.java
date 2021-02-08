@@ -28,7 +28,7 @@ import org.eclipse.jetty.util.log.Log;
 import org.eclipse.jetty.util.log.JavaUtilLog;
 
 public class App {
-    public static final Float VERSION = 3.1f;
+    public static final Float VERSION = 3.2f;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -38,7 +38,7 @@ public class App {
     private SSHTunnel tunnel;
     private String tunnelIdentifier;
     private String serverIP;
-    private Map<String, String> customHeaders = new HashMap<String, String>();
+    private Map<String, String> customHeaders = new HashMap<>();
     private int hubPort = 4444;
     private int tunnelID = 0;
     private int jettyPort = 0;
@@ -470,9 +470,9 @@ public class App {
             } else {
                 try {
                     FileWriter fw = new FileWriter(f.getAbsoluteFile());
-                    BufferedWriter bw = new BufferedWriter(fw);
-                    bw.write("TestingBot Tunnel Ready");
-                    bw.close();
+                    try (BufferedWriter bw = new BufferedWriter(fw)) {
+                        bw.write("TestingBot Tunnel Ready");
+                    }
                 } catch (IOException ex) {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the director exists and we can write to this directory." , ex);
                 }

@@ -51,7 +51,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-jar-plugin</artifactId>
-        <version>2.4</version>
+        <version>3.2.0</version>
         <configuration>
            <archive>
              <manifest>
@@ -63,7 +63,7 @@
 <plugin>
     <groupId>org.apache.maven.plugins</groupId>
     <artifactId>maven-javadoc-plugin</artifactId>
-    <version>2.9</version>
+    <version>3.2.0</version>
     <executions>
         <execution>
             <id>attach-javadocs</id>
@@ -71,7 +71,7 @@
                 <goal>jar</goal>
             </goals>
             <configuration>
-                <additionalparam>-Xdoclint:none</additionalparam>
+                <additionalOptions>-Xdoclint:none</additionalOptions>
             </configuration>
         </execution>
     </executions>
@@ -79,7 +79,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-shade-plugin</artifactId>
-        <version>2.4.3</version>
+        <version>3.2.4</version>
         <executions>
           <execution>
              <phase>package</phase>
@@ -114,34 +114,34 @@
     <dependency>
       <groupId>junit</groupId>
       <artifactId>junit</artifactId>
-      <version>4.12</version>
+      <version>4.13.1</version>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <version>9.4.26.v20200117</version>
+      <version>9.4.36.v20210114</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
-      <version>9.4.26.v20200117</version>
+      <version>9.4.36.v20210114</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-proxy</artifactId>
-      <version>9.4.26.v20200117</version>
+      <version>9.4.36.v20210114</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlets</artifactId>
-      <version>9.4.26.v20200117</version>
+      <version>9.4.36.v20210114</version>
       <type>jar</type>
     </dependency>
     <dependency>
       <groupId>org.apache.httpcomponents</groupId>
       <artifactId>httpclient</artifactId>
-      <version>4.5.11</version>
+      <version>4.5.13</version>
     </dependency>
     <dependency>
       <groupId>net.iharder</groupId>

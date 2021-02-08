@@ -214,6 +214,8 @@ public class TestingBotLogHandler extends AbstractLogger
 
     /**
      * Create a Child Logger of this Logger.
+     * @param fullname
+     * @return Logger
      */
     @Override
     protected Logger newLogger(String fullname)

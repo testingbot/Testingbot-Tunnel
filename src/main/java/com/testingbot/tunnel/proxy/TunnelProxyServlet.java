@@ -1,12 +1,10 @@
 package com.testingbot.tunnel.proxy;
 
-import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.Statistics;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -58,7 +56,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
             long endTime = System.currentTimeMillis();
             Statistics.addRequest();
             
-            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "<< [{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
+            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "[{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime-this.startTime) + " ms"});
             if (getServletConfig().getInitParameter("tb_debug") != null) {
                 Enumeration<String> headerNames = request.getHeaderNames();
                 if (headerNames != null) {
@@ -106,9 +104,9 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         super.addProxyHeaders(clientRequest, proxyRequest);
         if (getServletContext().getAttribute("extra_headers") != null) {
             HashMap<String, String> headers = (HashMap<String, String>) getServletContext().getAttribute("extra_headers");
-            for (Map.Entry<String, String> entry : headers.entrySet()) {
+            headers.entrySet().forEach((entry) -> {
                 proxyRequest.header(entry.getKey(), entry.getValue());
-            }
+            });
         }
     }
     
