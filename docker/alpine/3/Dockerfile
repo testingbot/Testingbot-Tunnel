@@ -1,20 +1,12 @@
 FROM frolvlad/alpine-java:jre8-slim
 LABEL author="TestingBot <info@testingbot.com>"
 
-RUN addgroup -S bot \
-    && adduser -S -G bot bot
-
-ENV HOME=/home/bot
+RUN apk add --no-cache --virtual .build-deps wget unzip
 
 ARG TUNNEL=testingbot-tunnel
 
-RUN apk add --no-cache --virtual .build-deps curl \
-    && curl https://testingbot.com/downloads/${TUNNEL}.zip | unzip -d ${HOME} - \
-    && chown -R bot:bot ${HOME}/${TUNNEL} \
-    && apk del .build-deps
+RUN wget https://testingbot.com/downloads/${TUNNEL}.zip \
+    && unzip ${TUNNEL}.zip \
+    && rm ${TUNNEL}.zip
 
-USER bot
-
-WORKDIR ${HOME}/${TUNNEL}
-
-ENTRYPOINT ["java", "-jar", "testingbot-tunnel.jar"]
+ENTRYPOINT ["java", "-jar", "testingbot-tunnel/testingbot-tunnel.jar"]
