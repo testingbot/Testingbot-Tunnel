@@ -1,3 +1,7 @@
+3.3
+* Update Dependencies
+* Show warning when Tunnel is unable to reach upstream
+
 3.2
 * Update Dependencies
 

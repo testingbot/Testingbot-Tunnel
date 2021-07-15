@@ -71,6 +71,9 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                     Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, sb.toString());
                 }
             }
+            if (result.isFailed() && !request.getRequestURL().toString().contains("squid-internal")) {
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, "Local proxy received a connection failure from upstream. Make sure the website you want to test is accessible from this machine.");
+            }
             super.onComplete(result);
         }
     }
