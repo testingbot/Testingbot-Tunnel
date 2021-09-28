@@ -24,8 +24,6 @@ import net.sf.json.JSONObject;
 import org.apache.commons.cli.*;
 import ssh.SSHTunnel;
 import ssh.TunnelPoller;
-import org.eclipse.jetty.util.log.Log;
-import org.eclipse.jetty.util.log.JavaUtilLog;
 
 public class App {
     public static final Float VERSION = 3.2f;
@@ -122,7 +120,6 @@ public class App {
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
 
-        Log.setLog(new TestingBotLogHandler());
         System.setProperty("org.eclipse.jetty.LEVEL", "OFF");
 
         Statistics.setStartTime(System.currentTimeMillis());
@@ -149,7 +146,6 @@ public class App {
 
             App app = new App();
             if (commandLine.hasOption("debug")) {
-                Log.setLog(new JavaUtilLog());
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Running in debug-mode");
                 Logger.getLogger(App.class.getName()).setLevel(Level.ALL);
                 app.setDebugMode(true);

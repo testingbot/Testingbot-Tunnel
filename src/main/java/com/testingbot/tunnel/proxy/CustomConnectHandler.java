@@ -15,9 +15,9 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 
 import org.eclipse.jetty.http.HttpMethod;
 import org.eclipse.jetty.proxy.ConnectHandler;
@@ -153,7 +153,6 @@ public class CustomConnectHandler extends ConnectHandler {
                             selector.close();
                         }
                         catch (final IOException e) {
-                            LOG.ignore(e);
                         }
 
                         promise.succeeded(channel);
@@ -168,7 +167,6 @@ public class CustomConnectHandler extends ConnectHandler {
                     channel.close();
                 }
                 catch (IOException t) {
-                    LOG.ignore(t);
                 }
             }
             promise.failed(x);
