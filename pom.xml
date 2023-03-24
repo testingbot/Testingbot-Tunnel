@@ -120,22 +120,22 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <version>9.4.51.v20230217</version>
+      <version>9.4.43.v20210629</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlet</artifactId>
-      <version>9.4.51.v20230217</version>
+      <version>9.4.43.v20210629</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-proxy</artifactId>
-      <version>9.4.51.v20230217</version>
+      <version>9.4.43.v20210629</version>
     </dependency>
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-servlets</artifactId>
-      <version>9.4.51.v20230217</version>
+      <version>9.4.43.v20210629</version>
       <type>jar</type>
     </dependency>
     <dependency>
