@@ -84,7 +84,7 @@ public class Api {
 
         if (app.getProxy() != null) {
             String[] splitted = app.getProxy().split(":");
-            int port = splitted.length > 1 ? Integer.valueOf(splitted[1]) : 80;
+            int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
             if (app.getProxyAuth() != null) {
                 String[] credentials = app.getProxyAuth().split(":");
                 CredentialsProvider credsProvider = new BasicCredentialsProvider();
@@ -117,7 +117,7 @@ public class Api {
 
             if (app.getProxy() != null) {
                 String[] splitted = app.getProxy().split(":");
-                int port = splitted.length > 1 ? Integer.valueOf(splitted[1]) : 80;
+                int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
                 if (app.getProxyAuth() != null) {
                     String[] credentials = app.getProxyAuth().split(":");
                     CredentialsProvider credsProvider = new BasicCredentialsProvider();
@@ -176,7 +176,7 @@ public class Api {
             HttpClientBuilder builder = HttpClientBuilder.create();
             if (app.getProxy() != null) {
                 String[] splitted = app.getProxy().split(":");
-                int port = splitted.length > 1 ? Integer.valueOf(splitted[1]) : 80;
+                int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
                 if (app.getProxyAuth() != null) {
                     String[] credentials = app.getProxyAuth().split(":");
                     CredentialsProvider credsProvider = new BasicCredentialsProvider();

@@ -23,6 +23,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
         this.app = app;
     }
 
+    @Override
     public void connectionLost(Throwable reason) {
         if (tunnel.isShuttingDown() == true) {
             return;
@@ -41,6 +42,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
 
     class PollTask extends TimerTask {
         private int retryAttempts = 0;
+        @Override
         public void run() {
             try {
                 Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Trying to re-establish SSH Connection");

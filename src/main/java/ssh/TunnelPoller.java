@@ -16,7 +16,6 @@ public class TunnelPoller {
     private final App app;
     private final Timer timer;
     private final String tunnelID;
-    private int pollerCount = 0;
     
     public TunnelPoller(App app, String tunnelID) {
         this.app = app;

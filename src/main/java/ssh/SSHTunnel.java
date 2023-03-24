@@ -100,6 +100,7 @@ public class SSHTunnel {
     }
     
     class PollTask extends TimerTask {
+        @Override
         public void run() {
             try {
                 // keep-alive attempt

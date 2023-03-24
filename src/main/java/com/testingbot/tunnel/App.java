@@ -38,7 +38,7 @@ public class App {
     private SSHTunnel tunnel;
     private String tunnelIdentifier;
     private String serverIP;
-    private Map<String, String> customHeaders = new HashMap<>();
+    private final Map<String, String> customHeaders = new HashMap<>();
     private int hubPort = 4444;
     private int tunnelID = 0;
     private int jettyPort = 0;
@@ -388,7 +388,7 @@ public class App {
             api.setTunnelID(tunnelID);
         }
 
-        if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
+        if (Float.valueOf(tunnelData.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
 
