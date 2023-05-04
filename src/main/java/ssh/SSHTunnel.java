@@ -29,8 +29,6 @@ public class SSHTunnel {
         
         this.conn = new Connection(server, 443);
         this.conn.addConnectionMonitor(new CustomConnectionMonitor(this, this.app));
-        String[] ciphers = new String[]{"blowfish-cbc"};
-        this.conn.setClient2ServerCiphers(ciphers);
         this.connect();
     }
     
