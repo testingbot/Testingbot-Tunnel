@@ -11,7 +11,7 @@ import java.io.OutputStream;
  * CipherOutputStream.
  *
  * @author Christian Plattner
- * @version $Id: CipherOutputStream.java 11 2011-05-27 14:14:06Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class CipherOutputStream
 {
@@ -100,7 +100,7 @@ public class CipherOutputStream
 		}
 		catch (Exception e)
 		{
-			throw (IOException) new IOException("Error while decrypting block.").initCause(e);
+			throw new IOException("Error while decrypting block.", e);
 		}
 
 		internal_write(enc, 0, blockSize);

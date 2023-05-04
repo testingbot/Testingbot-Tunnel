@@ -11,7 +11,7 @@ import java.io.UnsupportedEncodingException;
  * PacketSessionExecCommand.
  *
  * @author Christian Plattner
- * @version $Id: PacketSessionExecCommand.java 5 2011-05-27 12:59:54Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class PacketSessionExecCommand
 {

@@ -14,7 +14,7 @@ import java.nio.charset.UnsupportedCharsetException;
  * actually mapping every request to a distinct {@link ch.ethz.ssh2.Session}.
  *
  * @author Christian Plattner, plattner@inf.ethz.ch
- * @version $Id: SCPClient.java 32 2011-05-28 21:56:21Z dkocher@sudo.ch $
+ * @version $Id$
  */
 
 public class SCPClient
@@ -46,7 +46,7 @@ public class SCPClient
 		}
 		catch (UnsupportedCharsetException e)
 		{
-			throw (IOException) new IOException("This charset is not supported").initCause(e);
+			throw new IOException("This charset is not supported", e);
 		}
 		charsetName = charset;
 	}

@@ -11,7 +11,7 @@ import java.io.InputStream;
  * CipherInputStream.
  *
  * @author Christian Plattner
- * @version $Id: CipherInputStream.java 11 2011-05-27 14:14:06Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class CipherInputStream
 {

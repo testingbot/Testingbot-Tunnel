@@ -13,7 +13,7 @@ import ch.ethz.ssh2.log.Logger;
  * RemoteAcceptThread.
  *
  * @author Christian Plattner
- * @version $Id: RemoteAcceptThread.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class RemoteAcceptThread extends Thread
 {

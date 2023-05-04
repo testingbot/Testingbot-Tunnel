@@ -2,58 +2,64 @@
  * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
  * Please refer to the LICENSE.txt for licensing details.
  */
+
 package ch.ethz.ssh2.log;
 
 import java.util.logging.Level;
 
 /**
- * Logger delegating to JRE logging.
+ * Logger delegating to JRE logging. By default, this is disabled and only
+ * used during development.
  *
  * @author Christian Plattner
- * @version $Id: Logger.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class Logger
 {
-
 	private java.util.logging.Logger delegate;
 
-	public static Logger getLogger(Class x)
+	public static volatile boolean enabled = false;
+
+	public static Logger getLogger(Class<?> x)
 	{
 		return new Logger(x);
 	}
 
-	public Logger(Class x)
+	public Logger(Class<?> x)
 	{
 		this.delegate = java.util.logging.Logger.getLogger(x.getName());
 	}
 
 	public boolean isDebugEnabled()
 	{
-		return delegate.isLoggable(Level.FINER);
+		return enabled && delegate.isLoggable(Level.FINER);
 	}
 
 	public void debug(String message)
 	{
-		delegate.fine(message);
+		if (enabled)
+			delegate.fine(message);
 	}
 
 	public boolean isInfoEnabled()
 	{
-		return delegate.isLoggable(Level.FINE);
+		return enabled && delegate.isLoggable(Level.FINE);
 	}
 
 	public void info(String message)
 	{
-		delegate.info(message);
+		if (enabled)
+			delegate.info(message);
 	}
 
 	public boolean isWarningEnabled()
 	{
-		return delegate.isLoggable(Level.WARNING);
+		return enabled && delegate.isLoggable(Level.WARNING);
 	}
 
 	public void warning(String message)
 	{
-		delegate.warning(message);
+		if (enabled)
+			delegate.warning(message);
 	}
 }

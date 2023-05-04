@@ -1,30 +1,24 @@
 /*
- * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Copyright (c) 2006-2013 Christian Plattner. All rights reserved.
  * Please refer to the LICENSE.txt for licensing details.
  */
 
 package ch.ethz.ssh2.channel;
 
 import java.io.IOException;
+import java.io.InterruptedIOException;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Vector;
+import java.util.Map;
 
 import ch.ethz.ssh2.ChannelCondition;
+import ch.ethz.ssh2.PtySettings;
+import ch.ethz.ssh2.ServerConnectionCallback;
+import ch.ethz.ssh2.ServerSessionCallback;
 import ch.ethz.ssh2.log.Logger;
-import ch.ethz.ssh2.packets.PacketChannelOpenConfirmation;
-import ch.ethz.ssh2.packets.PacketChannelOpenFailure;
-import ch.ethz.ssh2.packets.PacketGlobalCancelForwardRequest;
-import ch.ethz.ssh2.packets.PacketGlobalForwardRequest;
-import ch.ethz.ssh2.packets.PacketOpenDirectTCPIPChannel;
-import ch.ethz.ssh2.packets.PacketOpenSessionChannel;
-import ch.ethz.ssh2.packets.PacketSessionExecCommand;
-import ch.ethz.ssh2.packets.PacketSessionPtyRequest;
-import ch.ethz.ssh2.packets.PacketSessionStartShell;
-import ch.ethz.ssh2.packets.PacketSessionSubsystemRequest;
-import ch.ethz.ssh2.packets.PacketSessionX11Request;
-import ch.ethz.ssh2.packets.Packets;
-import ch.ethz.ssh2.packets.TypesReader;
+import ch.ethz.ssh2.packets.*;
+import ch.ethz.ssh2.server.ServerConnectionState;
 import ch.ethz.ssh2.transport.MessageHandler;
 import ch.ethz.ssh2.transport.TransportManager;
 
@@ -34,31 +28,48 @@ import ch.ethz.ssh2.transport.TransportManager;
  * Besides the crypto part, this is the core of the library.
  *
  * @author Christian Plattner
- * @version $Id: ChannelManager.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class ChannelManager implements MessageHandler
 {
 	private static final Logger log = Logger.getLogger(ChannelManager.class);
 
-	private final HashMap<String, X11ServerData> x11_magic_cookies = new HashMap<String, X11ServerData>();
+	private final ServerConnectionState server_state;
+	private final TransportManager tm;
 
-	private TransportManager tm;
+	private final Map<String, X11ServerData> x11_magic_cookies = new HashMap<String, X11ServerData>();
 
-	private final List<Channel> channels = new Vector<Channel>();
+	private final List<Channel> channels = new ArrayList<Channel>();
 	private int nextLocalChannel = 100;
 	private boolean shutdown = false;
 	private int globalSuccessCounter = 0;
 	private int globalFailedCounter = 0;
 
-	private final HashMap<Integer, RemoteForwardingData> remoteForwardings = new HashMap<Integer, RemoteForwardingData>();
+	private final Map<Integer, RemoteForwardingData> remoteForwardings = new HashMap<Integer, RemoteForwardingData>();
 
-	private final List<IChannelWorkerThread> listenerThreads = new Vector<IChannelWorkerThread>();
+	private final List<IChannelWorkerThread> listenerThreads = new ArrayList<IChannelWorkerThread>();
 
 	private boolean listenerThreadsAllowed = true;
 
+	/**
+	 * Constructor for client-mode.
+	 * @param tm
+	 */
 	public ChannelManager(TransportManager tm)
 	{
+		this.server_state = null;
 		this.tm = tm;
+		tm.registerMessageHandler(this, 80, 100);
+	}
+
+	/**
+	 * Constructor for server-mode.
+	 * @param state
+	 */
+	public ChannelManager(ServerConnectionState state)
+	{
+		this.server_state = state;
+		this.tm = state.tm;
 		tm.registerMessageHandler(this, 80, 100);
 	}
 
@@ -101,8 +112,6 @@ public class ChannelManager implements MessageHandler
 
 	private void waitUntilChannelOpen(Channel c) throws IOException
 	{
-		boolean wasInterrupted = false;
-
 		synchronized (c)
 		{
 			while (c.state == Channel.STATE_OPENING)
@@ -111,9 +120,9 @@ public class ChannelManager implements MessageHandler
 				{
 					c.wait();
 				}
-				catch (InterruptedException ignore)
+				catch (InterruptedException e)
 				{
-					wasInterrupted = true;
+					throw new InterruptedIOException(e.getMessage());
 				}
 			}
 
@@ -129,96 +138,75 @@ public class ChannelManager implements MessageHandler
 				throw new IOException("Could not open channel (" + detail + ")");
 			}
 		}
-
-		if (wasInterrupted)
-			Thread.currentThread().interrupt();
 	}
 
 	private void waitForGlobalSuccessOrFailure() throws IOException
 	{
-		boolean wasInterrupted = false;
+        synchronized (channels)
+        {
+            while ((globalSuccessCounter == 0) && (globalFailedCounter == 0))
+            {
+                if (shutdown)
+                {
+                    throw new IOException("The connection is being shutdown");
+                }
 
-		try
-		{
-			synchronized (channels)
-			{
-				while ((globalSuccessCounter == 0) && (globalFailedCounter == 0))
-				{
-					if (shutdown)
-					{
-						throw new IOException("The connection is being shutdown");
-					}
-
-					try
-					{
-						channels.wait();
-					}
-					catch (InterruptedException ignore)
-					{
-						wasInterrupted = true;
-					}
-				}
-
-				if (globalFailedCounter != 0)
-				{
-					throw new IOException("The server denied the request (did you enable port forwarding?)");
-				}
-
-				if (globalSuccessCounter == 0)
-				{
-					throw new IOException("Illegal state.");
-				}
-			}
-		}
-		finally
-		{
-			if (wasInterrupted)
-				Thread.currentThread().interrupt();
-		}
+                try
+                {
+                    channels.wait();
+                }
+                catch (InterruptedException e)
+                {
+                    throw new InterruptedIOException(e.getMessage());
+                }
+            }
+            if ((globalFailedCounter == 0) && (globalSuccessCounter == 1))
+            {
+                return;
+            }
+            if ((globalFailedCounter == 1) && (globalSuccessCounter == 0))
+            {
+                throw new IOException("The server denied the request (did you enable port forwarding?)");
+            }
+            throw new IOException("Illegal state. The server sent " + globalSuccessCounter
+                    + " SSH_MSG_REQUEST_SUCCESS and " + globalFailedCounter + " SSH_MSG_REQUEST_FAILURE messages.");
+        }
 	}
 
 	private void waitForChannelSuccessOrFailure(Channel c) throws IOException
-	{
-		boolean wasInterrupted = false;
+   	{
+   		synchronized (c)
+   		{
+   			while ((c.successCounter == 0) && (c.failedCounter == 0))
+   			{
+   				if (c.state != Channel.STATE_OPEN)
+   				{
+   					String detail = c.getReasonClosed();
 
-		try
-		{
-			synchronized (c)
-			{
-				while ((c.successCounter == 0) && (c.failedCounter == 0))
-				{
-					if (c.state != Channel.STATE_OPEN)
-					{
-						String detail = c.getReasonClosed();
+   					if (detail == null)
+   						detail = "state: " + c.state;
 
-						if (detail == null)
-							detail = "state: " + c.state;
-
-						throw new IOException("This SSH2 channel is not open (" + detail + ")");
-					}
-
-					try
-					{
-						c.wait();
-					}
-					catch (InterruptedException ignore)
-					{
-						wasInterrupted = true;
-					}
-				}
-
-				if (c.failedCounter != 0)
-				{
-					throw new IOException("The server denied the request.");
-				}
-			}
-		}
-		finally
-		{
-			if (wasInterrupted)
-				Thread.currentThread().interrupt();
-		}
-	}
+   					throw new IOException("This SSH2 channel is not open (" + detail + ")");
+   				}
+   				try
+   				{
+   					c.wait();
+   				}
+   				catch (InterruptedException ignore)
+   				{
+   					throw new InterruptedIOException();
+   				}
+   			}
+   			if ((c.failedCounter == 0) && (c.successCounter == 1)) {
+                return;
+            }
+   			if ((c.failedCounter == 1) && (c.successCounter == 0)) {
+                throw new IOException("The server denied the request.");
+            }
+   			throw new IOException("Illegal state. The server sent " + c.successCounter
+   					+ " SSH_MSG_CHANNEL_SUCCESS and " + c.failedCounter + " SSH_MSG_CHANNEL_FAILURE messages.");
+   		}
+   	}
 
 	public void registerX11Cookie(String hexFakeCookie, X11ServerData data)
 	{
@@ -243,7 +231,7 @@ public class ChannelManager implements MessageHandler
 
 		log.debug("Closing all X11 channels for the given fake cookie");
 
-		List<Channel> channel_copy = new Vector<Channel>();
+		List<Channel> channel_copy = new ArrayList<Channel>();
 
 		synchronized (channels)
 		{
@@ -280,10 +268,9 @@ public class ChannelManager implements MessageHandler
 
 	public void closeAllChannels()
 	{
-
 		log.debug("Closing all channels");
 
-		List<Channel> channel_copy = new Vector<Channel>();
+		List<Channel> channel_copy = new ArrayList<Channel>();
 
 		synchronized (channels)
 		{
@@ -332,7 +319,6 @@ public class ChannelManager implements MessageHandler
 			tm.sendMessage(msg);
 			c.closeMessageSent = true;
 		}
-
 
 		log.debug("Sent SSH_MSG_CHANNEL_CLOSE (channel " + c.localID + ")");
 	}
@@ -388,88 +374,78 @@ public class ChannelManager implements MessageHandler
 
 	public void sendData(Channel c, byte[] buffer, int pos, int len) throws IOException
 	{
-		boolean wasInterrupted = false;
+        while (len > 0)
+        {
+            int thislen = 0;
+            byte[] msg;
 
-		try
-		{
-			while (len > 0)
-			{
-				int thislen = 0;
-				byte[] msg;
+            synchronized (c)
+            {
+                while (true)
+                {
+                    if (c.state == Channel.STATE_CLOSED)
+                        throw new ChannelClosedException("SSH channel is closed. (" + c.getReasonClosed() + ")");
 
-				synchronized (c)
-				{
-					while (true)
-					{
-						if (c.state == Channel.STATE_CLOSED)
-							throw new ChannelClosedException("SSH channel is closed. (" + c.getReasonClosed() + ")");
+                    if (c.state != Channel.STATE_OPEN)
+                        throw new ChannelClosedException("SSH channel in strange state. (" + c.state + ")");
 
-						if (c.state != Channel.STATE_OPEN)
-							throw new ChannelClosedException("SSH channel in strange state. (" + c.state + ")");
+                    if (c.remoteWindow != 0)
+                        break;
 
-						if (c.remoteWindow != 0)
-							break;
+                    try
+                    {
+                        c.wait();
+                    }
+                    catch (InterruptedException e)
+                    {
+                        throw new InterruptedIOException(e.getMessage());
+                    }
+                }
 
-						try
-						{
-							c.wait();
-						}
-						catch (InterruptedException ignore)
-						{
-							wasInterrupted = true;
-						}
-					}
+                /* len > 0, no sign extension can happen when comparing */
 
-					/* len > 0, no sign extension can happen when comparing */
+                thislen = (c.remoteWindow >= len) ? len : (int) c.remoteWindow;
 
-					thislen = (c.remoteWindow >= len) ? len : (int) c.remoteWindow;
+                int estimatedMaxDataLen = c.remoteMaxPacketSize - (tm.getPacketOverheadEstimate() + 9);
 
-					int estimatedMaxDataLen = c.remoteMaxPacketSize - (tm.getPacketOverheadEstimate() + 9);
+                /* The worst case scenario =) a true bottleneck */
 
-					/* The worst case scenario =) a true bottleneck */
+                if (estimatedMaxDataLen <= 0)
+                {
+                    estimatedMaxDataLen = 1;
+                }
 
-					if (estimatedMaxDataLen <= 0)
-					{
-						estimatedMaxDataLen = 1;
-					}
+                if (thislen > estimatedMaxDataLen)
+                    thislen = estimatedMaxDataLen;
 
-					if (thislen > estimatedMaxDataLen)
-						thislen = estimatedMaxDataLen;
+                c.remoteWindow -= thislen;
 
-					c.remoteWindow -= thislen;
+                msg = new byte[1 + 8 + thislen];
 
-					msg = new byte[1 + 8 + thislen];
+                msg[0] = Packets.SSH_MSG_CHANNEL_DATA;
+                msg[1] = (byte) (c.remoteID >> 24);
+                msg[2] = (byte) (c.remoteID >> 16);
+                msg[3] = (byte) (c.remoteID >> 8);
+                msg[4] = (byte) (c.remoteID);
+                msg[5] = (byte) (thislen >> 24);
+                msg[6] = (byte) (thislen >> 16);
+                msg[7] = (byte) (thislen >> 8);
+                msg[8] = (byte) (thislen);
 
-					msg[0] = Packets.SSH_MSG_CHANNEL_DATA;
-					msg[1] = (byte) (c.remoteID >> 24);
-					msg[2] = (byte) (c.remoteID >> 16);
-					msg[3] = (byte) (c.remoteID >> 8);
-					msg[4] = (byte) (c.remoteID);
-					msg[5] = (byte) (thislen >> 24);
-					msg[6] = (byte) (thislen >> 16);
-					msg[7] = (byte) (thislen >> 8);
-					msg[8] = (byte) (thislen);
+                System.arraycopy(buffer, pos, msg, 9, thislen);
+            }
 
-					System.arraycopy(buffer, pos, msg, 9, thislen);
-				}
+            synchronized (c.channelSendLock)
+            {
+                if (c.closeMessageSent == true)
+                    throw new ChannelClosedException("SSH channel is closed. (" + c.getReasonClosed() + ")");
 
-				synchronized (c.channelSendLock)
-				{
-					if (c.closeMessageSent == true)
-						throw new ChannelClosedException("SSH channel is closed. (" + c.getReasonClosed() + ")");
+                tm.sendMessage(msg);
+            }
 
-					tm.sendMessage(msg);
-				}
-
-				pos += thislen;
-				len -= thislen;
-			}
-		}
-		finally
-		{
-			if (wasInterrupted)
-				Thread.currentThread().interrupt();
-		}
+            pos += thislen;
+            len -= thislen;
+        }
 	}
 
 	public int requestGlobalForward(String bindAddress, int bindPort, String targetAddress, int targetPort)
@@ -484,7 +460,7 @@ public class ChannelManager implements MessageHandler
 
 		synchronized (remoteForwardings)
 		{
-			Integer key = new Integer(bindPort);
+			Integer key = bindPort;
 
 			if (remoteForwardings.get(key) != null)
 			{
@@ -501,7 +477,6 @@ public class ChannelManager implements MessageHandler
 
 		PacketGlobalForwardRequest pgf = new PacketGlobalForwardRequest(true, bindAddress, bindPort);
 		tm.sendMessage(pgf.getPayload());
-
 
 		log.debug("Requesting a remote forwarding ('" + bindAddress + "', " + bindPort + ")");
 
@@ -527,7 +502,7 @@ public class ChannelManager implements MessageHandler
 
 		synchronized (remoteForwardings)
 		{
-			rfd = remoteForwardings.get(new Integer(bindPort));
+			rfd = remoteForwardings.get(bindPort);
 
 			if (rfd == null)
 				throw new IOException("Sorry, there is no known remote forwarding for remote port " + bindPort);
@@ -541,7 +516,6 @@ public class ChannelManager implements MessageHandler
 		PacketGlobalCancelForwardRequest pgcf = new PacketGlobalCancelForwardRequest(true, rfd.bindAddress,
 				rfd.bindPort);
 		tm.sendMessage(pgcf.getPayload());
-
 
 		log.debug("Requesting cancelation of remote forward ('" + rfd.bindAddress + "', " + rfd.bindPort + ")");
 
@@ -596,7 +570,6 @@ public class ChannelManager implements MessageHandler
 			// end of synchronized block forces the writing out to main memory
 		}
 
-
 		log.debug("Sending SSH_MSG_CHANNEL_OPEN (Channel " + c.localID + ")");
 
 		PacketOpenSessionChannel smo = new PacketOpenSessionChannel(c.localID, c.localWindow, c.localMaxPacketSize);
@@ -636,12 +609,42 @@ public class ChannelManager implements MessageHandler
 		}
 		catch (IOException e)
 		{
-			throw (IOException) new IOException("PTY request failed").initCause(e);
+			throw new IOException("PTY request failed", e);
 		}
 	}
 
-	public void requestX11(Channel c, boolean singleConnection, String x11AuthenticationProtocol,
-						   String x11AuthenticationCookie, int x11ScreenNumber) throws IOException
+    public void requestWindowChange(Channel c, int term_width_characters, int term_height_characters,
+                                    int term_width_pixels, int term_height_pixels) throws IOException {
+        PacketWindowChange pwc;
+
+        synchronized (c) {
+            if (c.state != Channel.STATE_OPEN)
+                throw new IOException("Cannot request window-change on this channel (" + c.getReasonClosed() + ")");
+
+            pwc = new PacketWindowChange(c.remoteID, term_width_characters, term_height_characters,
+                    term_width_pixels, term_height_pixels);
+
+            c.successCounter = c.failedCounter = 0;
+        }
+
+        synchronized (c.channelSendLock) {
+            if (c.closeMessageSent)
+                throw new IOException("Cannot request window-change on this channel (" + c.getReasonClosed() + ")");
+            tm.sendMessage(pwc.getPayload());
+        }
+
+        try
+        {
+            waitForChannelSuccessOrFailure(c);
+        }
+        catch (IOException e)
+        {
+            throw new IOException("The window-change request failed.", e);
+        }
+    }
+
+    public void requestX11(Channel c, boolean singleConnection, String x11AuthenticationProtocol,
+                           String x11AuthenticationCookie, int x11ScreenNumber) throws IOException
 	{
 		PacketSessionX11Request psr;
 
@@ -663,16 +666,15 @@ public class ChannelManager implements MessageHandler
 			tm.sendMessage(psr.getPayload());
 		}
 
-
 		log.debug("Requesting X11 forwarding (Channel " + c.localID + "/" + c.remoteID + ")");
 
 		try
-		{
+        {
 			waitForChannelSuccessOrFailure(c);
-		}
-		catch (IOException e)
+        }
+        catch (IOException e)
 		{
-			throw (IOException) new IOException("The X11 request failed.").initCause(e);
+			throw new IOException("The X11 request failed.", e);
 		}
 	}
 
@@ -703,7 +705,7 @@ public class ChannelManager implements MessageHandler
 		}
 		catch (IOException e)
 		{
-			throw (IOException) new IOException("The subsystem request failed.").initCause(e);
+			throw new IOException("The subsystem request failed.", e);
 		}
 	}
 
@@ -736,7 +738,6 @@ public class ChannelManager implements MessageHandler
 			tm.sendMessage(sm.getPayload(charsetName));
 		}
 
-
 		log.debug("Executing command (channel " + c.localID + ", '" + cmd + "')");
 
 		try
@@ -745,7 +746,7 @@ public class ChannelManager implements MessageHandler
 		}
 		catch (IOException e)
 		{
-			throw (IOException) new IOException("The execute request failed.").initCause(e);
+			throw new IOException("The execute request failed.", e);
 		}
 	}
 
@@ -776,7 +777,7 @@ public class ChannelManager implements MessageHandler
 		}
 		catch (IOException e)
 		{
-			throw (IOException) new IOException("The shell request failed.").initCause(e);
+			throw new IOException("The shell request failed.", e);
 		}
 	}
 
@@ -800,7 +801,6 @@ public class ChannelManager implements MessageHandler
 		if (len != (msglen - 13))
 			throw new IOException("SSH_MSG_CHANNEL_EXTENDED_DATA message has wrong len (calculated " + (msglen - 13)
 					+ ", got " + len + ")");
-
 
 		log.debug("Got SSH_MSG_CHANNEL_EXTENDED_DATA (channel " + id + ", " + len + ")");
 
@@ -833,80 +833,70 @@ public class ChannelManager implements MessageHandler
 	 * @param condition_mask minimum event mask (at least one of the conditions must be fulfilled)
 	 * @return all current events
 	 */
-	public int waitForCondition(Channel c, long timeout, int condition_mask)
+	public int waitForCondition(Channel c, long timeout, int condition_mask) throws IOException
 	{
-		boolean wasInterrupted = false;
+        long end_time = 0;
+        boolean end_time_set = false;
 
-		try
-		{
-			long end_time = 0;
-			boolean end_time_set = false;
+        synchronized (c)
+        {
+            while (true)
+            {
+                int current_cond = 0;
 
-			synchronized (c)
-			{
-				while (true)
-				{
-					int current_cond = 0;
+                int stdoutAvail = c.stdoutWritepos - c.stdoutReadpos;
+                int stderrAvail = c.stderrWritepos - c.stderrReadpos;
 
-					int stdoutAvail = c.stdoutWritepos - c.stdoutReadpos;
-					int stderrAvail = c.stderrWritepos - c.stderrReadpos;
+                if (stdoutAvail > 0)
+                    current_cond = current_cond | ChannelCondition.STDOUT_DATA;
 
-					if (stdoutAvail > 0)
-						current_cond = current_cond | ChannelCondition.STDOUT_DATA;
+                if (stderrAvail > 0)
+                    current_cond = current_cond | ChannelCondition.STDERR_DATA;
 
-					if (stderrAvail > 0)
-						current_cond = current_cond | ChannelCondition.STDERR_DATA;
+                if (c.EOF)
+                    current_cond = current_cond | ChannelCondition.EOF;
 
-					if (c.EOF)
-						current_cond = current_cond | ChannelCondition.EOF;
+                if (c.getExitStatus() != null)
+                    current_cond = current_cond | ChannelCondition.EXIT_STATUS;
 
-					if (c.getExitStatus() != null)
-						current_cond = current_cond | ChannelCondition.EXIT_STATUS;
+                if (c.getExitSignal() != null)
+                    current_cond = current_cond | ChannelCondition.EXIT_SIGNAL;
 
-					if (c.getExitSignal() != null)
-						current_cond = current_cond | ChannelCondition.EXIT_SIGNAL;
+                if (c.state == Channel.STATE_CLOSED)
+                    return current_cond | ChannelCondition.CLOSED | ChannelCondition.EOF;
 
-					if (c.state == Channel.STATE_CLOSED)
-						return current_cond | ChannelCondition.CLOSED | ChannelCondition.EOF;
+                if ((current_cond & condition_mask) != 0)
+                    return current_cond;
 
-					if ((current_cond & condition_mask) != 0)
-						return current_cond;
+                if (timeout > 0)
+                {
+                    if (!end_time_set)
+                    {
+                        end_time = System.currentTimeMillis() + timeout;
+                        end_time_set = true;
+                    }
+                    else
+                    {
+                        timeout = end_time - System.currentTimeMillis();
 
-					if (timeout > 0)
-					{
-						if (!end_time_set)
-						{
-							end_time = System.currentTimeMillis() + timeout;
-							end_time_set = true;
-						}
-						else
-						{
-							timeout = end_time - System.currentTimeMillis();
+                        if (timeout <= 0)
+                            return current_cond | ChannelCondition.TIMEOUT;
+                    }
+                }
 
-							if (timeout <= 0)
-								return current_cond | ChannelCondition.TIMEOUT;
-						}
-					}
-
-					try
-					{
-						if (timeout > 0)
-							c.wait(timeout);
-						else
-							c.wait();
-					}
-					catch (InterruptedException e)
-					{
-						wasInterrupted = true;
-					}
-				}
-			}
-		}
-		finally
-		{
-			if (wasInterrupted)
-				Thread.currentThread().interrupt();
-		}
+                try
+                {
+                    if (timeout > 0)
+                        c.wait(timeout);
+                    else
+                        c.wait();
+                }
+                catch (InterruptedException e)
+                {
+                    throw new InterruptedIOException(e.getMessage());
+                }
+            }
+        }
 	}
 
 	public int getAvailable(Channel c, boolean extended) throws IOException
@@ -916,9 +906,9 @@ public class ChannelManager implements MessageHandler
 			int avail;
 
 			if (extended)
-				avail = c.stderrWritepos - c.stderrReadpos;
+                avail = c.stderrWritepos - c.stderrReadpos;
 			else
-				avail = c.stdoutWritepos - c.stdoutReadpos;
+                avail = c.stdoutWritepos - c.stdoutReadpos;
 
 			return ((avail > 0) ? avail : (c.EOF ? -1 : 0));
 		}
@@ -926,136 +916,124 @@ public class ChannelManager implements MessageHandler
 
 	public int getChannelData(Channel c, boolean extended, byte[] target, int off, int len) throws IOException
 	{
-		boolean wasInterrupted = false;
+        int copylen = 0;
+        int increment = 0;
+        int remoteID = 0;
+        int localID = 0;
 
-		try
-		{
-			int copylen = 0;
-			int increment = 0;
-			int remoteID = 0;
-			int localID = 0;
+        synchronized (c)
+        {
+            int stdoutAvail = 0;
+            int stderrAvail = 0;
 
-			synchronized (c)
-			{
-				int stdoutAvail = 0;
-				int stderrAvail = 0;
+            while (true)
+            {
+                /*
+                 * Data available? We have to return remaining data even if the
+                 * channel is already closed.
+                 */
 
-				while (true)
-				{
-					/*
-					 * Data available? We have to return remaining data even if the
-					 * channel is already closed.
-					 */
+                stdoutAvail = c.stdoutWritepos - c.stdoutReadpos;
+                stderrAvail = c.stderrWritepos - c.stderrReadpos;
 
-					stdoutAvail = c.stdoutWritepos - c.stdoutReadpos;
-					stderrAvail = c.stderrWritepos - c.stderrReadpos;
+                if ((!extended) && (stdoutAvail != 0))
+                    break;
 
-					if ((!extended) && (stdoutAvail != 0))
-						break;
+                if ((extended) && (stderrAvail != 0))
+                    break;
 
-					if ((extended) && (stderrAvail != 0))
-						break;
+                /* Do not wait if more data will never arrive (EOF or CLOSED) */
 
-					/* Do not wait if more data will never arrive (EOF or CLOSED) */
+                if ((c.EOF) || (c.state != Channel.STATE_OPEN))
+                    return -1;
 
-					if ((c.EOF) || (c.state != Channel.STATE_OPEN))
-						return -1;
+                try
+                {
+                    c.wait();
+                }
+                catch (InterruptedException e)
+                {
+                    throw new InterruptedIOException(e.getMessage());
+                }
+            }
 
-					try
-					{
-						c.wait();
-					}
-					catch (InterruptedException ignore)
-					{
-						wasInterrupted = true;
-					}
-				}
+            /* OK, there is some data. Return it. */
 
-				/* OK, there is some data. Return it. */
+            if (!extended)
+            {
+                copylen = (stdoutAvail > len) ? len : stdoutAvail;
+                System.arraycopy(c.stdoutBuffer, c.stdoutReadpos, target, off, copylen);
+                c.stdoutReadpos += copylen;
 
-				if (!extended)
-				{
-					copylen = (stdoutAvail > len) ? len : stdoutAvail;
-					System.arraycopy(c.stdoutBuffer, c.stdoutReadpos, target, off, copylen);
-					c.stdoutReadpos += copylen;
+                if (c.stdoutReadpos != c.stdoutWritepos)
 
-					if (c.stdoutReadpos != c.stdoutWritepos)
+                    System.arraycopy(c.stdoutBuffer, c.stdoutReadpos, c.stdoutBuffer, 0, c.stdoutWritepos
+                            - c.stdoutReadpos);
 
-						System.arraycopy(c.stdoutBuffer, c.stdoutReadpos, c.stdoutBuffer, 0, c.stdoutWritepos
-								- c.stdoutReadpos);
+                c.stdoutWritepos -= c.stdoutReadpos;
+                c.stdoutReadpos = 0;
+            }
+            else
+            {
+                copylen = (stderrAvail > len) ? len : stderrAvail;
+                System.arraycopy(c.stderrBuffer, c.stderrReadpos, target, off, copylen);
+                c.stderrReadpos += copylen;
 
-					c.stdoutWritepos -= c.stdoutReadpos;
-					c.stdoutReadpos = 0;
-				}
-				else
-				{
-					copylen = (stderrAvail > len) ? len : stderrAvail;
-					System.arraycopy(c.stderrBuffer, c.stderrReadpos, target, off, copylen);
-					c.stderrReadpos += copylen;
+                if (c.stderrReadpos != c.stderrWritepos)
 
-					if (c.stderrReadpos != c.stderrWritepos)
+                    System.arraycopy(c.stderrBuffer, c.stderrReadpos, c.stderrBuffer, 0, c.stderrWritepos
+                            - c.stderrReadpos);
 
-						System.arraycopy(c.stderrBuffer, c.stderrReadpos, c.stderrBuffer, 0, c.stderrWritepos
-								- c.stderrReadpos);
+                c.stderrWritepos -= c.stderrReadpos;
+                c.stderrReadpos = 0;
+            }
 
-					c.stderrWritepos -= c.stderrReadpos;
-					c.stderrReadpos = 0;
-				}
+            if (c.state != Channel.STATE_OPEN)
+                return copylen;
 
-				if (c.state != Channel.STATE_OPEN)
-					return copylen;
+            if (c.localWindow < ((Channel.CHANNEL_BUFFER_SIZE + 1) / 2))
+            {
+                int minFreeSpace = Math.min(Channel.CHANNEL_BUFFER_SIZE - c.stdoutWritepos,
+                        Channel.CHANNEL_BUFFER_SIZE - c.stderrWritepos);
 
-				if (c.localWindow < ((Channel.CHANNEL_BUFFER_SIZE + 1) / 2))
-				{
-					int minFreeSpace = Math.min(Channel.CHANNEL_BUFFER_SIZE - c.stdoutWritepos,
-							Channel.CHANNEL_BUFFER_SIZE - c.stderrWritepos);
+                increment = minFreeSpace - c.localWindow;
+                c.localWindow = minFreeSpace;
+            }
 
-					increment = minFreeSpace - c.localWindow;
-					c.localWindow = minFreeSpace;
-				}
+            remoteID = c.remoteID; /* read while holding the lock */
+            localID = c.localID; /* read while holding the lock */
+        }
 
-				remoteID = c.remoteID; /* read while holding the lock */
-				localID = c.localID; /* read while holding the lock */
-			}
+        /*
+         * If a consumer reads stdout and stdin in parallel, we may end up with
+         * sending two msgWindowAdjust messages. Luckily, it
+         * does not matter in which order they arrive at the server.
+         */
 
-			/*
-			 * If a consumer reads stdout and stdin in parallel, we may end up with
-			 * sending two msgWindowAdjust messages. Luckily, it
-			 * does not matter in which order they arrive at the server.
-			 */
+        if (increment > 0)
+        {
+            log.debug("Sending SSH_MSG_CHANNEL_WINDOW_ADJUST (channel " + localID + ", " + increment + ")");
 
-			if (increment > 0)
-			{
+            synchronized (c.channelSendLock)
+            {
+                byte[] msg = c.msgWindowAdjust;
 
-				log.debug("Sending SSH_MSG_CHANNEL_WINDOW_ADJUST (channel " + localID + ", " + increment + ")");
+                msg[0] = Packets.SSH_MSG_CHANNEL_WINDOW_ADJUST;
+                msg[1] = (byte) (remoteID >> 24);
+                msg[2] = (byte) (remoteID >> 16);
+                msg[3] = (byte) (remoteID >> 8);
+                msg[4] = (byte) (remoteID);
+                msg[5] = (byte) (increment >> 24);
+                msg[6] = (byte) (increment >> 16);
+                msg[7] = (byte) (increment >> 8);
+                msg[8] = (byte) (increment);
 
-				synchronized (c.channelSendLock)
-				{
-					byte[] msg = c.msgWindowAdjust;
+                if (c.closeMessageSent == false)
+                    tm.sendMessage(msg);
+            }
+        }
 
-					msg[0] = Packets.SSH_MSG_CHANNEL_WINDOW_ADJUST;
-					msg[1] = (byte) (remoteID >> 24);
-					msg[2] = (byte) (remoteID >> 16);
-					msg[3] = (byte) (remoteID >> 8);
-					msg[4] = (byte) (remoteID);
-					msg[5] = (byte) (increment >> 24);
-					msg[6] = (byte) (increment >> 16);
-					msg[7] = (byte) (increment >> 8);
-					msg[8] = (byte) (increment);
-
-					if (c.closeMessageSent == false)
-						tm.sendMessage(msg);
-				}
-			}
-
-			return copylen;
-		}
-		finally
-		{
-			if (wasInterrupted)
-				Thread.currentThread().interrupt();
-		}
-
+        return copylen;
 	}
 
 	public void msgChannelData(byte[] msg, int msglen) throws IOException
@@ -1074,7 +1052,6 @@ public class ChannelManager implements MessageHandler
 		if (len != (msglen - 9))
 			throw new IOException("SSH_MSG_CHANNEL_DATA message has wrong len (calculated " + (msglen - 9) + ", got "
 					+ len + ")");
-
 
 		log.debug("Got SSH_MSG_CHANNEL_DATA (channel " + id + ", " + len + ")");
 
@@ -1152,7 +1129,6 @@ public class ChannelManager implements MessageHandler
 
 					tm.sendAsynchronousMessage(pcof.getPayload());
 
-
 					log.warning("Unexpected X11 request, denying it!");
 
 					return;
@@ -1194,7 +1170,7 @@ public class ChannelManager implements MessageHandler
 
 			synchronized (remoteForwardings)
 			{
-				rfd = remoteForwardings.get(new Integer(remoteConnectedPort));
+				rfd = remoteForwardings.get(remoteConnectedPort);
 			}
 
 			if (rfd == null)
@@ -1206,7 +1182,6 @@ public class ChannelManager implements MessageHandler
 				/* Always try to be polite. */
 
 				tm.sendAsynchronousMessage(pcof.getPayload());
-
 
 				log.debug("Unexpected forwarded-tcpip request, denying it!");
 
@@ -1236,6 +1211,45 @@ public class ChannelManager implements MessageHandler
 			return;
 		}
 
+		if ((server_state != null) && ("session".equals(channelType)))
+		{
+			ServerConnectionCallback cb = null;
+			
+			synchronized (server_state)
+			{
+				cb = server_state.cb_conn;
+			}
+			
+			if (cb == null)
+			{
+				tm.sendAsynchronousMessage(new PacketChannelOpenFailure(remoteID, Packets.SSH_OPEN_ADMINISTRATIVELY_PROHIBITED,
+						"Sessions are currently not enabled", "en").getPayload());
+				
+				return;
+			}
+			
+			final Channel c = new Channel(this);
+
+			synchronized (c)
+			{
+				c.remoteID = remoteID;
+				c.remoteWindow = remoteWindow & 0xFFFFffffL; /* convert UINT32 to long */
+				c.remoteMaxPacketSize = remoteMaxPacketSize;
+				c.localID = addChannel(c);
+				c.state = Channel.STATE_OPEN;
+				c.ss = new ServerSessionImpl(c);
+			}
+
+			PacketChannelOpenConfirmation pcoc = new PacketChannelOpenConfirmation(c.remoteID, c.localID,
+					c.localWindow, c.localMaxPacketSize);
+
+			tm.sendAsynchronousMessage(pcoc.getPayload());
+
+			c.ss.sscb = cb.acceptSession(c.ss);
+
+			return;
+		}
+
 		/* Tell the server that we have no idea what it is talking about */
 
 		PacketChannelOpenFailure pcof = new PacketChannelOpenFailure(remoteID, Packets.SSH_OPEN_UNKNOWN_CHANNEL_TYPE,
@@ -1247,6 +1261,13 @@ public class ChannelManager implements MessageHandler
 		log.warning("The peer tried to open an unsupported channel type (" + channelType + ")");
 	}
 
+	/* Starts the given runnable in a foreground (non-daemon) thread */
+	private void runAsync(Runnable r)
+	{
+		Thread t = new Thread(r);
+		t.start();		
+	}
+	
 	public void msgChannelRequest(byte[] msg, int msglen) throws IOException
 	{
 		TypesReader tr = new TypesReader(msg, 0, msglen);
@@ -1259,16 +1280,26 @@ public class ChannelManager implements MessageHandler
 		if (c == null)
 			throw new IOException("Unexpected SSH_MSG_CHANNEL_REQUEST message for non-existent channel " + id);
 
+		ServerSessionImpl server_session = null;
+
+		if (server_state != null)
+		{
+			synchronized (c)
+			{
+				server_session = c.ss;
+			}
+		}
+
 		String type = tr.readString("US-ASCII");
 		boolean wantReply = tr.readBoolean();
-
 
 		log.debug("Got SSH_MSG_CHANNEL_REQUEST (channel " + id + ", '" + type + "')");
 
 		if (type.equals("exit-status"))
 		{
 			if (wantReply != false)
-				throw new IOException("Badly formatted SSH_MSG_CHANNEL_REQUEST message, 'want reply' is true");
+				throw new IOException(
+						"Badly formatted SSH_MSG_CHANNEL_REQUEST exit-status message, 'want reply' is true");
 
 			int exit_status = tr.readUINT32();
 
@@ -1277,20 +1308,20 @@ public class ChannelManager implements MessageHandler
 
 			synchronized (c)
 			{
-				c.exit_status = new Integer(exit_status);
+				c.exit_status = exit_status;
 				c.notifyAll();
 			}
-
 
 			log.debug("Got EXIT STATUS (channel " + id + ", status " + exit_status + ")");
 
 			return;
 		}
 
-		if (type.equals("exit-signal"))
+		if ((server_state == null) && (type.equals("exit-signal")))
 		{
 			if (wantReply != false)
-				throw new IOException("Badly formatted SSH_MSG_CHANNEL_REQUEST message, 'want reply' is true");
+				throw new IOException(
+						"Badly formatted SSH_MSG_CHANNEL_REQUEST exit-signal message, 'want reply' is true");
 
 			String signame = tr.readString("US-ASCII");
 			tr.readBoolean();
@@ -1306,9 +1337,113 @@ public class ChannelManager implements MessageHandler
 				c.notifyAll();
 			}
 
-
 			log.debug("Got EXIT SIGNAL (channel " + id + ", signal " + signame + ")");
 
+			return;
+		}
+
+		if ((server_session != null) && (type.equals("pty-req")))
+		{
+			PtySettings pty = new PtySettings();
+
+			pty.term = tr.readString();
+			pty.term_width_characters = tr.readUINT32();
+			pty.term_height_characters = tr.readUINT32();
+			pty.term_width_pixels = tr.readUINT32();
+			pty.term_height_pixels = tr.readUINT32();
+			pty.terminal_modes = tr.readByteString();
+
+			if (tr.remain() != 0)
+				throw new IOException("Badly formatted SSH_MSG_CHANNEL_REQUEST message");
+			
+			Runnable run_after_sending_success = null;
+			
+			ServerSessionCallback sscb = server_session.getServerSessionCallback();
+
+			if (sscb != null)
+				run_after_sending_success = sscb.requestPtyReq(server_session, pty);
+
+			if (wantReply)
+			{
+				if (run_after_sending_success != null)
+				{
+					tm.sendAsynchronousMessage(new PacketChannelSuccess(c.remoteID).getPayload());
+				}
+				else
+				{
+					tm.sendAsynchronousMessage(new PacketChannelFailure(c.remoteID).getPayload());
+				}			
+			}
+			
+			if (run_after_sending_success != null)
+			{
+				runAsync(run_after_sending_success);
+			}
+			
+			return;
+		}
+
+		if ((server_session != null) && (type.equals("shell")))
+		{
+			if (tr.remain() != 0)
+				throw new IOException("Badly formatted SSH_MSG_CHANNEL_REQUEST message");
+			
+			Runnable run_after_sending_success = null;
+			ServerSessionCallback sscb = server_session.getServerSessionCallback();
+
+			if (sscb != null)
+				run_after_sending_success = sscb.requestShell(server_session);
+
+			if (wantReply)
+			{
+				if (run_after_sending_success != null)
+				{
+					tm.sendAsynchronousMessage(new PacketChannelSuccess(c.remoteID).getPayload());
+				}
+				else
+				{
+					tm.sendAsynchronousMessage(new PacketChannelFailure(c.remoteID).getPayload());
+				}
+			}
+			
+			if (run_after_sending_success != null)
+			{
+				runAsync(run_after_sending_success);
+			}
+			
+			return;
+		}
+		
+		if ((server_session != null) && (type.equals("exec")))
+		{
+			String command = tr.readString();
+			
+			if (tr.remain() != 0)
+				throw new IOException("Badly formatted SSH_MSG_CHANNEL_REQUEST message");
+			
+			Runnable run_after_sending_success = null;
+			ServerSessionCallback sscb = server_session.getServerSessionCallback();
+
+			if (sscb != null)
+				run_after_sending_success = sscb.requestExec(server_session, command);
+
+			if (wantReply)
+			{
+				if (run_after_sending_success != null)
+				{
+					tm.sendAsynchronousMessage(new PacketChannelSuccess(c.remoteID).getPayload());
+				}
+				else
+				{
+					tm.sendAsynchronousMessage(new PacketChannelFailure(c.remoteID).getPayload());
+				}
+			}
+			
+			if (run_after_sending_success != null)
+			{
+				runAsync(run_after_sending_success);
+			}
+			
 			return;
 		}
 
@@ -1318,17 +1453,8 @@ public class ChannelManager implements MessageHandler
 
 		if (wantReply)
 		{
-			byte[] reply = new byte[5];
-
-			reply[0] = Packets.SSH_MSG_CHANNEL_FAILURE;
-			reply[1] = (byte) (c.remoteID >> 24);
-			reply[2] = (byte) (c.remoteID >> 16);
-			reply[3] = (byte) (c.remoteID >> 8);
-			reply[4] = (byte) (c.remoteID);
-
-			tm.sendAsynchronousMessage(reply);
+			tm.sendAsynchronousMessage(new PacketChannelFailure(c.remoteID).getPayload());
 		}
-
 
 		log.debug("Channel request '" + type + "' is not known, ignoring it");
 	}
@@ -1350,7 +1476,6 @@ public class ChannelManager implements MessageHandler
 			c.EOF = true;
 			c.notifyAll();
 		}
-
 
 		log.debug("Got SSH_MSG_CHANNEL_EOF (channel " + id + ")");
 	}
@@ -1379,7 +1504,6 @@ public class ChannelManager implements MessageHandler
 			c.notifyAll();
 		}
 
-
 		log.debug("Got SSH_MSG_CHANNEL_CLOSE (channel " + id + ")");
 	}
 
@@ -1401,7 +1525,6 @@ public class ChannelManager implements MessageHandler
 			c.notifyAll();
 		}
 
-
 		log.debug("Got SSH_MSG_CHANNEL_SUCCESS (channel " + id + ")");
 	}
 
@@ -1422,7 +1545,6 @@ public class ChannelManager implements MessageHandler
 			c.failedCounter++;
 			c.notifyAll();
 		}
-
 
 		log.debug("Got SSH_MSG_CHANNEL_FAILURE (channel " + id + ")");
 	}
@@ -1449,7 +1571,6 @@ public class ChannelManager implements MessageHandler
 			c.state = Channel.STATE_OPEN;
 			c.notifyAll();
 		}
-
 
 		log.debug("Got SSH_MSG_CHANNEL_OPEN_CONFIRMATION (channel " + sm.recipientChannelID + " / remote: "
 				+ sm.senderChannelID + ")");
@@ -1514,7 +1635,6 @@ public class ChannelManager implements MessageHandler
 			c.notifyAll();
 		}
 
-
 		log.debug("Got SSH_MSG_CHANNEL_OPEN_FAILURE (channel " + id + ")");
 	}
 
@@ -1538,7 +1658,6 @@ public class ChannelManager implements MessageHandler
 
 		/* We do not clean up the requestName String - that is OK for debug */
 
-
 		log.debug("Got SSH_MSG_GLOBAL_REQUEST (" + requestName + ")");
 	}
 
@@ -1550,7 +1669,6 @@ public class ChannelManager implements MessageHandler
 			channels.notifyAll();
 		}
 
-
 		log.debug("Got SSH_MSG_REQUEST_SUCCESS");
 	}
 
@@ -1561,7 +1679,6 @@ public class ChannelManager implements MessageHandler
 			globalFailedCounter++;
 			channels.notifyAll();
 		}
-
 
 		log.debug("Got SSH_MSG_REQUEST_FAILURE");
 	}

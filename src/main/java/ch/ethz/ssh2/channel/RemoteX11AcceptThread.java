@@ -16,7 +16,7 @@ import ch.ethz.ssh2.util.StringEncoder;
  * RemoteX11AcceptThread.
  *
  * @author Christian Plattner
- * @version $Id: RemoteX11AcceptThread.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class RemoteX11AcceptThread extends Thread
 {

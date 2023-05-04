@@ -22,7 +22,7 @@ import ch.ethz.ssh2.log.Logger;
  * Only after new timeouts arrive a new thread (singleton) will be instantiated.
  * 
  * @author Christian Plattner
- * @version $Id: TimeoutService.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class TimeoutService
 {
@@ -57,7 +57,7 @@ public class TimeoutService
 
 					long now = System.currentTimeMillis();
 
-					TimeoutToken tt = (TimeoutToken) todolist.getFirst();
+					TimeoutToken tt = todolist.getFirst();
 
 					if (tt.runTime > now)
 					{

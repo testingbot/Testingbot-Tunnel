@@ -8,7 +8,7 @@ package ch.ethz.ssh2.channel;
  * Channel.
  *
  * @author Christian Plattner
- * @version $Id: Channel.java 14 2011-05-27 14:28:21Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class Channel
 {
@@ -55,6 +55,9 @@ public class Channel
 	final ChannelOutputStream stdinStream;
 	final ChannelInputStream stdoutStream;
 	final ChannelInputStream stderrStream;
+
+	// In case this channel belongs to a server-side session.
+	ServerSessionImpl ss;
 
 	// These two fields will only be written while the Channel is in state
 	// STATE_OPENING.

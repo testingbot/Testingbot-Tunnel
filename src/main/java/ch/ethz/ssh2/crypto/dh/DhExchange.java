@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006-2011 Christian Plattner. All rights reserved.
+ * Copyright (c) 2006-2013 Christian Plattner. All rights reserved.
  * Please refer to the LICENSE.txt for licensing details.
  */
 package ch.ethz.ssh2.crypto.dh;
@@ -13,7 +13,7 @@ import ch.ethz.ssh2.util.StringEncoder;
 
 /**
  * @author Christian Plattner
- * @version $Id: DhExchange.java 41 2011-06-02 10:36:41Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class DhExchange
 {
@@ -21,7 +21,7 @@ public class DhExchange
 
 	/* Given by the standard */
 
-	static final BigInteger p1, p14;
+	static final BigInteger p1, p14, p16, p18;
 	static final BigInteger g;
 
 	BigInteger p;
@@ -31,13 +31,16 @@ public class DhExchange
 	BigInteger e;
 	BigInteger x;
 
-	/* Server public */
+	/* Server public and private */
 
 	BigInteger f;
-
+	BigInteger y;
+	
 	/* Shared secret */
 
 	BigInteger k;
+
+	private String hashFunction = "SHA1";
 
 	static
 	{
@@ -56,16 +59,90 @@ public class DhExchange
 				+ "E3BE39E772C180E86039B2783A2EC07A28FB5C55DF06F4C52C9DE2BCBF69558171"
 				+ "83995497CEA956AE515D2261898FA051015728E5A8AACAA68FFFFFFFFFFFFFFFF";
 
+		final String p16_string = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD12902"
+			+ "4E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F1"
+			+ "4374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386B"
+			+ "FB5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39"
+			+ "A69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E"
+			+ "4ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB"
+			+ "5C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8A"
+			+ "AAC42DAD33170D04507A33A85521ABDF1CBA64ECFB850458DBEF0A8AEA71575D060C7DB39"
+			+ "70F85A6E1E4C7ABF5AE8CDB0933D71E8C94E04A25619DCEE3D2261AD2EE6BF12FFA06D98A"
+			+ "0864D87602733EC86A64521F2B18177B200CBBE117577A615D6C770988C0BAD946E208E24"
+			+ "FA074E5AB3143DB5BFCE0FD108E4B82D120A92108011A723C12A787E6D788719A10BDBA5B"
+			+ "2699C327186AF4E23C1A946834B6150BDA2583E9CA2AD44CE8DBBBC2DB04DE8EF92E8EFC1"
+			+ "41FBECAA6287C59474E6BC05D99B2964FA090C3A2233BA186515BE7ED1F612970CEE2D7AF"
+			+ "B81BDD762170481CD0069127D5B05AA993B4EA988D8FDDC186FFB7DC90A6C08F4DF435C93"
+			+ "4063199FFFFFFFFFFFFFFFF";
+
+		final String p18_string = "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024"
+			+ "E088A67CC74020BBEA63B139B22514A08798E3404DDEF9519B3CD3A431B302B0A6DF25F14"
+			+ "374FE1356D6D51C245E485B576625E7EC6F44C42E9A637ED6B0BFF5CB6F406B7EDEE386BF"
+			+ "B5A899FA5AE9F24117C4B1FE649286651ECE45B3DC2007CB8A163BF0598DA48361C55D39A"
+			+ "69163FA8FD24CF5F83655D23DCA3AD961C62F356208552BB9ED529077096966D670C354E4"
+			+ "ABC9804F1746C08CA18217C32905E462E36CE3BE39E772C180E86039B2783A2EC07A28FB5"
+			+ "C55DF06F4C52C9DE2BCBF6955817183995497CEA956AE515D2261898FA051015728E5A8AA"
+			+ "AC42DAD33170D04507A33A85521ABDF1CBA64ECFB850458DBEF0A8AEA71575D060C7DB397"
+			+ "0F85A6E1E4C7ABF5AE8CDB0933D71E8C94E04A25619DCEE3D2261AD2EE6BF12FFA06D98A0"
+			+ "864D87602733EC86A64521F2B18177B200CBBE117577A615D6C770988C0BAD946E208E24F"
+			+ "A074E5AB3143DB5BFCE0FD108E4B82D120A92108011A723C12A787E6D788719A10BDBA5B2"
+			+ "699C327186AF4E23C1A946834B6150BDA2583E9CA2AD44CE8DBBBC2DB04DE8EF92E8EFC14"
+			+ "1FBECAA6287C59474E6BC05D99B2964FA090C3A2233BA186515BE7ED1F612970CEE2D7AFB"
+			+ "81BDD762170481CD0069127D5B05AA993B4EA988D8FDDC186FFB7DC90A6C08F4DF435C934"
+			+ "02849236C3FAB4D27C7026C1D4DCB2602646DEC9751E763DBA37BDF8FF9406AD9E530EE5D"
+			+ "B382F413001AEB06A53ED9027D831179727B0865A8918DA3EDBEBCF9B14ED44CE6CBACED4"
+			+ "BB1BDB7F1447E6CC254B332051512BD7AF426FB8F401378CD2BF5983CA01C64B92ECF032E"
+			+ "A15D1721D03F482D7CE6E74FEF6D55E702F46980C82B5A84031900B1C9E59E7C97FBEC7E8"
+			+ "F323A97A7E36CC88BE0F1D45B7FF585AC54BD407B22B4154AACC8F6D7EBF48E1D814CC5ED"
+			+ "20F8037E0A79715EEF29BE32806A1D58BB7C5DA76F550AA3D8A1FBFF0EB19CCB1A313D55C"
+			+ "DA56C9EC2EF29632387FE8D76E3C0468043E8F663F4860EE12BF2D5B0B7474D6E694F91E6"
+			+ "DBE115974A3926F12FEE5E438777CB6A932DF8CD8BEC4D073B931BA3BC832B68D9DD30074"
+			+ "1FA7BF8AFC47ED2576F6936BA424663AAB639C5AE4F5683423B4742BF1C978238F16CBE39"
+			+ "D652DE3FDB8BEFC848AD922222E04A4037C0713EB57A81A23F0C73473FC646CEA306B4BCB"
+			+ "C8862F8385DDFA9D4B7FA2C087E879683303ED5BDD3A062B3CF5B3A278A66D2A13F83F44F"
+			+ "82DDF310EE074AB6A364597E899A0255DC164F31CC50846851DF9AB48195DED7EA1B1D510"
+			+ "BD7EE74D73FAF36BC31ECFA268359046F4EB879F924009438B481C6CD7889A002ED5EE382"
+			+ "BC9190DA6FC026E479558E4475677E9AA9E3050E2765694DFC81F56E880B96E7160C980DD"
+			+ "98EDD3DFFFFFFFFFFFFFFFFF";
+
 		p1 = new BigInteger(p1_string);
 		p14 = new BigInteger(p14_string, 16);
+		p16 = new BigInteger(p16_string, 16);
+		p18 = new BigInteger(p18_string, 16);
 		g = new BigInteger("2");
 	}
 
-	public DhExchange()
+	public DhExchange(String hashFunction)
 	{
+		this.hashFunction = hashFunction;
 	}
 
-	public void init(int group, SecureRandom rnd)
+	public void clientInit(int group, SecureRandom rnd)
+	{
+		k = null;
+
+		if (group == 1)
+			p = p1;
+		else if (group == 14)
+			p = p14;
+		else if (group == 16)
+			p = p16;
+		else if (group == 18)
+			p = p18;
+		else
+			throw new IllegalArgumentException("Unknown DH group " + group);
+
+		while(true)
+		{
+			x = new BigInteger(p.bitLength() - 1, rnd);
+			if (x.compareTo(BigInteger.ONE) > 0)
+				break;
+		}
+		
+		e = g.modPow(x, p);
+	}
+	
+	public void serverInit(int group, SecureRandom rnd)
 	{
 		k = null;
 
@@ -76,11 +153,11 @@ public class DhExchange
 		else
 			throw new IllegalArgumentException("Unknown DH group " + group);
 
-		x = new BigInteger(p.bitLength() - 1, rnd);
+		y = new BigInteger(p.bitLength() - 1, rnd);
 
-		e = g.modPow(x, p);
+		f = g.modPow(y, p);
 	}
-
+	
 	/**
 	 * @return Returns the e.
 	 * @throws IllegalStateException
@@ -93,6 +170,18 @@ public class DhExchange
 		return e;
 	}
 
+	/**
+	 * @return Returns the f.
+	 * @throws IllegalStateException
+	 */
+	public BigInteger getF()
+	{
+		if (f == null)
+			throw new IllegalStateException("DhDsaExchange not initialized!");
+
+		return f;
+	}
+	
 	/**
 	 * @return Returns the shared secret k.
 	 * @throws IllegalStateException
@@ -113,25 +202,39 @@ public class DhExchange
 		if (e == null)
 			throw new IllegalStateException("DhDsaExchange not initialized!");
 
-		BigInteger zero = BigInteger.valueOf(0);
-
-		if (zero.compareTo(f) >= 0 || p.compareTo(f) <= 0)
+		if (BigInteger.ZERO.compareTo(f) >= 0 || p.compareTo(f) <= 0)
 			throw new IllegalArgumentException("Invalid f specified!");
 
 		this.f = f;
 		this.k = f.modPow(x, p);
 	}
+	
+	/**
+	 * @param e
+	 */
+	public void setE(BigInteger e)
+	{
+		if (f == null)
+			throw new IllegalStateException("DhDsaExchange not initialized!");
+
+		if (BigInteger.ZERO.compareTo(e) >= 0 || p.compareTo(e) <= 0)
+			throw new IllegalArgumentException("Invalid e specified!");
+
+		this.e = e;
+		this.k = e.modPow(y, p);
+	}
 
 	public byte[] calculateH(byte[] clientversion, byte[] serverversion, byte[] clientKexPayload,
-							 byte[] serverKexPayload, byte[] hostKey)
+			byte[] serverKexPayload, byte[] hostKey)
 	{
-		HashForSSH2Types hash = new HashForSSH2Types("SHA1");
+		HashForSSH2Types hash = new HashForSSH2Types(hashFunction);
 
 		if (log.isInfoEnabled())
 		{
 			log.info("Client: '" + StringEncoder.GetString(clientversion) + "'");
 		    log.info("Server: '" + StringEncoder.GetString(serverversion) + "'");
 		}
+
 		hash.updateByteString(clientversion);
 		hash.updateByteString(serverversion);
 		hash.updateByteString(clientKexPayload);
@@ -142,5 +245,10 @@ public class DhExchange
 		hash.updateBigInt(k);
 
 		return hash.getDigest();
+	}
+
+	public String getHashFunction()
+	{
+		return hashFunction;
 	}
 }

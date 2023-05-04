@@ -23,7 +23,7 @@ import ch.ethz.ssh2.util.StringEncoder;
  * PEM Support.
  *
  * @author Christian Plattner
- * @version $Id: PEMDecoder.java 37 2011-05-28 22:31:46Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class PEMDecoder
 {

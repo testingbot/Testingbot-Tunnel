@@ -9,7 +9,7 @@ package ch.ethz.ssh2;
  * about a file on the server. Not all fields may/must be present.
  *
  * @author Christian Plattner, plattner@inf.ethz.ch
- * @version $Id: SFTPv3FileAttributes.java 42 2011-06-02 15:34:20Z dkocher@sudo.ch $
+ * @version $Id$
  */
 
 public class SFTPv3FileAttributes

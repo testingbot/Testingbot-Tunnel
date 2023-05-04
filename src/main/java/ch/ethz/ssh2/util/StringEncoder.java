@@ -9,7 +9,7 @@ import java.io.UnsupportedEncodingException;
 
 /**
  * @author Christian Plattner
- * @version $Id: StringEncoder.java 43 2011-06-21 18:34:06Z dkocher@sudo.ch $
+ * @version $Id$
  */
 public class StringEncoder
 {

@@ -6,7 +6,7 @@ package ch.ethz.ssh2.crypto.digest;
 
 /**
  * HMAC.
- *
+ * 
  * @author Christian Plattner
  * @version 2.50, 03/15/10
  */
@@ -22,17 +22,22 @@ public final class HMAC implements Digest
 
 	public HMAC(Digest md, byte[] key, int size)
 	{
+	    this(md, key, size, 64);
+	}
+
+	public HMAC(Digest md, byte[] key, int size, int blocksize)
+	{
 		this.md = md;
 		this.size = size;
 
 		tmp = new byte[md.getDigestLength()];
 
-		int blocksize = 64;
+		final int BLOCKSIZE = blocksize;
 
-		k_xor_ipad = new byte[blocksize];
-		k_xor_opad = new byte[blocksize];
+		k_xor_ipad = new byte[BLOCKSIZE];
+		k_xor_opad = new byte[BLOCKSIZE];
 
-		if (key.length > blocksize)
+		if (key.length > BLOCKSIZE)
 		{
 			md.reset();
 			md.update(key);
@@ -43,7 +48,7 @@ public final class HMAC implements Digest
 		System.arraycopy(key, 0, k_xor_ipad, 0, key.length);
 		System.arraycopy(key, 0, k_xor_opad, 0, key.length);
 
-		for (int i = 0; i < blocksize; i++)
+		for (int i = 0; i < BLOCKSIZE; i++)
 		{
 			k_xor_ipad[i] ^= 0x36;
 			k_xor_opad[i] ^= 0x5C;
@@ -51,38 +56,38 @@ public final class HMAC implements Digest
 		md.update(k_xor_ipad);
 	}
 
-	public int getDigestLength()
+	public final int getDigestLength()
 	{
 		return size;
 	}
 
-	public void update(byte b)
+	public final void update(byte b)
 	{
 		md.update(b);
 	}
 
-	public void update(byte[] b)
+	public final void update(byte[] b)
 	{
 		md.update(b);
 	}
 
-	public void update(byte[] b, int off, int len)
+	public final void update(byte[] b, int off, int len)
 	{
 		md.update(b, off, len);
 	}
 
-	public void reset()
+	public final void reset()
 	{
 		md.reset();
 		md.update(k_xor_ipad);
 	}
 
-	public void digest(byte[] out)
+	public final void digest(byte[] out)
 	{
 		digest(out, 0);
 	}
 
-	public void digest(byte[] out, int off)
+	public final void digest(byte[] out, int off)
 	{
 		md.digest(tmp);
 
