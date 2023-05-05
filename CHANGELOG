@@ -1,3 +1,9 @@
+3.5
+* Update SSH library, no longer use blowfish as default cipher
+
+3.4
+* Revert dependencies update
+
 3.3
 * Update Dependencies
 * Show warning when Tunnel is unable to reach upstream
