@@ -39,10 +39,10 @@ public final class HttpProxy {
     private final Server httpProxy;
     private final int randomNumber = (int )(Math.random() * 50 + 1);
     private final Thread shutDownHook;
-    
+
     public HttpProxy(App app) {
         this.app = app;
-            
+
         this.httpProxy = new Server();
                 HttpConfiguration http_config = new HttpConfiguration();
         ServerConnector connector = new ServerConnector(httpProxy,
@@ -51,11 +51,11 @@ public final class HttpProxy {
         connector.setIdleTimeout(400000);
         httpProxy.setConnectors(new Connector[] { connector });
         httpProxy.setStopAtShutdown(true);
-        
+
         ServletHolder servletHolder = new ServletHolder(TunnelProxyServlet.class);
         servletHolder.setInitParameter("idleTimeout", "120000");
         servletHolder.setInitParameter("timeout", "120000");
-        
+
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
             for (String domain : app.getFastFail()) {
@@ -66,28 +66,28 @@ public final class HttpProxy {
             }
             servletHolder.setInitParameter("blackList", sb.toString());
         }
-        
+
         if (app.isDebugMode() == true) {
             servletHolder.setInitParameter("tb_debug", "true");
         }
-        
+
         if (app.getProxy() != null) {
-            servletHolder.setInitParameter("proxy", app.getProxy());     
+            servletHolder.setInitParameter("proxy", app.getProxy());
         }
-        
+
         if (app.getProxyAuth() != null) {
-            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());     
+            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());
         }
-        
+
         if (app.getBasicAuth() != null) {
-            servletHolder.setInitParameter("basicAuth", String.join(",", app.getBasicAuth())); 
+            servletHolder.setInitParameter("basicAuth", String.join(",", app.getBasicAuth()));
         }
 
         servletHolder.setInitParameter("jetty", String.valueOf(app.getJettyPort()));
-        
+
         HandlerCollection handlers = new HandlerCollection();
         httpProxy.setHandler(handlers);
-        
+
         ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
         context.addServlet(servletHolder, "/*");
         context.setAttribute("extra_headers", app.getCustomHeaders());
@@ -102,7 +102,7 @@ public final class HttpProxy {
             }
         }
         handlers.addHandler(proxy);
-        
+
         start();
 
         shutDownHook = new Thread(new ShutDownHook(httpProxy));
@@ -112,7 +112,7 @@ public final class HttpProxy {
 
     public void stop() {
         Runtime.getRuntime().removeShutdownHook(shutDownHook);
-        
+
         try {
             httpProxy.stop();
         } catch (Exception ex) {
@@ -128,23 +128,23 @@ public final class HttpProxy {
             System.exit(1);
         }
     }
-    
+
     private ServerSocket _findAvailableSocket() {
-        int[] ports = {80, 888, 2000, 2001, 2020, 2222, 3000, 3001, 3030, 3333, 4000, 4001, 4040, 4502, 4503, 5000, 5001, 5050, 5555, 6000, 6001, 6060, 6666, 7000, 7070, 7777, 8000, 8001, 8080, 8888, 9000, 9001, 9090, 9999};
-        
+        int[] ports = {2000, 2001, 2020, 2222, 3000, 3001, 3030, 3333, 4000, 4001, 4040, 4502, 4503, 5000, 5001, 5050, 5555, 6000, 6001, 6060, 6666, 7000, 7070, 7777, 8000, 8001, 8080, 8888, 9000, 9001, 9090, 9999};
+
         for (int port : ports) {
             try {
                 return new ServerSocket(port);
             } catch (IOException ex) {
             }
         }
-        
+
         return null;
     }
-    
+
     public boolean testProxy() {
         // find a free port, create a webserver, make a request to the proxy endpoint, expect it to arrive here.
-        
+
         ServerSocket serverSocket;
         int port;
         try {
@@ -152,14 +152,14 @@ public final class HttpProxy {
             if (serverSocket == null) {
                 return true;
             }
-            
+
             port = serverSocket.getLocalPort();
             serverSocket.close();
         } catch (IOException ex) {
             // no port available? assume everything is ok
             return true;
         }
-        
+
         Server server = new Server(port);
         server.setHandler(new TestHandler());
         try {
@@ -167,20 +167,20 @@ public final class HttpProxy {
         } catch (Exception e) {
             return true;
         }
-        
+
         try {
             HttpClient httpClient = HttpClientBuilder.create().build();
             String url = "https://api.testingbot.com/v1/tunnel/test";
             HttpPost postRequest = new HttpPost(url);
-            
+
             List<NameValuePair> nameValuePairs = new ArrayList<>(2);
             nameValuePairs.add(new BasicNameValuePair("client_key", app.getClientKey()));
             nameValuePairs.add(new BasicNameValuePair("client_secret", app.getClientSecret()));
             nameValuePairs.add(new BasicNameValuePair("tunnel_id", Integer.toString(app.getTunnelID())));
             nameValuePairs.add(new BasicNameValuePair("test_port", Integer.toString(port)));
-            
+
             postRequest.setEntity(new UrlEncodedFormEntity(nameValuePairs));
-            
+
             HttpResponse response = httpClient.execute(postRequest);
             BufferedReader br = new BufferedReader(
                      new InputStreamReader((response.getEntity().getContent()), "UTF8"));
@@ -193,7 +193,7 @@ public final class HttpProxy {
             try {
                 server.stop();
             } catch (Exception ex) {
-                
+
             }
 
             return ((response.getStatusLine().getStatusCode() == 201) && (sb.indexOf("test=" + this.randomNumber) > -1));
@@ -201,13 +201,13 @@ public final class HttpProxy {
             return true;
         }
     }
-    
+
     private class TestHandler extends AbstractHandler {
         @Override
         public void handle(String target,
                        Request baseRequest,
                        HttpServletRequest request,
-                       HttpServletResponse response) 
+                       HttpServletResponse response)
         throws IOException
         {
             response.setContentType("text/html;charset=utf-8");
@@ -216,7 +216,7 @@ public final class HttpProxy {
             response.getWriter().println("test=" + randomNumber);
         }
     }
-    
+
     private class ShutDownHook implements Runnable {
         private final Server proxy;
 

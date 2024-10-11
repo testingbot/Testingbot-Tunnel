@@ -79,7 +79,7 @@ public class App {
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
-        
+
         Option basicAuth = new Option("a", "auth", true, "Performs Basic Authentication for specific hosts.");
         basicAuth.setArgs(Option.UNLIMITED_VALUES);
         basicAuth.setArgName("host:port:user:passwd");
@@ -243,7 +243,7 @@ public class App {
                 String identifierValue = commandLine.getOptionValue("tunnel-identifier");
                 app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
             }
-            
+
             if (commandLine.hasOption("auth")) {
                 for (String optionValue : commandLine.getOptionValues("auth")) {
                     if (optionValue.split(":").length < 4) {
@@ -417,7 +417,7 @@ public class App {
         if (httpForwarder != null) {
             httpForwarder.stop();
         }
-        
+
         if (poller != null) {
             poller.cancel();
         }
@@ -459,7 +459,7 @@ public class App {
         if (!this.noProxy) {
             this.httpProxy = new HttpProxy(this);
             if (this.getProxy() == null && this.httpProxy.testProxy() == false) {
-                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Tunnel might not work properly, test failed");
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "! Tunnel might not work properly, test failed");
             }
         }
 
@@ -474,7 +474,7 @@ public class App {
                         bw.write("TestingBot Tunnel Ready");
                     }
                 } catch (IOException ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the director exists and we can write to this directory." , ex);
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the directory exists and we have permission write to this directory." , ex);
                 }
             }
         }
@@ -508,14 +508,14 @@ public class App {
             if (serverSocket == null) {
                 return;
             }
-            
+
             port = serverSocket.getLocalPort();
             serverSocket.close();
             setJettyPort(port);
         } catch (IOException ex) {
-        }  
+        }
     }
-    
+
     private ServerSocket _findAvailableSocket() {
         try {
             return new ServerSocket(0);
@@ -523,7 +523,7 @@ public class App {
             return null;
         }
     }
-    
+
     public int getHubPort() {
         return hubPort;
     }
@@ -640,7 +640,7 @@ public class App {
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Setting up Local Proxy Port {0}", Integer.toString(jettyPort));
         this.jettyPort = jettyPort;
     }
-    
+
     /**
      * @return the metricsPort
      */
