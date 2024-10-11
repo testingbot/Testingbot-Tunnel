@@ -14,20 +14,20 @@ import java.util.logging.Logger;
  * @author testingbot
  */
 public class PidPoller {
-    private File pidFile;
+    private final File pidFile;
     private Timer timer;
     private final Thread cleanupThread;
-    
+
     public PidPoller(App app) {
-        
+
         // create a "pid" file which we'll watch, when deleted, shutdown the tunnel
         String fileName = "testingbot-tunnel.pid";
         if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
             fileName = "testingbot-tunnel-" + app.getTunnelIdentifier() + ".pid";
         }
-        
+
         final String pidFileName = fileName;
-        
+
         cleanupThread = new Thread() {
           @Override
           public void run() {
@@ -51,18 +51,18 @@ public class PidPoller {
                 return;
             }
         }
-        
+
         Runtime.getRuntime().addShutdownHook(cleanupThread);
-        
+
         timer = new Timer();
         timer.schedule(new PollTask(), 5000, 5000);
     }
-    
+
     public void cancel() {
        Runtime.getRuntime().removeShutdownHook(cleanupThread);
        timer.cancel();
     }
-    
+
     class PollTask extends TimerTask {
         @Override
         public void run() {

@@ -22,9 +22,9 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  * @author TestingBot
  */
 public class HttpForwarder {
-    private App app;
+    private final App app;
     private final Server httpProxy;
-    
+
     public HttpForwarder(App app) {
         this.app = app;
         httpProxy = new Server();
@@ -33,28 +33,28 @@ public class HttpForwarder {
                 new HttpConnectionFactory(http_config));
         connector.setPort(app.getSeleniumPort());
         connector.setIdleTimeout(440000);
-        
+
         httpProxy.setStopAtShutdown(true);
-        
+
         httpProxy.addConnector(connector);
-        
+
         ServletHolder servletHolder = new ServletHolder(new ForwarderServlet(app));
         servletHolder.setInitParameter("idleTimeout", "440000");
         servletHolder.setInitParameter("timeout", "440000");
         if (app.getProxy() != null) {
-            servletHolder.setInitParameter("proxy", app.getProxy());     
+            servletHolder.setInitParameter("proxy", app.getProxy());
         }
-        
+
         if (app.getProxyAuth()!= null) {
-            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());     
+            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());
         }
-        
+
         ServletContextHandler ctxHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         ctxHandler.setContextPath("/");
         ctxHandler.addServlet(servletHolder, "/*");
-        
+
         httpProxy.setHandler(ctxHandler);
-        
+
         try {
             httpProxy.start();
         } catch (Exception ex) {
@@ -62,7 +62,7 @@ public class HttpForwarder {
             Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
+
     public void stop() {
         try {
             httpProxy.stop();
@@ -70,11 +70,11 @@ public class HttpForwarder {
             Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
+
     public boolean testForwarding() {
         HttpClient httpClient = HttpClientBuilder.create().build();
         HttpGet getRequest = new HttpGet("http://127.0.0.1:" + app.getSeleniumPort());
-        
+
         HttpResponse response;
         try {
             response = httpClient.execute(getRequest);

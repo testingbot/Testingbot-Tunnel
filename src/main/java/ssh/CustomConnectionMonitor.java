@@ -25,7 +25,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
 
     @Override
     public void connectionLost(Throwable reason) {
-        if (tunnel.isShuttingDown() == true) {
+        if (tunnel.isShuttingDown()) {
             return;
         }
 
@@ -33,7 +33,7 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
 
         Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE, "SSH Connection lost! {0}", reason.getMessage());
 
-        if (this.retrying == false) {
+        if (!this.retrying) {
             this.retrying = true;
             timer = new Timer();
             timer.schedule(new PollTask(), 5000, 5000);

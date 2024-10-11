@@ -6,6 +6,7 @@ import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.ServerSocket;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
@@ -67,7 +68,7 @@ public final class HttpProxy {
             servletHolder.setInitParameter("blackList", sb.toString());
         }
 
-        if (app.isDebugMode() == true) {
+        if (app.isDebugMode()) {
             servletHolder.setInitParameter("tb_debug", "true");
         }
 
@@ -135,7 +136,7 @@ public final class HttpProxy {
         for (int port : ports) {
             try {
                 return new ServerSocket(port);
-            } catch (IOException ex) {
+            } catch (IOException ignored) {
             }
         }
 
@@ -183,7 +184,7 @@ public final class HttpProxy {
 
             HttpResponse response = httpClient.execute(postRequest);
             BufferedReader br = new BufferedReader(
-                     new InputStreamReader((response.getEntity().getContent()), "UTF8"));
+                     new InputStreamReader((response.getEntity().getContent()), StandardCharsets.UTF_8));
 
             String output;
             StringBuilder sb = new StringBuilder();
@@ -217,7 +218,7 @@ public final class HttpProxy {
         }
     }
 
-    private class ShutDownHook implements Runnable {
+    private static class ShutDownHook implements Runnable {
         private final Server proxy;
 
         ShutDownHook(Server proxy) {
@@ -232,6 +233,6 @@ public final class HttpProxy {
                 Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
             }
         }
-      }
+    }
 }
 

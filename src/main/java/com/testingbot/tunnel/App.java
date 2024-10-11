@@ -324,13 +324,11 @@ public class App {
                 BufferedReader br = new BufferedReader(new InputStreamReader(in));
                 String strLine = br.readLine();
                 return strLine.split(":");
-            } catch (IOException e) {
+            } catch (IOException ignored) {
             }
         }
 
-        String[] empty = {""};
-
-        return empty;
+        return new String[]{""};
     }
 
     public void init() {
@@ -388,7 +386,7 @@ public class App {
             api.setTunnelID(tunnelID);
         }
 
-        if (Float.valueOf(tunnelData.getString("version")) > App.VERSION) {
+        if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
 
@@ -435,7 +433,7 @@ public class App {
         try {
             String _serverIP = apiResponse.getString("ip");
             tunnel = new SSHTunnel(this, _serverIP);
-            if (tunnel.isAuthenticated() == true) {
+            if (tunnel.isAuthenticated()) {
                 this.serverIP = _serverIP;
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
@@ -452,7 +450,7 @@ public class App {
     private void startProxies() {
         httpForwarder = new HttpForwarder(this);
 
-        if (httpForwarder.testForwarding() == false) {
+        if (!httpForwarder.testForwarding()) {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", Integer.toString(getSeleniumPort()));
         }
 

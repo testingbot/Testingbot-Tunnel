@@ -21,17 +21,17 @@ public class SSHTunnel {
     private boolean authenticated = false;
     private boolean shuttingDown = false;
     private LocalPortForwarder lpf1;
-    
+
     public SSHTunnel(App app, String server) throws Exception {
         /* Create a connection instance */
         this.app = app;
         this.server = server;
-        
+
         this.conn = new Connection(server, 443);
         this.conn.addConnectionMonitor(new CustomConnectionMonitor(this, this.app));
         this.connect();
     }
-    
+
     public final void connect() throws Exception {
         try {
             /* Now connect */
@@ -39,7 +39,7 @@ public class SSHTunnel {
         } catch (IOException ex) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, ex.getMessage(), ex);
         }
-        
+
         try {
             // authenticate
             this.authenticated = conn.authenticateWithPassword(app.getClientKey(), app.getClientSecret());
@@ -47,22 +47,22 @@ public class SSHTunnel {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.");
             throw new Exception("Authentication failed: " + ex.getMessage());
         }
-        
-       
-        if (this.authenticated == false) {
+
+
+        if (!this.authenticated) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, "Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.");
             throw new Exception("Authentication failed");
         }
-        
+
         timer = new Timer();
         timer.schedule(new PollTask(), 60000, 60000);
     }
-    
+
     public void stop(boolean quitting) {
         this.shuttingDown = true;
         this.stop();
     }
-    
+
     public void stop() {
         timer.cancel();
         conn.close();
@@ -74,7 +74,7 @@ public class SSHTunnel {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, null, ex);
         }
     }
-    
+
     public void createPortForwarding() {
         try {
             conn.openSession();
@@ -89,14 +89,14 @@ public class SSHTunnel {
     public boolean isShuttingDown() {
         return shuttingDown;
     }
-    
+
     /**
      * @return the authenticated
      */
     public boolean isAuthenticated() {
         return authenticated;
     }
-    
+
     class PollTask extends TimerTask {
         @Override
         public void run() {

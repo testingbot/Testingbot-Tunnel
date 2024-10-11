@@ -48,10 +48,10 @@ public final class Doctor {
         } catch (URISyntaxException e) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
         }
-        
+
         performChecks(uris);
     }
-    
+
     public void performChecks(ArrayList<URI> uris) {
         try {
             for (URI uri : uris) {
@@ -60,10 +60,10 @@ public final class Doctor {
         } catch (UnknownHostException e) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
         }
-        
+
         checkOpenPorts();
     }
-    
+
     public void checkOpenPorts() {
         // check jetty port
         boolean canOpenJetty = checkPortOpen(app.getJettyPort());
@@ -72,7 +72,7 @@ public final class Doctor {
         } else {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Proxy port {0} can be opened", Integer.toString(app.getJettyPort()));
         }
-        
+
         boolean canOpenSEPort = checkPortOpen(app.getSeleniumPort());
         if (!canOpenSEPort) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open Selenium port {0}.\nPerhaps another process is using this port? Or this process does not have the correct permission?", Integer.toString(app.getSeleniumPort()));
@@ -80,22 +80,22 @@ public final class Doctor {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Selenium port {0} can be opened", Integer.toString(app.getSeleniumPort()));
         }
     }
-    
+
     private boolean checkPortOpen(int port) {
         try {
             try (ServerSocket socket = new ServerSocket(port)) {
                 socket.getLocalPort();
             }
             return true;
-        } catch (IOException ex) {
+        } catch (IOException ignored) {
         }
-        
+
         return false;
     }
-    
+
     public void performCheck(final URI uri) throws UnknownHostException {
         Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "Resolving {0}", new Object[]{ uri.toString() });
-        InetAddress address = InetAddress.getByName(uri.getHost()); 
+        InetAddress address = InetAddress.getByName(uri.getHost());
         Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Resolved {0} to {1}", new Object[]{ uri.toString(), address.getHostAddress() });
         if (checkConnection(uri)) {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - URL {0} can be reached.", uri.toString());
@@ -103,11 +103,11 @@ public final class Doctor {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "URL {0} can not be reached.", uri.toString());
         }
     }
-    
+
     private boolean checkConnection(final URI uri) {
         HttpClient httpClient = HttpClientBuilder.create().build();
         HttpGet getRequest = new HttpGet(uri);
-        
+
         HttpResponse response;
         try {
             response = httpClient.execute(getRequest);
