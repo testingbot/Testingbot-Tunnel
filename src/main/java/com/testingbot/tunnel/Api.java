@@ -55,6 +55,9 @@ public class Api {
             if (app.isBypassingSquid()) {
                 nameValuePairs.add(new BasicNameValuePair("no_cache", String.valueOf(app.isBypassingSquid())));
             }
+            if (app.isNoBump()) {
+                nameValuePairs.add(new BasicNameValuePair("no_bump", String.valueOf(app.isNoBump())));
+            }
             return this._post("https://" + apiHost + "/v1/tunnel/create", nameValuePairs);
         }
         catch (Exception e) {

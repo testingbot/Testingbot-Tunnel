@@ -3,7 +3,7 @@ package com.testingbot.tunnel;
 public class Statistics {
     private static long numberOfRequests = 0;
     private static long startTime = 0;
-    private static long bytesTransfered = 0;
+    private static long bytesTransferred = 0;
 
     /**
      * @return the numberOfRequests
@@ -34,23 +34,23 @@ public class Statistics {
     }
 
     /**
-     * @return the bytesTransfered
+     * @return the bytesTransferred
      */
-    public static long getBytesTransfered() {
-        return bytesTransfered;
+    public static long getBytesTransferred() {
+        return bytesTransferred;
     }
 
     /**
-     * @param aBytesTransfered the bytesTransfered to set
+     * @param aBytesTransferred the bytesTransferred to set
      */
-    public static void setBytesTransfered(long aBytesTransfered) {
-        bytesTransfered = aBytesTransfered;
+    public static void setBytesTransferred(long aBytesTransferred) {
+        bytesTransferred = aBytesTransferred;
     }
-    
-    public static void addBytesTransfered(long aBytesTransfered) {
-        bytesTransfered += aBytesTransfered;
+
+    public static void addBytesTransferred(long aBytesTransferred) {
+        bytesTransferred += aBytesTransferred;
     }
-    
+
     public static void addRequest() {
         numberOfRequests += 1;
     }

@@ -11,8 +11,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
+
+import com.testingbot.tunnel.proxy.WebsocketHandler;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.HttpClient;
@@ -20,17 +22,17 @@ import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.message.BasicNameValuePair;
-import org.eclipse.jetty.server.Connector;
+import org.eclipse.jetty.proxy.ConnectHandler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.AbstractHandler;
+import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.servlet.ServletHolder;
-
-import org.eclipse.jetty.server.handler.HandlerCollection;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+
 /**
  *
  * @author TestingBot
@@ -45,17 +47,27 @@ public final class HttpProxy {
         this.app = app;
 
         this.httpProxy = new Server();
-                HttpConfiguration http_config = new HttpConfiguration();
-        ServerConnector connector = new ServerConnector(httpProxy,
+
+        HttpConfiguration http_config = new HttpConfiguration();
+
+        ServerConnector proxyConnector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
-        connector.setPort(app.getJettyPort());
-        connector.setIdleTimeout(400000);
-        httpProxy.setConnectors(new Connector[] { connector });
+
+        proxyConnector.setPort(app.getJettyPort());
+        proxyConnector.setIdleTimeout(400000);
+        httpProxy.addConnector(proxyConnector);
         httpProxy.setStopAtShutdown(true);
 
-        ServletHolder servletHolder = new ServletHolder(TunnelProxyServlet.class);
-        servletHolder.setInitParameter("idleTimeout", "120000");
-        servletHolder.setInitParameter("timeout", "120000");
+        ConnectHandler connectHandler = new CustomConnectHandler(app);
+        WebsocketHandler websocketHandler = new WebsocketHandler();
+
+        ServletContextHandler contextHandler = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
+        contextHandler.setContextPath("/");  // Root path for all requests
+
+        // AsyncProxyServlet for proxying HTTP requests
+        ServletHolder proxyServlet = new ServletHolder(new TunnelProxyServlet());
+        proxyServlet.setInitParameter("idleTimeout", "120000");
+        proxyServlet.setInitParameter("timeout", "120000");
 
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
             StringBuilder sb = new StringBuilder();
@@ -65,44 +77,35 @@ public final class HttpProxy {
                 }
                 sb.append(domain).append(",");
             }
-            servletHolder.setInitParameter("blackList", sb.toString());
+            proxyServlet.setInitParameter("blackList", sb.toString());
         }
 
         if (app.isDebugMode()) {
-            servletHolder.setInitParameter("tb_debug", "true");
+            proxyServlet.setInitParameter("tb_debug", "true");
         }
 
         if (app.getProxy() != null) {
-            servletHolder.setInitParameter("proxy", app.getProxy());
+            proxyServlet.setInitParameter("proxy", app.getProxy());
         }
 
         if (app.getProxyAuth() != null) {
-            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());
+            proxyServlet.setInitParameter("proxyAuth", app.getProxyAuth());
         }
 
         if (app.getBasicAuth() != null) {
-            servletHolder.setInitParameter("basicAuth", String.join(",", app.getBasicAuth()));
+            proxyServlet.setInitParameter("basicAuth", String.join(",", app.getBasicAuth()));
         }
 
-        servletHolder.setInitParameter("jetty", String.valueOf(app.getJettyPort()));
+        proxyServlet.setInitParameter("jetty", String.valueOf(app.getJettyPort()));
 
-        HandlerCollection handlers = new HandlerCollection();
+        contextHandler.addServlet(proxyServlet, "/*");  // Proxy all HTTP requests
+
+        // Add the context handler to the server
+        HandlerList handlers = new HandlerList();
+        handlers.addHandler(websocketHandler);  // For handling WS requests
+        handlers.addHandler(connectHandler);  // For handling HTTPS requests (if needed)
+        handlers.addHandler(contextHandler);  // For handling HTTP requests through proxy servlet
         httpProxy.setHandler(handlers);
-
-        ServletContextHandler context = new ServletContextHandler(handlers, "/", ServletContextHandler.SESSIONS);
-        context.addServlet(servletHolder, "/*");
-        context.setAttribute("extra_headers", app.getCustomHeaders());
-        CustomConnectHandler proxy = new CustomConnectHandler(app);
-        proxy.setDebugMode(app.isDebugMode());
-        if (app.getFastFail() != null && app.getFastFail().length > 0) {
-            for (String domain : app.getFastFail()) {
-                if (!domain.contains(":")) {
-                    domain = domain + ":443"; // default port 443 (SSL)
-                }
-                proxy.getBlackListHosts().add(domain);
-            }
-        }
-        handlers.addHandler(proxy);
 
         start();
 
@@ -206,11 +209,9 @@ public final class HttpProxy {
     private class TestHandler extends AbstractHandler {
         @Override
         public void handle(String target,
-                       Request baseRequest,
-                       HttpServletRequest request,
-                       HttpServletResponse response)
-        throws IOException
-        {
+                           Request baseRequest,
+                           HttpServletRequest request,
+                           HttpServletResponse response) throws IOException {
             response.setContentType("text/html;charset=utf-8");
             response.setStatus(HttpServletResponse.SC_OK);
             baseRequest.setHandled(true);

@@ -2,6 +2,13 @@ package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.Statistics;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jetty.http.HttpMethod;
+import org.eclipse.jetty.proxy.ConnectHandler;
+import org.eclipse.jetty.server.Request;
+import org.eclipse.jetty.util.Promise;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -15,18 +22,8 @@ import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import javax.servlet.ServletException;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-
-import org.eclipse.jetty.http.HttpMethod;
-import org.eclipse.jetty.proxy.ConnectHandler;
-import org.eclipse.jetty.server.Request;
-import org.eclipse.jetty.util.Promise;
-
 /**
- *
- * @author TestingBot
+ * Custom ConnectHandler for Jetty 11 that handles proxy connections.
  */
 public class CustomConnectHandler extends ConnectHandler {
     private boolean debugMode = false;
@@ -36,26 +33,24 @@ public class CustomConnectHandler extends ConnectHandler {
     private String proxyAuth = null;
 
     public CustomConnectHandler(final App app) {
-      final String proxy = app.getProxy();
-      if (proxy != null) {
-        final int colon = proxy.indexOf(':');
-        if (colon != -1) {
-          proxyHost = proxy.substring(0, colon);
-          proxyPort = Integer.parseInt(proxy.substring(colon + 1));
+        final String proxy = app.getProxy();
+        if (proxy != null) {
+            final int colon = proxy.indexOf(':');
+            if (colon != -1) {
+                proxyHost = proxy.substring(0, colon);
+                proxyPort = Integer.parseInt(proxy.substring(colon + 1));
+            } else {
+                proxyHost = proxy;
+                proxyPort = 80;
+            }
+        } else {
+            proxyHost = null;
+            proxyPort = -1;
         }
-        else {
-          proxyHost = proxy;
-          proxyPort = 80;
-        }
-      }
-      else {
-        proxyHost = null;
-        proxyPort = -1;
-      }
 
-      if (app.getProxyAuth() != null) {
-        proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes());
-      }
+        if (app.getProxyAuth() != null) {
+            proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes());
+        }
     }
 
     public void setDebugMode(boolean mode) {
@@ -71,7 +66,7 @@ public class CustomConnectHandler extends ConnectHandler {
             Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1} ({2})", new Object[]{method, request.getRequestURL().toString().split(":443")[0].replaceAll("http:", "https:"), response.toString().substring(9, 12)});
         }
 
-        if (debugMode == true) {
+        if (debugMode) {
             Enumeration<String> headerNames = request.getHeaderNames();
             if (headerNames != null) {
                 StringBuilder sb = new StringBuilder();
@@ -79,7 +74,7 @@ public class CustomConnectHandler extends ConnectHandler {
 
                 while (headerNames.hasMoreElements()) {
                     header = headerNames.nextElement();
-                    sb.append(header).append(": ").append(request.getHeader(header)).append(System.getProperty("line.separator"));
+                    sb.append(header).append(": ").append(request.getHeader(header)).append(System.lineSeparator());
                 }
                 Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
             }
@@ -90,10 +85,11 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     protected void connectToServer(HttpServletRequest request, String host, int port, Promise<SocketChannel> promise) {
-        if (proxyHost == null)
+        if (proxyHost == null) {
             super.connectToServer(request, host, port, promise);
-        else
+        } else {
             connectToProxy(request, promise);
+        }
     }
 
     private void connectToProxy(HttpServletRequest request, Promise<SocketChannel> promise) {
@@ -114,8 +110,9 @@ public class CustomConnectHandler extends ConnectHandler {
                     iterator.remove();
 
                     if (key.isConnectable()) {
-                        if (!channel.finishConnect())
+                        if (!channel.finishConnect()) {
                             throw new IOException("Failure: channel.finishConnect()");
+                        }
 
                         channel.register(selector, SelectionKey.OP_READ);
 
@@ -136,14 +133,13 @@ public class CustomConnectHandler extends ConnectHandler {
                         final ByteBuffer buffer = ByteBuffer.wrap(connect.toString().getBytes());
                         while (buffer.hasRemaining())
                             channel.write(buffer);
-                    }
-                    else if (key.isReadable() && channel.isConnected()) {
+                    } else if (key.isReadable() && channel.isConnected()) {
                         final ByteBuffer buffer = ByteBuffer.allocate(1024);
                         final StringBuilder response = new StringBuilder();
                         while (channel.read(buffer) > 0) {
                             buffer.flip();
                             while (buffer.hasRemaining())
-                                response.append((char)buffer.get());
+                                response.append((char) buffer.get());
                         }
 
                         if (!response.toString().contains("200"))
@@ -151,9 +147,8 @@ public class CustomConnectHandler extends ConnectHandler {
 
                         try {
                             selector.close();
-                        }
-                        catch (final IOException e) {
-                            LOG.ignore(e);
+                        } catch (final IOException e) {
+                            LOG.error(e.getMessage(), e);
                         }
 
                         promise.succeeded(channel);
@@ -161,14 +156,12 @@ public class CustomConnectHandler extends ConnectHandler {
                     }
                 }
             }
-        }
-        catch (IOException x) {
+        } catch (IOException x) {
             if (channel != null) {
                 try {
                     channel.close();
-                }
-                catch (IOException t) {
-                    LOG.ignore(t);
+                } catch (IOException t) {
+                    LOG.error(t.getMessage(), t);
                 }
             }
             promise.failed(x);
