@@ -1,3 +1,8 @@
+4.0
+* Update dependencies (Jetty 11)
+* Websocket + Server Sent Events support
+* Introduced --nobump argument to disable SSL bumping
+
 3.5
 * Update SSH library, no longer use blowfish as default cipher
 
