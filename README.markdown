@@ -42,6 +42,7 @@ The tunnel comes with various options:
 |Command|Description|
 |---------|-------------|
 |-a,--auth <host:port:user:passwd>|Performs Basic Authentication for specific hosts.|
+|-b,--nobump|Do not perform SSL bumping.|
 |-d,--debug|Enables debug messages. Will output request/response headers.|
 |-dns,--dns|Use a custom DNS server. For example: 8.8.8.8|
 |--doctor|Perform sanity/health checks to detect possible misconfiguration or problems.|
@@ -124,7 +125,7 @@ Compile from Source
 
 To compile and test the Jar yourself you can use the following command:
 
-    mvn assembly:assembly
+    mvn package
 
 Copyright
 ---------
