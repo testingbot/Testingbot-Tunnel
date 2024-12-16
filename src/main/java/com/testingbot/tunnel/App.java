@@ -25,7 +25,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final Float VERSION = 3.5f;
+    public static final Float VERSION = 4.0f;
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -41,6 +41,7 @@ public class App {
     private int jettyPort = 0;
     private boolean noProxy = false;
     private boolean bypassSquid = false;
+    private boolean noBump = false;
     private boolean debugMode = false;
     private HttpProxy httpProxy;
     private String proxy;
@@ -115,6 +116,7 @@ public class App {
 
         options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087)");
         options.addOption("q", "nocache", false, "Bypass our Caching Proxy running on our tunnel VM.");
+        options.addOption("b", "nobump", false, "Do not perform SSL bumping.");
         options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default 8087)");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
@@ -267,6 +269,11 @@ public class App {
             if (commandLine.hasOption("nocache")) {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable Caching. All requests will go through the tunnel.");
                 app.bypassSquid = true;
+            }
+
+            if (commandLine.hasOption("nobump")) {
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable SSL bumping. SSL certificates will not be rewritten.");
+                app.noBump = true;
             }
 
             if (commandLine.hasOption("hubport")) {
@@ -573,6 +580,10 @@ public class App {
 
     public boolean isBypassingSquid() {
         return bypassSquid;
+    }
+
+    public boolean isNoBump() {
+        return noBump;
     }
 
     /**

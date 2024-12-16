@@ -184,8 +184,6 @@ public class WebsocketHandler extends HandlerWrapper {
                 header = headerNames.nextElement();
                 sb.append(header).append(": ").append(request.getHeader(header)).append(System.lineSeparator());
             }
-
-            java.util.logging.Logger.getLogger(WebsocketHandler.class.getName()).log(Level.INFO, sb.toString());
         }
 
         if (request.getHeader("Upgrade") != null && request.getHeader("Upgrade").equalsIgnoreCase("websocket")) {
@@ -286,7 +284,6 @@ public class WebsocketHandler extends HandlerWrapper {
 
         // Forward the WebSocket upgrade headers to the downstream connection
         try {
-            LOG.info("forwarding websocket headers");
             forwardWebSocketUpgradeHeaders(request, upstreamConnection.getEndPoint());
         } catch (IOException e) {
             LOG.error("Error while forwarding WebSocket upgrade headers", e);
