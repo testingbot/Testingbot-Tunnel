@@ -17,15 +17,12 @@ import java.util.Map;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
 import java.util.logging.Handler;
-import java.util.logging.LogManager;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import net.sf.json.JSONObject;
 import org.apache.commons.cli.*;
 import ssh.SSHTunnel;
 import ssh.TunnelPoller;
-import org.eclipse.jetty.util.log.Log;
-import org.eclipse.jetty.util.log.JavaUtilLog;
 
 public class App {
     public static final Float VERSION = 3.5f;
@@ -122,9 +119,6 @@ public class App {
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
 
-        Log.setLog(new TestingBotLogHandler());
-        System.setProperty("org.eclipse.jetty.LEVEL", "OFF");
-
         Statistics.setStartTime(System.currentTimeMillis());
 
         CommandLine commandLine;
@@ -149,17 +143,12 @@ public class App {
 
             App app = new App();
             if (commandLine.hasOption("debug")) {
-                Log.setLog(new JavaUtilLog());
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Running in debug-mode");
-                Logger.getLogger(App.class.getName()).setLevel(Level.ALL);
+                System.setProperty("org.eclipse.jetty.LEVEL", "DEBUG");
+                logger.log(Level.INFO, "Running in debug-mode");
+                logger.setLevel(Level.ALL);
                 app.setDebugMode(true);
-                Logger rootLogger = LogManager.getLogManager().getLogger("");
-                rootLogger.setLevel(Level.ALL);
-                for (Handler h : rootLogger.getHandlers()) {
-                    h.setLevel(Level.ALL);
-                }
             } else {
-                Logger.getLogger(App.class.getName()).setLevel(Level.INFO);
+                logger.setLevel(Level.INFO);
             }
 
             if (commandLine.hasOption("logfile")) {

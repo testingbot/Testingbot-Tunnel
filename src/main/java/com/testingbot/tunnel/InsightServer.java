@@ -1,39 +1,40 @@
 package com.testingbot.tunnel;
 
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.servlet.ServletContextHandler;
+import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
 import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import javax.servlet.http.HttpServlet;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.servlet.ServletHandler;
 
 public class InsightServer {
     public InsightServer(App app) {
         Server server = new Server(app.getMetricsPort());
-        ServletHandler handler = new ServletHandler();
+
+        // Using ServletContextHandler for Jetty 11
+        ServletContextHandler handler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         server.setHandler(handler);
 
-        handler.addServletWithMapping(JsonServlet.class, "/*");
+        // Register the servlet and map it to the root URL pattern
+        handler.addServlet(JsonServlet.class, "/*");
 
         try {
             server.start();
         } catch (Exception ex) {
-            Logger.getLogger(InsightServer.class.getName()).log(Level.SEVERE, null, "Could not set up metrics service. Make sure port " + app.getMetricsPort() + " is available or change with --metrics-port");
+            Logger.getLogger(InsightServer.class.getName()).log(Level.SEVERE, "Could not set up metrics service. Make sure port " + app.getMetricsPort() + " is available or change with --metrics-port", ex);
         }
     }
-    
-    @SuppressWarnings("serial")
-    public static class JsonServlet extends HttpServlet
-    {
+
+    public static class JsonServlet extends HttpServlet {
         @Override
-        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException
-        {
-                resp.setContentType("application/json");
-                resp.setStatus(200);
-                resp.getWriter().println("{\"version\":\"" + App.VERSION + "\", \"uptime\":\"" + (System.currentTimeMillis() - Statistics.getStartTime()) + "\","
-                        + "\"numberOfRequests:\"" + Statistics.getNumberOfRequests() + "\", \"bytesTransferred\":" + Statistics.getBytesTransfered() + "}");
+        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+            resp.setContentType("application/json");
+            resp.setStatus(HttpServletResponse.SC_OK);
+            resp.getWriter().println("{\"version\":\"" + App.VERSION + "\", \"uptime\":\"" + (System.currentTimeMillis() - Statistics.getStartTime()) + "\","
+                + "\"numberOfRequests\":\"" + Statistics.getNumberOfRequests() + "\", \"bytesTransferred\":" + Statistics.getBytesTransferred() + "}");
         }
     }
 }
