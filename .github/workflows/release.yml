@@ -35,6 +35,6 @@ jobs:
     - name: Upload JAR to GitHub Releases
       uses: softprops/action-gh-release@v1
       with:
-        files: target/*.jar
+        files: target/TestingBotTunnel-*.jar
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
