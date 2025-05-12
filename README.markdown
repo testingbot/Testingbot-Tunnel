@@ -122,7 +122,11 @@ $ docker run -p 4445:4445 --net=host -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRE
 
 To build the docker image, run:
 ```
-docker buildx build --platform linux/amd64,linux/arm64 --no-cache -t testingbot/tunnel:4.0 -t testingbot/tunnel:latest .
+docker buildx build --platform linux/amd64,linux/arm64 \
+  --no-cache \
+  --push \
+  -t testingbot/tunnel:4.0 \
+  -t testingbot/tunnel:latest .
 ```
 
 Compile from Source
