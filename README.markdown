@@ -112,12 +112,12 @@ For those who don't want to deal with Java, we also provide a containerized vers
 
 To start the tunnel, run:
 ```
-$ docker run -p 4445:4445 --net=host testingbot/tunnel:2.9 <key> <secret> <options>
+$ docker run -p 4445:4445 testingbot/tunnel:2.9 <key> <secret> <options>
 ```
 
 Alternatively:
 ```
-$ docker run -p 4445:4445 --net=host -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRET=<secret> testingbot/tunnel:2.9 <options>
+$ docker run -p 4445:4445 -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRET=<secret> testingbot/tunnel:2.9 <options>
 ```
 
 To build the docker image, run:
