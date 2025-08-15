@@ -13,8 +13,6 @@ import org.eclipse.jetty.servlet.ServletHolder;
 import com.testingbot.tunnel.proxy.ForwarderServlet;
 import org.apache.http.HttpResponse;
 import org.apache.http.client.methods.HttpGet;
-import org.eclipse.jetty.server.HttpConfiguration;
-import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 
 /**
@@ -22,15 +20,13 @@ import org.eclipse.jetty.servlet.ServletContextHandler;
  * @author TestingBot
  */
 public class HttpForwarder {
-    private final App app;
+    private final int seleniumPort;
     private final Server httpProxy;
 
     public HttpForwarder(App app) {
-        this.app = app;
+        this.seleniumPort = app.getSeleniumPort();
         httpProxy = new Server();
-        HttpConfiguration http_config = new HttpConfiguration();
-        ServerConnector connector = new ServerConnector(httpProxy,
-                new HttpConnectionFactory(http_config));
+        ServerConnector connector = new ServerConnector(httpProxy);
         connector.setPort(app.getSeleniumPort());
         connector.setIdleTimeout(440000);
 
@@ -73,7 +69,7 @@ public class HttpForwarder {
 
     public boolean testForwarding() {
         HttpClient httpClient = HttpClientBuilder.create().build();
-        HttpGet getRequest = new HttpGet("http://127.0.0.1:" + app.getSeleniumPort());
+        HttpGet getRequest = new HttpGet("http://127.0.0.1:" + seleniumPort);
 
         HttpResponse response;
         try {
