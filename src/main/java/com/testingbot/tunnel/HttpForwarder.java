@@ -1,18 +1,19 @@
 package com.testingbot.tunnel;
 
-import java.io.IOException;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.apache.http.client.HttpClient;
-import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.HttpStatus;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletHolder;
 
 import com.testingbot.tunnel.proxy.ForwarderServlet;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
 import org.eclipse.jetty.servlet.ServletContextHandler;
 
 /**
@@ -68,17 +69,22 @@ public class HttpForwarder {
     }
 
     public boolean testForwarding() {
-        HttpClient httpClient = HttpClientBuilder.create().build();
-        HttpGet getRequest = new HttpGet("http://127.0.0.1:" + seleniumPort);
+        RequestConfig cfg = RequestConfig.custom()
+            .setConnectTimeout(2000)
+            .setSocketTimeout(2000)
+            .setRedirectsEnabled(false)
+            .build();
 
-        HttpResponse response;
-        try {
-            response = httpClient.execute(getRequest);
-        } catch (IOException ex) {
+        try (CloseableHttpClient client = HttpClients.custom()
+            .setDefaultRequestConfig(cfg)
+            .build()) {
+            HttpHead req = new HttpHead("http://127.0.0.1:" + seleniumPort + "/");
+            try (CloseableHttpResponse resp = client.execute(req)) {
+                return resp.getStatusLine().getStatusCode() == HttpStatus.SC_OK;
+            }
+        } catch (Exception e) {
             return false;
         }
-
-        return (response.getStatusLine().getStatusCode() == 200);
     }
 }
 
