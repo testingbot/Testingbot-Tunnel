@@ -36,7 +36,7 @@ public class App {
     private String tunnelIdentifier;
     private String serverIP;
     private final Map<String, String> customHeaders = new HashMap<>();
-    private int hubPort = 4444;
+    private int hubPort = 80;
     private int tunnelID = 0;
     private int jettyPort = 0;
     private boolean noProxy = false;
