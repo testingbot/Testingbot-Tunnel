@@ -4,6 +4,7 @@ import com.testingbot.tunnel.App;
 import java.util.Arrays;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 import org.eclipse.jetty.client.api.Request;
 import java.util.Enumeration;
@@ -58,5 +59,11 @@ public class ForwarderServlet extends AsyncProxyServlet {
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure) {
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);
         Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Error when forwarding request: {0} {1}", new Object[]{failure.getMessage(), Arrays.toString(failure.getStackTrace())});
+    }
+
+    @Override
+    protected void onProxyResponseFailure(HttpServletRequest clientRequest, HttpServletResponse proxyResponse, Response serverResponse, Throwable failure) {
+        super.onProxyResponseFailure(clientRequest, proxyResponse, serverResponse, failure);
+        Logger.getLogger(ForwarderServlet.class.getName()).log(Level.WARNING, "Proxy response failure: {0} {1}", new Object[]{failure.getMessage(), Arrays.toString(failure.getStackTrace())});
     }
 }
