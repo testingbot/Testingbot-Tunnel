@@ -1,6 +1,5 @@
 package ssh;
 
-import ch.ethz.ssh2.ConnectionMonitor;
 import com.testingbot.tunnel.App;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -11,7 +10,7 @@ import java.util.logging.Logger;
  *
  * @author TestingBot
  */
-public class CustomConnectionMonitor implements ConnectionMonitor {
+public class CustomConnectionMonitor {
 
     private final SSHTunnel tunnel;
     private final App app;
@@ -25,7 +24,6 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
         this.app = app;
     }
 
-    @Override
     public void connectionLost(Throwable reason) {
         if (tunnel.isShuttingDown()) {
             return;
