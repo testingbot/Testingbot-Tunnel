@@ -2,12 +2,9 @@ package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
 import com.testingbot.tunnel.proxy.TunnelProxyServlet;
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -15,13 +12,15 @@ import java.util.logging.Logger;
 import com.testingbot.tunnel.proxy.WebsocketHandler;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.http.HttpResponse;
 import org.apache.http.NameValuePair;
-import org.apache.http.client.HttpClient;
+import org.apache.http.client.config.RequestConfig;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
+import org.apache.http.client.methods.CloseableHttpResponse;
 import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
 import org.apache.http.message.BasicNameValuePair;
+import org.apache.http.util.EntityUtils;
 import org.eclipse.jetty.proxy.ConnectHandler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -32,6 +31,7 @@ import org.eclipse.jetty.server.handler.AbstractHandler;
 import org.eclipse.jetty.server.handler.HandlerList;
 import org.eclipse.jetty.servlet.ServletHolder;
 import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
 /**
  *
@@ -133,76 +133,58 @@ public final class HttpProxy {
         }
     }
 
-    private ServerSocket _findAvailableSocket() {
-        int[] ports = {2000, 2001, 2020, 2222, 3000, 3001, 3030, 3333, 4000, 4001, 4040, 4502, 4503, 5000, 5001, 5050, 5555, 6000, 6001, 6060, 6666, 7000, 7070, 7777, 8000, 8001, 8080, 8888, 9000, 9001, 9090, 9999};
-
-        for (int port : ports) {
-            try {
-                return new ServerSocket(port);
-            } catch (IOException ignored) {
-            }
-        }
-
-        return null;
-    }
-
     public boolean testProxy() {
-        // find a free port, create a webserver, make a request to the proxy endpoint, expect it to arrive here.
-
-        ServerSocket serverSocket;
-        int port;
+        Server server = null;
         try {
-            serverSocket = _findAvailableSocket();
-            if (serverSocket == null) {
-                return true;
-            }
-
-            port = serverSocket.getLocalPort();
-            serverSocket.close();
-        } catch (IOException ex) {
-            // no port available? assume everything is ok
-            return true;
-        }
-
-        Server server = new Server(port);
-        server.setHandler(new TestHandler());
-        try {
+            // Start Jetty on loopback, ephemeral port
+            server = new Server();
+            ServerConnector connector = new ServerConnector(server, 1, 1);
+            connector.setHost("127.0.0.1");
+            connector.setPort(0);                 // let OS pick a free port
+            connector.setIdleTimeout(10_000);
+            server.addConnector(connector);
+            server.setHandler(new TestHandler());
             server.start();
+
+            int port = connector.getLocalPort();  // actual bound port
+
+            // HttpClient with sane timeouts
+            RequestConfig cfg = RequestConfig.custom()
+                .setConnectTimeout(3000)
+                .setSocketTimeout(5000)
+                .setRedirectsEnabled(false)
+                .build();
+
+            try (CloseableHttpClient http = HttpClients.custom()
+                .setDefaultRequestConfig(cfg)
+                .build()) {
+
+                HttpPost post = new HttpPost("https://api.testingbot.com/v1/tunnel/test");
+                List<NameValuePair> form = Arrays.asList(
+                    new BasicNameValuePair("client_key",    app.getClientKey()),
+                    new BasicNameValuePair("client_secret", app.getClientSecret()),
+                    new BasicNameValuePair("tunnel_id",     Integer.toString(app.getTunnelID())),
+                    new BasicNameValuePair("test_port",     Integer.toString(port))
+                );
+                post.setEntity(new UrlEncodedFormEntity(form, StandardCharsets.UTF_8));
+
+                try (CloseableHttpResponse resp = http.execute(post)) {
+                    int status = resp.getStatusLine().getStatusCode();
+                    String body = resp.getEntity() != null
+                        ? EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8)
+                        : "";
+                    // Expect TB to echo what your local handler served
+                    return status == 201 && body.contains("test=" + randomNumber);
+                }
+            }
         } catch (Exception e) {
-            return true;
-        }
-
-        try {
-            HttpClient httpClient = HttpClientBuilder.create().build();
-            String url = "https://api.testingbot.com/v1/tunnel/test";
-            HttpPost postRequest = new HttpPost(url);
-
-            List<NameValuePair> nameValuePairs = new ArrayList<>(2);
-            nameValuePairs.add(new BasicNameValuePair("client_key", app.getClientKey()));
-            nameValuePairs.add(new BasicNameValuePair("client_secret", app.getClientSecret()));
-            nameValuePairs.add(new BasicNameValuePair("tunnel_id", Integer.toString(app.getTunnelID())));
-            nameValuePairs.add(new BasicNameValuePair("test_port", Integer.toString(port)));
-
-            postRequest.setEntity(new UrlEncodedFormEntity(nameValuePairs));
-
-            HttpResponse response = httpClient.execute(postRequest);
-            BufferedReader br = new BufferedReader(
-                     new InputStreamReader((response.getEntity().getContent()), StandardCharsets.UTF_8));
-
-            String output;
-            StringBuilder sb = new StringBuilder();
-            while ((output = br.readLine()) != null) {
-                    sb.append(output);
+            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, e.getMessage());
+            return false; // make failures explicit
+        } finally {
+            if (server != null) {
+                try { server.stop(); } catch (Exception ignore) {}
+                server.destroy();
             }
-            try {
-                server.stop();
-            } catch (Exception ex) {
-
-            }
-
-            return ((response.getStatusLine().getStatusCode() == 201) && (sb.indexOf("test=" + this.randomNumber) > -1));
-        } catch (IOException ex) {
-            return true;
         }
     }
 
@@ -212,10 +194,10 @@ public final class HttpProxy {
                            Request baseRequest,
                            HttpServletRequest request,
                            HttpServletResponse response) throws IOException {
-            response.setContentType("text/html;charset=utf-8");
             response.setStatus(HttpServletResponse.SC_OK);
+            response.setContentType("text/plain;charset=UTF-8");
             baseRequest.setHandled(true);
-            response.getWriter().println("test=" + randomNumber);
+            response.getWriter().append("test=").append(String.valueOf(randomNumber));
         }
     }
 
