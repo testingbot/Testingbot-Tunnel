@@ -16,18 +16,16 @@
 package com.testingbot.tunnel;
 
 import java.io.IOException;
-import java.net.InetAddress;
-import java.net.ServerSocket;
-import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.UnknownHostException;
+import java.net.*;
 import java.util.ArrayList;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.HttpClient;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.HttpClientBuilder;
+import org.apache.http.client.config.RequestConfig;
+import org.apache.http.client.methods.CloseableHttpResponse;
+import org.apache.http.client.methods.HttpHead;
+import org.apache.http.impl.client.CloseableHttpClient;
+import org.apache.http.impl.client.HttpClients;
+import org.apache.http.util.EntityUtils;
 
 /**
  *
@@ -82,15 +80,12 @@ public final class Doctor {
     }
 
     private boolean checkPortOpen(int port) {
-        try {
-            try (ServerSocket socket = new ServerSocket(port)) {
-                socket.getLocalPort();
-            }
+        try (ServerSocket ss = new ServerSocket()) {
+            ss.bind(new InetSocketAddress(port));
             return true;
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            return false;
         }
-
-        return false;
     }
 
     public void performCheck(final URI uri) throws UnknownHostException {
@@ -105,16 +100,19 @@ public final class Doctor {
     }
 
     private boolean checkConnection(final URI uri) {
-        HttpClient httpClient = HttpClientBuilder.create().build();
-        HttpGet getRequest = new HttpGet(uri);
+        RequestConfig cfg = RequestConfig.custom()
+            .setConnectTimeout(2000).setSocketTimeout(3000).build();
 
-        HttpResponse response;
-        try {
-            response = httpClient.execute(getRequest);
-        } catch (IOException ex) {
+        try (CloseableHttpClient client = HttpClients.custom()
+            .setDefaultRequestConfig(cfg).build()) {
+            HttpHead head = new HttpHead(uri);
+            try (CloseableHttpResponse resp = client.execute(head)) {
+                EntityUtils.consumeQuietly(resp.getEntity());
+                int sc = resp.getStatusLine().getStatusCode();
+                return sc >= 200 && sc < 400;
+            }
+        } catch (Exception e) {
             return false;
         }
-
-        return (response.getStatusLine().getStatusCode() == 200);
     }
 }
