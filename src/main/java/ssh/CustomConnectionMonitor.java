@@ -17,6 +17,8 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
     private final App app;
     private Timer timer;
     private boolean retrying = false;
+    private long currentRetryDelay = 5000;
+    private final int maxRetries = 3;
 
     public CustomConnectionMonitor(SSHTunnel tunnel, App app) {
         this.tunnel = tunnel;
@@ -31,50 +33,78 @@ public class CustomConnectionMonitor implements ConnectionMonitor {
 
         app.getHttpProxy().stop();
 
-        Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE, "SSH Connection lost! {0}", reason.getMessage());
+        Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE,
+            String.format("[%s] SSH Connection lost! %s", tunnel.getConnectionId(), reason.getMessage()));
 
         if (!this.retrying) {
             this.retrying = true;
-            timer = new Timer();
-            timer.schedule(new PollTask(), 5000, 5000);
+            timer = new Timer("Reconnect-" + tunnel.getConnectionId());
+            timer.schedule(new ReconnectTask(), currentRetryDelay);
         }
     }
 
-    class PollTask extends TimerTask {
+    class ReconnectTask extends TimerTask {
         private int retryAttempts = 0;
+
         @Override
         public void run() {
             try {
-                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Trying to re-establish SSH Connection");
                 retryAttempts += 1;
+
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO,
+                    String.format("[%s] Attempting to re-establish SSH Connection (attempt %d, delay %dms)",
+                        tunnel.getConnectionId(), retryAttempts, currentRetryDelay));
+
                 tunnel.stop();
                 tunnel.connect();
 
                 if (tunnel.isAuthenticated()) {
+                    // Successful reconnection
                     retrying = false;
                     retryAttempts = 0;
                     timer.cancel();
+
                     app.getHttpProxy().start();
                     tunnel.createPortForwarding();
-                    Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Successfully re-established SSH Connection");
+
+                    Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO,
+                        String.format("[%s] Successfully re-established SSH Connection after %d attempts",
+                            tunnel.getConnectionId(), retryAttempts));
                     return;
                 }
-                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Attempts {0}", retryAttempts);
+
             } catch (Exception ex) {
-                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.WARNING, ex.getMessage());
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.WARNING,
+                    String.format("[%s] Reconnection attempt %d failed: %s",
+                        tunnel.getConnectionId(), retryAttempts, ex.getMessage()));
             }
-            if (retryAttempts >= 3) {
-                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO, "Giving up retrying this Connection. Creating a new Tunnel Connection.");
-                // give up connecting to this tunnel VM, try another one
+
+            // Check if we should continue retrying
+            if (retryAttempts >= maxRetries) {
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.WARNING,
+                    String.format("[%s] Giving up retrying after %d attempts. Creating a new Tunnel Connection.",
+                        tunnel.getConnectionId(), retryAttempts));
+
+                // Give up connecting to this tunnel VM, try another one
                 timer.cancel();
                 retrying = false;
                 retryAttempts = 0;
+
                 app.stop();
                 try {
                     app.boot();
                 } catch (Exception ex) {
-                    Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE,
+                        String.format("[%s] Failed to create new tunnel: %s", tunnel.getConnectionId(), ex.getMessage()), ex);
                 }
+            } else {
+                timer.cancel();
+                timer = new Timer("Reconnect-" + tunnel.getConnectionId());
+                timer.schedule(new ReconnectTask(), currentRetryDelay);
+
+                Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO,
+                    String.format("[%s] Will retry in %dms (attempt %d)",
+                        tunnel.getConnectionId(), currentRetryDelay, retryAttempts + 1));
             }
         }
     }
