@@ -1,8 +1,6 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.Statistics;
-import jakarta.servlet.ServletConfig;
-import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.apache.commons.lang.exception.ExceptionUtils;
@@ -17,20 +15,11 @@ import org.eclipse.jetty.client.api.Result;
 import org.eclipse.jetty.client.util.BasicAuthentication;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.HttpCookieStore;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
-
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
-import java.net.Socket;
 import java.net.URI;
 import java.net.URISyntaxException;
-import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.Executor;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -110,71 +99,6 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
                 String value = entry.getValue();
                 proxyRequest.header(key, value);
             }
-        }
-    }
-
-    @Override
-    protected HttpClient createHttpClient() throws ServletException {
-        ServletConfig config = getServletConfig();
-
-        HttpClient client = newHttpClient();
-
-        // Redirects must be proxied as is, not followed.
-        client.setFollowRedirects(false);
-
-        // Must not store cookies, otherwise cookies of different clients will mix.
-        client.setCookieStore(new HttpCookieStore.Empty());
-
-        Executor executor;
-        String value = config.getInitParameter("maxThreads");
-        if (value == null || "-".equals(value)) {
-            executor = (Executor) getServletContext().getAttribute("org.eclipse.jetty.server.Executor");
-            if (executor == null)
-                throw new IllegalStateException("No server executor for proxy");
-        } else {
-            QueuedThreadPool qtp = new QueuedThreadPool(Integer.parseInt(value));
-            String servletName = config.getServletName();
-            int dot = servletName.lastIndexOf('.');
-            if (dot >= 0)
-                servletName = servletName.substring(dot + 1);
-            qtp.setName(servletName);
-            executor = qtp;
-        }
-
-        client.setExecutor(executor);
-
-        value = config.getInitParameter("maxConnections");
-        if (value == null)
-            value = "256";
-        client.setMaxConnectionsPerDestination(Integer.parseInt(value));
-
-        value = config.getInitParameter("idleTimeout");
-        if (value == null)
-            value = "30000";
-        client.setIdleTimeout(Long.parseLong(value));
-
-        value = config.getInitParameter("timeout");
-        if (value == null)
-            value = "60000";
-        setTimeout(Long.parseLong(value));
-
-        value = config.getInitParameter("requestBufferSize");
-        if (value != null)
-            client.setRequestBufferSize(Integer.parseInt(value));
-
-        value = config.getInitParameter("responseBufferSize");
-        if (value != null)
-            client.setResponseBufferSize(Integer.parseInt(value));
-
-        try {
-            client.start();
-
-            // Content must not be decoded, otherwise the client gets confused.
-            client.getContentDecoderFactories().clear();
-
-            return client;
-        } catch (Exception x) {
-            throw new ServletException(x);
         }
     }
 
