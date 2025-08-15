@@ -82,7 +82,8 @@ public class HttpForwarder {
             try (CloseableHttpResponse resp = client.execute(req)) {
                 return resp.getStatusLine().getStatusCode() == HttpStatus.SC_OK;
             }
-        } catch (Exception e) {
+        } catch (Exception ex) {
+            Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
             return false;
         }
     }
