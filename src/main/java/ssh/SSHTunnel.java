@@ -4,6 +4,7 @@ import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
 import com.testingbot.tunnel.App;
+
 import java.io.IOException;
 import java.util.Timer;
 import java.util.TimerTask;
@@ -12,7 +13,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 /**
- *
  * @author TestingBot
  */
 public class SSHTunnel {
@@ -23,9 +23,10 @@ public class SSHTunnel {
     private final String connectionId;
     private Timer keepAliveTimer;
     private Timer connectionMonitorTimer;
-    private boolean authenticated = false;
+    private Timer portForwardingMonitorTimer;
     private boolean shuttingDown = false;
-    private CustomConnectionMonitor connectionMonitor;
+    private final CustomConnectionMonitor connectionMonitor;
+    private boolean portForwardingEstablished = false;
 
     public SSHTunnel(App app, String server) throws Exception {
         /* Create a connection instance */
@@ -58,9 +59,9 @@ public class SSHTunnel {
         }
 
         // Authentication is done during connect() with JSch
-        this.authenticated = session.isConnected();
-        
-        if (!this.authenticated) {
+        boolean authenticated = session.isConnected();
+
+        if (!authenticated) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                 String.format("[%s] Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.", connectionId));
             throw new Exception("Authentication failed");
@@ -69,10 +70,14 @@ public class SSHTunnel {
         // Start keep-alive timer with configurable interval
         keepAliveTimer = new Timer("KeepAlive-" + connectionId);
         keepAliveTimer.schedule(new KeepAliveTask(), 30000, 30000);
-        
+
         // Start connection monitoring timer
         connectionMonitorTimer = new Timer("ConnectionMonitor-" + connectionId);
         connectionMonitorTimer.schedule(new ConnectionMonitorTask(), 10000, 10000);
+
+        // Start port forwarding monitoring timer
+        portForwardingMonitorTimer = new Timer("PortForwardingMonitor-" + connectionId);
+        portForwardingMonitorTimer.schedule(new PortForwardingMonitorTask(), 15000, 15000);
     }
 
     public void stop(boolean quitting) {
@@ -81,12 +86,15 @@ public class SSHTunnel {
     }
 
     public void stop() {
-        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format("[%s] Stopping secure tunnel",connectionId));
+        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format("[%s] Stopping secure tunnel", connectionId));
         if (keepAliveTimer != null) {
             keepAliveTimer.cancel();
         }
         if (connectionMonitorTimer != null) {
             connectionMonitorTimer.cancel();
+        }
+        if (portForwardingMonitorTimer != null) {
+            portForwardingMonitorTimer.cancel();
         }
 
         if (session != null && session.isConnected()) {
@@ -100,10 +108,12 @@ public class SSHTunnel {
             String hubHost = "hub.testingbot.com";
             session.setPortForwardingL(app.getSSHPort(), hubHost, app.getHubPort());
 
+            portForwardingEstablished = true;
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                 String.format("[%s] Port forwarding established: %s:2010 -> localhost:%d, localhost:%d -> %s:%d",
                     connectionId, server, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
         } catch (JSchException ex) {
+            portForwardingEstablished = false;
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                 String.format("[%s] Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.", connectionId), ex);
         }
@@ -134,7 +144,7 @@ public class SSHTunnel {
                     long roundTripTime = System.currentTimeMillis() - startTime;
 
                     Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
-                            String.format("[%s] Keep-alive sent, RTT: %dms", connectionId, roundTripTime));
+                        String.format("[%s] Keep-alive sent, RTT: %dms", connectionId, roundTripTime));
                 }
             } catch (Exception ex) {
                 Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
@@ -142,7 +152,7 @@ public class SSHTunnel {
             }
         }
     }
-    
+
     class ConnectionMonitorTask extends TimerTask {
         @Override
         public void run() {
@@ -154,6 +164,61 @@ public class SSHTunnel {
                 Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
                     String.format("[%s] Connection monitoring failed: %s", connectionId, ex.getMessage()));
             }
+        }
+    }
+
+    class PortForwardingMonitorTask extends TimerTask {
+        @Override
+        public void run() {
+            try {
+                if (session != null && session.isConnected() && !shuttingDown) {
+                    // Check if port forwarding is still active by testing the forwarded ports
+                    String[] forwardedPorts = session.getPortForwardingL();
+                    boolean localForwardingActive = false;
+
+                    if (forwardedPorts != null) {
+                        for (String port : forwardedPorts) {
+                            if (port.contains(String.valueOf(app.getSSHPort()))) {
+                                localForwardingActive = true;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (!localForwardingActive && portForwardingEstablished) {
+                        Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
+                            String.format("[%s] Local port forwarding lost, attempting to restart", connectionId));
+                        restartPortForwarding();
+                    }
+                }
+            } catch (Exception ex) {
+                Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
+                    String.format("[%s] Port forwarding monitoring failed: %s", connectionId, ex.getMessage()));
+            }
+        }
+    }
+
+    private void restartPortForwarding() {
+        try {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
+                String.format("[%s] Restarting port forwarding", connectionId));
+
+            // Clear existing port forwarding
+            portForwardingEstablished = false;
+
+            // Re-establish port forwarding
+            createPortForwarding();
+
+            if (portForwardingEstablished) {
+                Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
+                    String.format("[%s] Port forwarding successfully restarted", connectionId));
+            } else {
+                Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
+                    String.format("[%s] Failed to restart port forwarding", connectionId));
+            }
+        } catch (Exception ex) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
+                String.format("[%s] Error during port forwarding restart: %s", connectionId, ex.getMessage()), ex);
         }
     }
 }
