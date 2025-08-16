@@ -13,13 +13,6 @@ public class Statistics {
     }
 
     /**
-     * @param aNumberOfRequests the numberOfRequests to set
-     */
-    public static void setNumberOfRequests(long aNumberOfRequests) {
-        numberOfRequests = aNumberOfRequests;
-    }
-
-    /**
      * @return the startTime
      */
     public static long getStartTime() {
@@ -38,13 +31,6 @@ public class Statistics {
      */
     public static long getBytesTransferred() {
         return bytesTransferred;
-    }
-
-    /**
-     * @param aBytesTransferred the bytesTransferred to set
-     */
-    public static void setBytesTransferred(long aBytesTransferred) {
-        bytesTransferred = aBytesTransferred;
     }
 
     public static void addBytesTransferred(long aBytesTransferred) {

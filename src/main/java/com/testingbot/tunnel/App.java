@@ -452,7 +452,7 @@ public class App {
 
         if (!this.noProxy) {
             this.httpProxy = new HttpProxy(this);
-            if (this.getProxy() == null && this.httpProxy.testProxy() == false) {
+            if (this.getProxy() == null && !this.httpProxy.testProxy()) {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "! Tunnel might not work properly, test failed");
             }
         }
@@ -509,7 +509,7 @@ public class App {
             port = serverSocket.getLocalPort();
             serverSocket.close();
             setJettyPort(port);
-        } catch (IOException ex) {
+        } catch (IOException ignored) {
         }
     }
 
@@ -685,7 +685,7 @@ public class App {
                 port = serverSocket.getLocalPort();
                 serverSocket.close();
                 sshPort = port;
-            } catch (IOException ex) {
+            } catch (IOException ignored) {
             }
         }
         return sshPort;
