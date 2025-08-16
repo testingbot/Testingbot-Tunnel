@@ -1,4 +1,5 @@
-<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.testingbot</groupId>
@@ -8,7 +9,7 @@
 
   <properties>
     <maven.compiler.release>11</maven.compiler.release>
- </properties>
+  </properties>
 
   <licenses>
     <license>
@@ -18,33 +19,33 @@
     </license>
   </licenses>
 
-  <parent>
-    <groupId>org.sonatype.oss</groupId>
-    <artifactId>oss-parent</artifactId>
-    <version>7</version>
-  </parent>
-
   <name>TestingBotTunnel</name>
   <description>Tunnel to run TestingBot Selenium tests on your local machine</description>
   <url>https://testingbot.com</url>
   <scm>
-<connection>scm:git:git@github.com:testingbot/Testingbot-Tunnel.git</connection>
-      <developerConnection>scm:git:git@github.com:testingbot/Testingbot-Tunnel.git</developerConnection>
-      <url>git@github.com:testingbot/Testingbot-Tunnel.git</url>
-    </scm>
+    <connection>scm:git:git@github.com:testingbot/Testingbot-Tunnel.git</connection>
+    <developerConnection>scm:git:git@github.com:testingbot/Testingbot-Tunnel.git</developerConnection>
+    <url>git@github.com:testingbot/Testingbot-Tunnel.git</url>
+    <tag>HEAD</tag>
+  </scm>
 
-    <distributionManagement>
-         <snapshotRepository>
-            <id>ossrh</id>
-            <name>Nexus Release Repository</name>
-            <url>https://oss.sonatype.org/content/repositories/snapshots</url>
-        </snapshotRepository>
-        <repository>
-            <id>ossrh</id>
-            <name>Nexus Release Repository</name>
-            <url>https://oss.sonatype.org/service/local/staging/deploy/maven2/</url>
-        </repository>
-    </distributionManagement>
+  <developers>
+    <developer>
+      <name>TestingBot</name>
+      <email>info@testingbot.com</email>
+      <organization>TestingBot</organization>
+      <organizationUrl>https://testingbot.com</organizationUrl>
+    </developer>
+  </developers>
+
+  <distributionManagement>
+    <repository>
+      <id>central</id>
+      <name>Maven Central</name>
+      <url>https://central.sonatype.com/api/v1/publisher/deployments/upload/</url>
+    </repository>
+  </distributionManagement>
+
   <build>
     <plugins>
       <plugin>
@@ -52,29 +53,65 @@
         <artifactId>maven-jar-plugin</artifactId>
         <version>3.2.0</version>
         <configuration>
-           <archive>
-             <manifest>
-                <mainClass>com.testingbot.tunnel.App</mainClass>
-             </manifest>
-           </archive>
+          <archive>
+            <manifest>
+              <mainClass>com.testingbot.tunnel.App</mainClass>
+            </manifest>
+          </archive>
         </configuration>
       </plugin>
-<plugin>
-    <groupId>org.apache.maven.plugins</groupId>
-    <artifactId>maven-javadoc-plugin</artifactId>
-    <version>3.2.0</version>
-    <executions>
-        <execution>
+      <plugin>
+        <groupId>org.sonatype.central</groupId>
+        <artifactId>central-publishing-maven-plugin</artifactId>
+        <version>0.8.0</version>
+        <extensions>true</extensions>
+        <configuration>
+          <publishingServerId>central</publishingServerId>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-gpg-plugin</artifactId>
+        <version>3.0.1</version>
+        <executions>
+          <execution>
+            <id>sign-artifacts</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>sign</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>3.2.1</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>3.2.0</version>
+        <executions>
+          <execution>
             <id>attach-javadocs</id>
             <goals>
-                <goal>jar</goal>
+              <goal>jar</goal>
             </goals>
             <configuration>
-                <additionalOptions>-Xdoclint:none</additionalOptions>
+              <additionalOptions>-Xdoclint:none</additionalOptions>
             </configuration>
-        </execution>
-    </executions>
-</plugin>
+          </execution>
+        </executions>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
@@ -94,48 +131,48 @@
         <version>3.2.4</version>
         <executions>
           <execution>
-             <phase>package</phase>
-               <goals>
-                  <goal>shade</goal>
-               </goals>
-               <configuration>
-                  <minimizeJar>true</minimizeJar>
-                  <filters>
-                    <filter>
-                       <artifact>commons-logging:commons-logging</artifact>
-                       <includes>
-                           <include>**</include>
-                       </includes>
-                    </filter>
-                    <filter>
-                       <artifact>ch.qos.logback:logback-classic</artifact>
-                       <includes>
-                           <include>**</include>
-                       </includes>
-                    </filter>
-                    <filter>
-                       <artifact>ch.qos.logback:logback-core</artifact>
-                       <includes>
-                           <include>**</include>
-                       </includes>
-                    </filter>
-                    <filter>
-                       <artifact>com.github.mwiede:jsch</artifact>
-                       <includes>
-                           <include>**</include>
-                       </includes>
-                    </filter>
-                    <filter>
-                      <artifact>*:*</artifact>
-                      <excludes>
-                        <exclude>META-INF/*.SF</exclude>
-                        <exclude>META-INF/*.DSA</exclude>
-                        <exclude>META-INF/*.RSA</exclude>
-                      </excludes>
-                    </filter>
-                  </filters>
-              </configuration>
-           </execution>
+            <phase>package</phase>
+            <goals>
+              <goal>shade</goal>
+            </goals>
+            <configuration>
+              <minimizeJar>true</minimizeJar>
+              <filters>
+                <filter>
+                  <artifact>commons-logging:commons-logging</artifact>
+                  <includes>
+                    <include>**</include>
+                  </includes>
+                </filter>
+                <filter>
+                  <artifact>ch.qos.logback:logback-classic</artifact>
+                  <includes>
+                    <include>**</include>
+                  </includes>
+                </filter>
+                <filter>
+                  <artifact>ch.qos.logback:logback-core</artifact>
+                  <includes>
+                    <include>**</include>
+                  </includes>
+                </filter>
+                <filter>
+                  <artifact>com.github.mwiede:jsch</artifact>
+                  <includes>
+                    <include>**</include>
+                  </includes>
+                </filter>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
         </executions>
       </plugin>
     </plugins>
@@ -214,11 +251,11 @@
       <version>1.4</version>
     </dependency>
     <dependency>
-     <groupId>net.sf.json-lib</groupId>
-     <artifactId>json-lib</artifactId>
-     <version>2.4</version>
-     <classifier>jdk15</classifier>
-  </dependency>
+      <groupId>net.sf.json-lib</groupId>
+      <artifactId>json-lib</artifactId>
+      <version>2.4</version>
+      <classifier>jdk15</classifier>
+    </dependency>
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>slf4j-api</artifactId>
