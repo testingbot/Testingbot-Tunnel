@@ -32,8 +32,9 @@ import org.apache.http.util.EntityUtils;
  * @author testingbot
  */
 public final class Doctor {
-
     private final App app;
+    private boolean hasFailures = false;
+
     public Doctor(App app) {
         this.app = app;
         app.setFreeJettyPort();
@@ -45,9 +46,14 @@ public final class Doctor {
             uris.add(new URI("https://www.google.com/"));
         } catch (URISyntaxException e) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
+            hasFailures = true;
         }
 
         performChecks(uris);
+    }
+
+    public boolean hasFailures() {
+        return hasFailures;
     }
 
     public void performChecks(ArrayList<URI> uris) {
@@ -57,6 +63,7 @@ public final class Doctor {
             }
         } catch (UnknownHostException e) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
+            hasFailures = true;
         }
 
         checkOpenPorts();
@@ -67,6 +74,7 @@ public final class Doctor {
         boolean canOpenJetty = checkPortOpen(app.getJettyPort());
         if (!canOpenJetty) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open proxy port {0}.\nDoes this process have the correct permissions?", Integer.toString(app.getJettyPort()));
+            hasFailures = true;
         } else {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Proxy port {0} can be opened", Integer.toString(app.getJettyPort()));
         }
@@ -74,6 +82,7 @@ public final class Doctor {
         boolean canOpenSEPort = checkPortOpen(app.getSeleniumPort());
         if (!canOpenSEPort) {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "Cannot open Selenium port {0}.\nPerhaps another process is using this port? Or this process does not have the correct permission?", Integer.toString(app.getSeleniumPort()));
+            hasFailures = true;
         } else {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - Selenium port {0} can be opened", Integer.toString(app.getSeleniumPort()));
         }
@@ -96,6 +105,7 @@ public final class Doctor {
             Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - URL {0} can be reached.", uri.toString());
         } else {
             Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, "URL {0} can not be reached.", uri.toString());
+            hasFailures = true;
         }
     }
 

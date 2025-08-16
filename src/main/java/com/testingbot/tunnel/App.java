@@ -168,6 +168,16 @@ public class App {
             String clientKey = null;
             String clientSecret = null;
 
+            if (commandLine.hasOption("se-port")) {
+                app.seleniumPort = Integer.parseInt(commandLine.getOptionValue("se-port"));
+            }
+
+            if (commandLine.hasOption("localproxy")) {
+                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localproxy")));
+            } else {
+                app.setFreeJettyPort();
+            }
+
             if (commandLine.hasOption("doctor")) {
                 app.doctor();
                 return;
@@ -256,12 +266,6 @@ public class App {
                 app.pac = commandLine.getOptionValue("pac");
             }
 
-            if (commandLine.hasOption("localproxy")) {
-                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localproxy")));
-            } else {
-                app.setFreeJettyPort();
-            }
-
             if (commandLine.hasOption("readyfile")) {
                 app.readyFile = commandLine.getOptionValue("readyfile").trim();
             }
@@ -290,10 +294,6 @@ public class App {
 
             if (commandLine.hasOption("web")) {
                 LocalWebServer local = new LocalWebServer(commandLine.getOptionValue("web"));
-            }
-
-            if (commandLine.hasOption("se-port")) {
-                app.seleniumPort = Integer.parseInt(commandLine.getOptionValue("se-port"));
             }
 
             app.init();
@@ -476,6 +476,9 @@ public class App {
 
     public void doctor() {
         Doctor doctor = new Doctor(this);
+        if (doctor.hasFailures()) {
+            System.exit(1);
+        }
     }
 
     public HttpProxy getHttpProxy() {
