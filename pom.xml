@@ -3,7 +3,7 @@
 
   <groupId>com.testingbot</groupId>
   <artifactId>TestingBotTunnel</artifactId>
-  <version>4.2</version>
+  <version>4.2-SNAPSHOT</version>
   <packaging>jar</packaging>
 
   <properties>
@@ -22,10 +22,10 @@
   <description>Tunnel to run TestingBot Selenium tests on your local machine</description>
   <url>https://testingbot.com</url>
   <scm>
-    <connection>scm:git:https://github.com/testingbot/Testingbot-Tunnel.git</connection>
-    <developerConnection>scm:git:https://github.com/testingbot/Testingbot-Tunnel.git</developerConnection>
+    <connection>scm:git:git@github.com:testingbot/testingbot-tunnel.git</connection>
+    <developerConnection>scm:git:git@github.com:testingbot/testingbot-tunnel.git</developerConnection>
     <url>https://github.com/testingbot/Testingbot-Tunnel.git</url>
-    <tag>v4.2</tag>
+    <tag>HEAD</tag>
   </scm>
 
   <developers>
@@ -181,7 +181,7 @@
         <configuration>
           <scmCommentPrefix>[maven-release-plugin]</scmCommentPrefix>
           <tagNameFormat>v@{project.version}</tagNameFormat>
-          <connectionUrl>scm:git:https://github.com/testingbot/Testingbot-Tunnel.git</connectionUrl>
+          <connectionUrl>scm:git:git@github.com:testingbot/testingbot-tunnel.git</connectionUrl>
         </configuration>
       </plugin>
     </plugins>
