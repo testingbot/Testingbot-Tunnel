@@ -27,6 +27,12 @@ jobs:
         restore-keys: |
           ${{ runner.os }}-maven-
 
+    # Set version from tag
+    - name: Set version from tag
+      run: |
+        TAG_VERSION=${GITHUB_REF#refs/tags/v}
+        mvn versions:set -DnewVersion=${TAG_VERSION} -DgenerateBackupPoms=false
+
     # Run Maven to package the project
     - name: Build with Maven
       run: mvn clean package -DskipTests
