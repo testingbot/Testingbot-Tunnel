@@ -8,7 +8,9 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.util.Properties;
 import java.net.Authenticator;
 import java.net.ServerSocket;
 import java.util.HashMap;
@@ -25,7 +27,7 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final Float VERSION = 4.1f;
+    public static final Float VERSION = getVersionFromProperties();
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -50,6 +52,24 @@ public class App {
     private String pac = null;
     private int metricsPort = 8003;
     private int sshPort = 0;
+
+    private static Float getVersionFromProperties() {
+        try (InputStream input = App.class.getClassLoader().getResourceAsStream("version.properties")) {
+            if (input == null) {
+                return 0.0f;
+            }
+            Properties prop = new Properties();
+            prop.load(input);
+            String version = prop.getProperty("version");
+            if (version != null) {
+                String numericVersion = version.replaceAll("-SNAPSHOT", "").replaceAll("[^0-9.]", "");
+                return Float.parseFloat(numericVersion);
+            }
+        } catch (IOException | NumberFormatException ex) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not read version from properties, using fallback", ex);
+        }
+        return 0.0f;
+    }
 
     public static void main(String... args) throws Exception {
 
