@@ -2,7 +2,7 @@
 
 This is a Java-based application to test websites on your local computer or staging environment with the TestingBot.com browser cloud.
 A secure connection is established between your machine and the TestingBot.com cloud.
-You can find more information on https://testingbot.com/support/other/tunnel
+You can find more information on https://testingbot.com/support/tunnel
 
 About
 -------
@@ -20,7 +20,10 @@ Below are some of the features of the TestingBot Tunnel:
 Prerequisites
 -------
 
-This version of the tunnel requires Java 8 or higher. If you'd like to run on Java < 8, please use [TestingBot Tunnel 1.21](https://github.com/testingbot/Testingbot-Tunnel/tree/TestingBotTunnel-1.21) (no longer maintained)
+This version of the tunnel requires Java 11 or higher.
+
+- If you need Java 8, you can use TestingBot Tunnel 4.0(https://github.com/testingbot/Testingbot-Tunnel/tree/TestingBotTunnel-4.0).
+- If you'd like to run on Java < 8, please use [TestingBot Tunnel 1.21](https://github.com/testingbot/Testingbot-Tunnel/tree/TestingBotTunnel-1.21) (no longer maintained)
 
 **NOTE:** If you use the containerized tunnel, Java is not needed. See below under the *Docker*-header.
 
@@ -125,7 +128,7 @@ To build the docker image, run:
 docker buildx build --platform linux/amd64,linux/arm64 \
   --no-cache \
   --push \
-  -t testingbot/tunnel:4.0 \
+  -t testingbot/tunnel:4.1 \
   -t testingbot/tunnel:latest .
 ```
 

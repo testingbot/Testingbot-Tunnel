@@ -1,3 +1,9 @@
+4.1
+* Update dependencies (Jetty + SSH lib)
+* Improve monitoring + retry mechanisms
+* Drop support for JDK 8
+* Improve `--doctor` checks
+
 4.0
 * Update dependencies (Jetty 11)
 * Websocket + Server Sent Events support
