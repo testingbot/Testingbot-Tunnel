@@ -13,6 +13,8 @@ import org.eclipse.jetty.client.api.Request;
 import org.eclipse.jetty.client.api.Response;
 import org.eclipse.jetty.client.api.Result;
 import org.eclipse.jetty.client.util.BasicAuthentication;
+import org.eclipse.jetty.client.ProxyAuthenticationProtocolHandler;
+import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.proxy.AsyncProxyServlet;
 import org.eclipse.jetty.util.Callback;
 import java.net.URI;
@@ -24,6 +26,7 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 public class TunnelProxyServlet extends AsyncProxyServlet {
+    private String proxyAuthHeaderValue = null;
 
     class TunnelProxyResponseListener extends ProxyResponseListener {
         private final HttpServletRequest request;
@@ -92,6 +95,11 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     @Override
     protected void addProxyHeaders(HttpServletRequest clientRequest, Request proxyRequest) {
         super.addProxyHeaders(clientRequest, proxyRequest);
+
+        if (proxyAuthHeaderValue != null) {
+            proxyRequest.header(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
+        }
+
         if (getServletContext().getAttribute("extra_headers") != null) {
             HashMap<String, String> headers = (HashMap<String, String>) getServletContext().getAttribute("extra_headers");
             for (Map.Entry<String, String> entry : headers.entrySet()) {
@@ -111,19 +119,16 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         if (proxy != null && !proxy.isEmpty()) {
             String[] splitted = proxy.split(":");
             ProxyConfiguration proxyConfig = client.getProxyConfiguration();
-            proxyConfig.getProxies().add(new HttpProxy(splitted[0], Integer.parseInt(splitted[1])));
+            HttpProxy httpProxy = new HttpProxy(splitted[0], Integer.parseInt(splitted[1]));
+            proxyConfig.getProxies().add(httpProxy);
 
             String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
             if (proxyAuth != null && !proxyAuth.isEmpty()) {
                 String[] credentials = proxyAuth.split(":");
-
-                auth = client.getAuthenticationStore();
                 Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Proxy auth {0} : {1}", new Object[]{credentials[0], credentials[1]});
-                try {
-                    auth.addAuthentication(new BasicAuthentication(new URI("http://" + proxy), Authentication.ANY_REALM, credentials[0], credentials[1]));
-                } catch (URISyntaxException ex) {
-                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
-                }
+
+                String userPass = credentials[0] + ":" + credentials[1];
+                proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder().encodeToString(userPass.getBytes());
             }
         }
 
