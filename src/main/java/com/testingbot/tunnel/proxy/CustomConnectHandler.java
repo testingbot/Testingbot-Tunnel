@@ -88,11 +88,11 @@ public class CustomConnectHandler extends ConnectHandler {
         if (proxyHost == null) {
             super.connectToServer(request, host, port, promise);
         } else {
-            connectToProxy(request, promise);
+            connectToProxy(request, host, port, promise);
         }
     }
 
-    private void connectToProxy(HttpServletRequest request, Promise<SocketChannel> promise) {
+    private void connectToProxy(HttpServletRequest request, String host, int port, Promise<SocketChannel> promise) {
         SocketChannel channel = null;
         try {
             channel = SocketChannel.open();
@@ -117,7 +117,7 @@ public class CustomConnectHandler extends ConnectHandler {
                         channel.register(selector, SelectionKey.OP_READ);
 
                         final StringBuilder connect = new StringBuilder();
-                        connect.append(request.getMethod()).append(' ').append(request.getPathInfo()).append(' ').append(request.getProtocol());
+                        connect.append(request.getMethod()).append(' ').append(host).append(':').append(port).append(' ').append(request.getProtocol());
                         final Enumeration<String> headerNames = request.getHeaderNames();
                         while (headerNames.hasMoreElements()) {
                             final String headerName = headerNames.nextElement();
