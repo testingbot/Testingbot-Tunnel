@@ -1,7 +1,7 @@
 package com.testingbot.tunnel;
 
 import com.github.tomakehurst.wiremock.WireMockServer;
-import net.sf.json.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

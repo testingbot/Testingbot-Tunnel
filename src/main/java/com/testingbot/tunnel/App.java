@@ -21,7 +21,8 @@ import java.util.logging.FileHandler;
 import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import net.sf.json.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.cli.*;
 import ssh.SSHTunnel;
 import ssh.TunnelPoller;
@@ -245,12 +246,13 @@ public class App {
 
             if (commandLine.hasOption("extra-headers")) {
                 String extraHeadersValue = commandLine.getOptionValue("extra-headers");
-                JSONObject obj = JSONObject.fromObject(extraHeadersValue);
+                ObjectMapper mapper = new ObjectMapper();
+                JsonNode obj = mapper.readTree(extraHeadersValue);
 
-                Iterator<String> keyIterator = obj.keys();
+                Iterator<String> keyIterator = obj.fieldNames();
                 while (keyIterator.hasNext()) {
                     String key = keyIterator.next();
-                    String value = obj.getString(key);
+                    String value = obj.get(key).asText();
                     app.addCustomHeader(key, value);
                 }
             }
@@ -375,7 +377,7 @@ public class App {
 
     public void boot() throws Exception {
         api = new Api(this);
-        JSONObject tunnelData = new JSONObject();
+        JsonNode tunnelData = null;
 
         try {
             tunnelData = api.createTunnel();
@@ -386,8 +388,8 @@ public class App {
         }
 
         if (tunnelData.has("error")) {
-            System.err.println("An error ocurred: " + tunnelData.getString("error"));
-            if (tunnelData.getString("error").contains("401")) {
+            System.err.println("An error ocurred: " + tunnelData.get("error").asText());
+            if (tunnelData.get("error").asText().contains("401")) {
             	System.err.println("Missing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit");
             }
             System.exit(1);
@@ -398,20 +400,20 @@ public class App {
         startInsightServer();
 
         if (tunnelData.has("id")) {
-            this.tunnelID = Integer.parseInt(tunnelData.getString("id"));
+            this.tunnelID = Integer.parseInt(tunnelData.get("id").asText());
             api.setTunnelID(tunnelID);
         }
 
-        if (Float.parseFloat(tunnelData.getString("version")) > App.VERSION) {
-            System.err.println("A new version (" + tunnelData.getString("version") + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
+        if (Float.parseFloat(tunnelData.get("version").asText()) > App.VERSION) {
+            System.err.println("A new version (" + tunnelData.get("version").asText() + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
 
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
 
-        if (tunnelData.getString("state").equals("READY")) {
+        if (tunnelData.get("state").asText().equals("READY")) {
             this.tunnelReady(tunnelData);
         } else {
-            poller = new TunnelPoller(this, tunnelData.getString("id"));
+            poller = new TunnelPoller(this, tunnelData.get("id").asText());
         }
     }
 
@@ -444,10 +446,10 @@ public class App {
         }
     }
 
-    public void tunnelReady(JSONObject apiResponse) {
+    public void tunnelReady(JsonNode apiResponse) {
         // server is booted, make the connection
         try {
-            String _serverIP = apiResponse.getString("ip");
+            String _serverIP = apiResponse.get("ip").asText();
             tunnel = new SSHTunnel(this, _serverIP);
             if (tunnel.isAuthenticated()) {
                 this.serverIP = _serverIP;

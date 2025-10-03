@@ -6,7 +6,7 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import net.sf.json.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
 
 /**
  *
@@ -34,7 +34,7 @@ public class TunnelPoller {
         @Override
         public void run() {
             Api api = app.getApi();
-            JSONObject response;
+            JsonNode response;
             try {
                 response = api.pollTunnel(tunnelID);
 
@@ -44,12 +44,12 @@ public class TunnelPoller {
                     return;
                 }
 
-                if (response.getString("state").equals("READY")) {
+                if (response.get("state").asText().equals("READY")) {
                    timer.cancel();
                    app.tunnelReady(response);
                 } else {
                     this.counter += 1;
-                    Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.getString("state"));
+                    Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.get("state").asText());
                 }
             } catch (Exception ex) {
                 timer.cancel();

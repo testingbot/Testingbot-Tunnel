@@ -69,9 +69,16 @@ public class HttpForwarder {
     }
 
     public boolean testForwarding() {
+        // Give the SSH tunnel a moment to fully establish
+        try {
+            Thread.sleep(500);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+
         RequestConfig cfg = RequestConfig.custom()
-            .setConnectTimeout(2000)
-            .setSocketTimeout(2000)
+            .setConnectTimeout(5000)
+            .setSocketTimeout(10000)
             .setRedirectsEnabled(false)
             .build();
 

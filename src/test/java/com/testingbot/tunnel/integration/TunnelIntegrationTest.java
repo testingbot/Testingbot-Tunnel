@@ -6,7 +6,7 @@ import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.Doctor;
 import com.testingbot.tunnel.HttpForwarder;
 import com.testingbot.tunnel.HttpProxy;
-import net.sf.json.JSONObject;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -118,7 +118,7 @@ class TunnelIntegrationTest {
         // Then: Should handle the API call structure correctly
         assertThatCode(() -> {
             try {
-                JSONObject result = api.createTunnel();
+                JsonNode result = api.createTunnel();
                 assertThat((Object) result).isNotNull();
             } catch (Exception e) {
                 // Expected in test environment

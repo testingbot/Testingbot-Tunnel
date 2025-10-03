@@ -3,7 +3,8 @@ package com.testingbot.tunnel.proxy;
 import com.testingbot.tunnel.Statistics;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.commons.lang.exception.ExceptionUtils;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
 import org.eclipse.jetty.client.ProxyConfiguration;
@@ -81,7 +82,9 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     @Override
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure) {
         if (!clientRequest.getRequestURL().toString().contains("squid-internal")) {
-            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), ExceptionUtils.getStackTrace(failure)});
+            StringWriter sw = new StringWriter();
+            failure.printStackTrace(new PrintWriter(sw));
+            Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "{0} for request {1}\n{2}", new Object[]{failure.getMessage(), clientRequest.getMethod() + " - " + clientRequest.getRequestURL().toString(), sw.toString()});
         }
 
         super.onClientRequestFailure(clientRequest, proxyRequest, proxyResponse, failure);

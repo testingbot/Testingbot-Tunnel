@@ -149,8 +149,8 @@ public final class HttpProxy {
 
             // HttpClient with sane timeouts
             RequestConfig cfg = RequestConfig.custom()
-                .setConnectTimeout(3000)
-                .setSocketTimeout(5000)
+                .setConnectTimeout(5000)
+                .setSocketTimeout(10000)
                 .setRedirectsEnabled(false)
                 .build();
 

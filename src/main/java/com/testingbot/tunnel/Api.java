@@ -19,7 +19,8 @@ import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.CloseableHttpClient;
 
-import net.sf.json.*;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.http.NameValuePair;
 import org.apache.http.client.entity.UrlEncodedFormEntity;
 import org.apache.http.client.methods.HttpPost;
@@ -38,6 +39,7 @@ public class Api {
     private final String apiHost = "api.testingbot.com";
     private final App app;
     private int tunnelID;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     public Api(App app) {
         this.app = app;
@@ -45,7 +47,7 @@ public class Api {
         this.clientSecret = app.getClientSecret();
     }
 
-    public JSONObject createTunnel() throws Exception {
+    public JsonNode createTunnel() throws Exception {
         try {
             List<NameValuePair> nameValuePairs = new ArrayList<>(2);
             nameValuePairs.add(new BasicNameValuePair("tunnel_version", App.VERSION.toString()));
@@ -69,7 +71,7 @@ public class Api {
         this.tunnelID = tunnelID;
     }
 
-    public JSONObject pollTunnel(String tunnelID) throws Exception {
+    public JsonNode pollTunnel(String tunnelID) throws Exception {
         try {
             return this._get("https://" + apiHost + "/v1/tunnel/" + tunnelID);
         }
@@ -115,7 +117,7 @@ public class Api {
         }
     }
 
-    private JSONObject _post(String url, List<NameValuePair> postData)  throws Exception {
+    private JsonNode _post(String url, List<NameValuePair> postData)  throws Exception {
         try {
             HttpClientBuilder builder = HttpClientBuilder.create();
 
@@ -160,9 +162,9 @@ public class Api {
                     jsonData = jsonData.substring(1, (jsonData.length() - 1));
                 }
 
-                return (JSONObject) JSONSerializer.toJSON(jsonData);
+                return objectMapper.readTree(jsonData);
             }
-            catch (JSONException e) {
+            catch (Exception e) {
                 throw new Exception("Json parse error: " + e.getMessage() + " for " + sb.toString());
             }
 
@@ -171,7 +173,7 @@ public class Api {
 	    }
     }
 
-    private JSONObject _get(String url) throws Exception {
+    private JsonNode _get(String url) throws Exception {
         try {
             HttpClientBuilder builder = HttpClientBuilder.create();
             if (app.getProxy() != null) {
@@ -217,9 +219,9 @@ public class Api {
                     jsonData = jsonData.substring(1, (jsonData.length() - 1));
                 }
 
-                return (JSONObject) JSONSerializer.toJSON(jsonData);
+                return objectMapper.readTree(jsonData);
             }
-            catch (JSONException e) {
+            catch (Exception e) {
                 throw new Exception("Json parse error: " + e.getMessage() + " for " + sb);
             }
 
