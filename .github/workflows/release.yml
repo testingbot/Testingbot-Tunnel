@@ -11,21 +11,19 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Set up JDK 11
-      uses: actions/setup-java@v2
+      uses: actions/setup-java@v4
       with:
         java-version: '11'
-        distribution: 'adopt'
-
-    - name: Cache Maven dependencies
-      uses: actions/cache@v4
-      with:
-        path: ~/.m2/repository
-        key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-        restore-keys: |
-          ${{ runner.os }}-maven-
+        distribution: 'temurin'
+        cache: 'maven'
+        server-id: central
+        server-username: MAVEN_USERNAME
+        server-password: MAVEN_PASSWORD
+        gpg-private-key: ${{ secrets.GPG_PRIVATE_KEY }}
+        gpg-passphrase: GPG_PASSPHRASE
 
     # Set version from tag
     - name: Set version from tag
@@ -33,9 +31,17 @@ jobs:
         TAG_VERSION=${GITHUB_REF#refs/tags/v}
         mvn versions:set -DnewVersion=${TAG_VERSION} -DgenerateBackupPoms=false
 
-    # Run Maven to package the project
-    - name: Build with Maven
-      run: mvn clean package -DskipTests
+    # Run tests
+    - name: Run tests
+      run: mvn test
+
+    # Build and deploy to Maven Central
+    - name: Build and deploy to Maven Central
+      run: mvn -B clean deploy -DskipTests -Dgpg.passphrase=${{ secrets.GPG_PASSPHRASE }}
+      env:
+        MAVEN_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+        MAVEN_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+        GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
     # Upload the JAR as a release asset
     - name: Upload JAR to GitHub Releases
