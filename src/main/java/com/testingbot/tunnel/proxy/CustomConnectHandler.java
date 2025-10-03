@@ -142,13 +142,22 @@ public class CustomConnectHandler extends ConnectHandler {
                                 response.append((char) buffer.get());
                         }
 
-                        if (!response.toString().contains("200"))
-                            throw new IOException("Channel error response:\n" + response);
+                        String responseStr = response.toString();
+                        if (!responseStr.contains("200")) {
+                            String errorMsg = String.format("Upstream proxy (%s:%d) rejected CONNECT request to %s:%d. Response: %s",
+                                    proxyHost, proxyPort, host, port, responseStr.split("\r\n")[0]);
+                            throw new IOException(errorMsg);
+                        }
+
+                        if (debugMode) {
+                            LOG.info("Successfully established CONNECT tunnel through upstream proxy {}:{} to {}:{}",
+                                    proxyHost, proxyPort, host, port);
+                        }
 
                         try {
                             selector.close();
                         } catch (final IOException e) {
-                            LOG.error(e.getMessage(), e);
+                            LOG.error("Error closing selector: {}", e.getMessage(), e);
                         }
 
                         promise.succeeded(channel);
@@ -157,11 +166,13 @@ public class CustomConnectHandler extends ConnectHandler {
                 }
             }
         } catch (IOException x) {
+            LOG.error("Failed to establish CONNECT tunnel through upstream proxy {}:{} to {}:{}: {}",
+                    proxyHost, proxyPort, host, port, x.getMessage());
             if (channel != null) {
                 try {
                     channel.close();
                 } catch (IOException t) {
-                    LOG.error(t.getMessage(), t);
+                    LOG.error("Error closing channel after failure: {}", t.getMessage(), t);
                 }
             }
             promise.failed(x);

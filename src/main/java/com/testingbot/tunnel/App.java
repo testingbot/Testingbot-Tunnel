@@ -569,8 +569,36 @@ public class App {
         clientSecret = secret;
     }
 
+    /**
+     * Sets the upstream proxy server address.
+     *
+     * @param p proxy address in format "host:port" or "host" (defaults to port 80)
+     * @throws IllegalArgumentException if proxy format is invalid
+     */
     public void setProxy(String p) {
-        proxy = p;
+        if (p != null && !p.trim().isEmpty()) {
+            // Validate proxy format: hostname:port or hostname or IP:port
+            String trimmed = p.trim();
+            if (trimmed.contains(":")) {
+                String[] parts = trimmed.split(":", 2);
+                if (parts.length != 2 || parts[0].isEmpty()) {
+                    throw new IllegalArgumentException("Invalid proxy format. Expected 'host:port' but got: " + p);
+                }
+                try {
+                    int port = Integer.parseInt(parts[1]);
+                    if (port < 1 || port > 65535) {
+                        throw new IllegalArgumentException("Invalid proxy port. Must be between 1-65535 but got: " + port);
+                    }
+                } catch (NumberFormatException e) {
+                    throw new IllegalArgumentException("Invalid proxy port. Must be a number but got: " + parts[1]);
+                }
+            } else if (trimmed.isEmpty()) {
+                throw new IllegalArgumentException("Proxy hostname cannot be empty");
+            }
+            proxy = trimmed;
+        } else {
+            proxy = p;
+        }
     }
 
     public String getProxy() {
@@ -629,10 +657,27 @@ public class App {
         return proxyAuth;
     }
 
+    /**
+     * Sets the proxy authentication credentials.
+     *
+     * @param proxyAuth credentials in format "username:password"
+     * @throws IllegalArgumentException if format is invalid
+     */
     public void setProxyAuth(String proxyAuth) {
-        this.proxyAuth = proxyAuth;
-        String[] splitted = proxyAuth.split(":");
-        Authenticator.setDefault(new ProxyAuth(splitted[0], splitted[1]));
+        if (proxyAuth != null && !proxyAuth.trim().isEmpty()) {
+            String trimmed = proxyAuth.trim();
+            if (!trimmed.contains(":")) {
+                throw new IllegalArgumentException("Invalid proxy auth format. Expected 'username:password' but got: " + proxyAuth);
+            }
+            String[] splitted = trimmed.split(":", 2);
+            if (splitted.length != 2 || splitted[0].isEmpty()) {
+                throw new IllegalArgumentException("Invalid proxy auth format. Username cannot be empty");
+            }
+            this.proxyAuth = trimmed;
+            Authenticator.setDefault(new ProxyAuth(splitted[0], splitted[1]));
+        } else {
+            this.proxyAuth = proxyAuth;
+        }
     }
 
     /**
