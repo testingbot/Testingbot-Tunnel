@@ -77,6 +77,9 @@ $ java -jar testingbot-tunnel.jar <key> <secret>
 ```
 
 Now point your tests to use the tunnel's IP (localhost if the .jar is running on your local computer) and port 4445
+
+### Ruby
+
 ```ruby
 require "rubygems"
 require 'testingbot'
@@ -102,6 +105,107 @@ puts webdriver.title
 webdriver.quit
 ```
 
+### Python
+
+```python
+from selenium import webdriver
+from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+
+caps = DesiredCapabilities.INTERNET_EXPLORER.copy()
+caps['version'] = 'latest'
+caps['platform'] = 'WINDOWS'
+
+driver = webdriver.Remote(
+    command_executor='http://key:secret@localhost:4445/wd/hub',
+    desired_capabilities=caps
+)
+
+driver.get("http://staging.local")
+print(driver.title)
+driver.quit()
+```
+
+### Java
+
+```java
+import org.openqa.selenium.WebDriver;
+import org.openqa.selenium.remote.DesiredCapabilities;
+import org.openqa.selenium.remote.RemoteWebDriver;
+import java.net.URL;
+
+public class TestingBotTest {
+    public static void main(String[] args) throws Exception {
+        DesiredCapabilities caps = DesiredCapabilities.internetExplorer();
+        caps.setCapability("version", "latest");
+        caps.setCapability("platform", "WINDOWS");
+
+        WebDriver driver = new RemoteWebDriver(
+            new URL("http://key:secret@localhost:4445/wd/hub"),
+            caps
+        );
+
+        driver.get("http://staging.local");
+        System.out.println(driver.getTitle());
+        driver.quit();
+    }
+}
+```
+
+### JavaScript (Node.js)
+
+```javascript
+const { Builder } = require('selenium-webdriver');
+const { By } = require('selenium-webdriver');
+
+const caps = {
+    browserName: 'internet explorer',
+    version: 'latest',
+    platform: 'WINDOWS'
+};
+
+(async function example() {
+    let driver = await new Builder()
+        .usingServer('http://key:secret@localhost:4445/wd/hub')
+        .withCapabilities(caps)
+        .build();
+
+    try {
+        await driver.get('http://staging.local');
+        console.log(await driver.getTitle());
+    } finally {
+        await driver.quit();
+    }
+})();
+```
+
+### C#
+
+```csharp
+using OpenQA.Selenium;
+using OpenQA.Selenium.Remote;
+using System;
+
+class TestingBotTest
+{
+    static void Main(string[] args)
+    {
+        DesiredCapabilities caps = new DesiredCapabilities();
+        caps.SetCapability("browserName", "internet explorer");
+        caps.SetCapability("version", "latest");
+        caps.SetCapability("platform", "WINDOWS");
+
+        IWebDriver driver = new RemoteWebDriver(
+            new Uri("http://key:secret@localhost:4445/wd/hub"),
+            caps
+        );
+
+        driver.Navigate().GoToUrl("http://staging.local");
+        Console.WriteLine(driver.Title);
+        driver.Quit();
+    }
+}
+```
+
 Node
 -------
 We have created a NodeJS based launcher which you can use in your NodeJS tests and projects:
@@ -115,12 +219,12 @@ For those who don't want to deal with Java, we also provide a containerized vers
 
 To start the tunnel, run:
 ```
-$ docker run -p 4445:4445 testingbot/tunnel:2.9 <key> <secret> <options>
+$ docker run -p 4445:4445 testingbot/tunnel:latest <key> <secret> <options>
 ```
 
 Alternatively:
 ```
-$ docker run -p 4445:4445 -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRET=<secret> testingbot/tunnel:2.9 <options>
+$ docker run -p 4445:4445 -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRET=<secret> testingbot/tunnel:latest <options>
 ```
 
 To build the docker image, run:
