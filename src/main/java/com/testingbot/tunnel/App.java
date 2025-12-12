@@ -72,7 +72,27 @@ public class App {
         return 0.0f;
     }
 
+    private static final int MINIMUM_JAVA_VERSION = 11;
+
+    static boolean checkJavaVersion() {
+        int major = getMajorJavaVersion();
+        if (major < MINIMUM_JAVA_VERSION) {
+            System.err.println("Error: TestingBot Tunnel requires Java " + MINIMUM_JAVA_VERSION + " or higher.");
+            System.err.println("Current version: " + Runtime.version());
+            System.err.println("Please upgrade your Java installation and try again.");
+            return false;
+        }
+        return true;
+    }
+
+    static int getMajorJavaVersion() {
+        return Runtime.version().feature();
+    }
+
     public static void main(String... args) throws Exception {
+        if (!checkJavaVersion()) {
+            System.exit(1);
+        }
 
         final CommandLineParser cmdLinePosixParser = new PosixParser();
         final Options options = new Options();
