@@ -3,15 +3,15 @@ package com.testingbot.tunnel.proxy;
 import com.github.tomakehurst.wiremock.WireMockServer;
 import com.github.tomakehurst.wiremock.client.WireMock;
 import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
-import com.github.tomakehurst.wiremock.http.RequestMethod;
 import com.testingbot.tunnel.App;
-import org.apache.http.HttpHost;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.util.EntityUtils;
+
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.HttpHost;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletContextHandler;
@@ -20,12 +20,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.IOException;
 import java.util.Base64;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatCode;
 
 /**
  * Tests for upstream proxy functionality (--proxy and --proxy-userpwd options)
@@ -110,7 +108,7 @@ class UpstreamProxyTest {
         startLocalProxyWithUpstream("localhost:" + upstreamProxy.port(), null);
 
         // When: Making HTTP request through local proxy
-        HttpHost proxy = new HttpHost("localhost", localProxyPort);
+        HttpHost proxy = new HttpHost("http", "localhost", localProxyPort);
         RequestConfig config = RequestConfig.custom()
                 .setProxy(proxy)
                 .build();
@@ -120,16 +118,16 @@ class UpstreamProxyTest {
                 .build()) {
 
             HttpGet request = new HttpGet("http://localhost:" + targetServer.port() + "/api/test");
-            try (CloseableHttpResponse response = client.execute(request)) {
-
+            client.execute(request, response -> {
                 // Then: Request should succeed
-                assertThat(response.getStatusLine().getStatusCode()).isEqualTo(200);
+                assertThat(response.getCode()).isEqualTo(200);
                 String body = EntityUtils.toString(response.getEntity());
                 assertThat(body).contains("success");
+                return null;
+            });
 
-                // And: Upstream proxy should have received the request
-                upstreamProxy.verify(getRequestedFor(urlPathEqualTo("/api/test")));
-            }
+            // And: Upstream proxy should have received the request
+            upstreamProxy.verify(getRequestedFor(urlPathEqualTo("/api/test")));
         }
     }
 
@@ -154,7 +152,7 @@ class UpstreamProxyTest {
         startLocalProxyWithUpstream("localhost:" + upstreamProxy.port(), "testuser:testpass");
 
         // When: Making HTTP request through authenticated proxy
-        HttpHost proxy = new HttpHost("localhost", localProxyPort);
+        HttpHost proxy = new HttpHost("http", "localhost", localProxyPort);
         RequestConfig config = RequestConfig.custom()
                 .setProxy(proxy)
                 .build();
@@ -164,15 +162,15 @@ class UpstreamProxyTest {
                 .build()) {
 
             HttpGet request = new HttpGet("http://example.com/test");
-            try (CloseableHttpResponse response = client.execute(request)) {
-
+            client.execute(request, response -> {
                 // Then: Request should succeed with auth
-                assertThat(response.getStatusLine().getStatusCode()).isEqualTo(200);
+                assertThat(response.getCode()).isEqualTo(200);
+                return null;
+            });
 
-                // And: Upstream proxy should have received auth header
-                upstreamProxy.verify(getRequestedFor(urlPathEqualTo("/test"))
-                        .withHeader("Proxy-Authorization", equalTo(expectedAuth)));
-            }
+            // And: Upstream proxy should have received auth header
+            upstreamProxy.verify(getRequestedFor(urlPathEqualTo("/test"))
+                    .withHeader("Proxy-Authorization", equalTo(expectedAuth)));
         }
     }
 
@@ -269,7 +267,7 @@ class UpstreamProxyTest {
         startLocalProxyWithUpstream("localhost:" + upstreamProxy.port(), null);
 
         // When: Making multiple requests
-        HttpHost proxy = new HttpHost("localhost", localProxyPort);
+        HttpHost proxy = new HttpHost("http", "localhost", localProxyPort);
         RequestConfig config = RequestConfig.custom().setProxy(proxy).build();
 
         try (CloseableHttpClient client = HttpClients.custom()
@@ -278,9 +276,10 @@ class UpstreamProxyTest {
 
             for (int i = 0; i < 3; i++) {
                 HttpGet request = new HttpGet("http://localhost:" + targetServer.port() + "/request" + i);
-                try (CloseableHttpResponse response = client.execute(request)) {
-                    assertThat(response.getStatusLine().getStatusCode()).isEqualTo(200);
-                }
+                client.execute(request, response -> {
+                    assertThat(response.getCode()).isEqualTo(200);
+                    return null;
+                });
             }
 
             // Then: All requests should go through upstream proxy

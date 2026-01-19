@@ -1,14 +1,15 @@
 package com.testingbot.tunnel;
 
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
-import org.apache.http.HttpStatus;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpHead;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.classic.methods.HttpHead;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.HttpStatus;
+import org.apache.hc.core5.util.Timeout;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.servlet.ServletHolder;
@@ -77,8 +78,8 @@ public class HttpForwarder {
         }
 
         RequestConfig cfg = RequestConfig.custom()
-            .setConnectTimeout(5000)
-            .setSocketTimeout(10000)
+            .setConnectTimeout(Timeout.of(5, TimeUnit.SECONDS))
+            .setResponseTimeout(Timeout.of(10, TimeUnit.SECONDS))
             .setRedirectsEnabled(false)
             .build();
 
@@ -86,13 +87,10 @@ public class HttpForwarder {
             .setDefaultRequestConfig(cfg)
             .build()) {
             HttpHead req = new HttpHead("http://127.0.0.1:" + seleniumPort + "/");
-            try (CloseableHttpResponse resp = client.execute(req)) {
-                return resp.getStatusLine().getStatusCode() == HttpStatus.SC_OK;
-            }
+            return client.execute(req, response -> response.getCode() == HttpStatus.SC_OK);
         } catch (Exception ex) {
             Logger.getLogger(HttpForwarder.class.getName()).log(Level.SEVERE, null, ex);
             return false;
         }
     }
 }
-

@@ -18,14 +18,16 @@ package com.testingbot.tunnel;
 import java.io.IOException;
 import java.net.*;
 import java.util.ArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpHead;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.util.EntityUtils;
+
+import org.apache.hc.client5.http.classic.methods.HttpHead;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.util.Timeout;
 
 /**
  *
@@ -111,16 +113,18 @@ public final class Doctor {
 
     private boolean checkConnection(final URI uri) {
         RequestConfig cfg = RequestConfig.custom()
-            .setConnectTimeout(2000).setSocketTimeout(3000).build();
+            .setConnectTimeout(Timeout.of(2, TimeUnit.SECONDS))
+            .setResponseTimeout(Timeout.of(3, TimeUnit.SECONDS))
+            .build();
 
         try (CloseableHttpClient client = HttpClients.custom()
             .setDefaultRequestConfig(cfg).build()) {
             HttpHead head = new HttpHead(uri);
-            try (CloseableHttpResponse resp = client.execute(head)) {
-                EntityUtils.consumeQuietly(resp.getEntity());
-                int sc = resp.getStatusLine().getStatusCode();
+            return client.execute(head, response -> {
+                EntityUtils.consumeQuietly(response.getEntity());
+                int sc = response.getCode();
                 return sc >= 200 && sc < 400;
-            }
+            });
         } catch (Exception e) {
             return false;
         }

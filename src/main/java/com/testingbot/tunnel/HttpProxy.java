@@ -6,21 +6,24 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.testingbot.tunnel.proxy.WebsocketHandler;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.apache.http.NameValuePair;
-import org.apache.http.client.config.RequestConfig;
-import org.apache.http.client.entity.UrlEncodedFormEntity;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpPost;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.message.BasicNameValuePair;
-import org.apache.http.util.EntityUtils;
+
+import org.apache.hc.client5.http.classic.methods.HttpPost;
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.NameValuePair;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
+import org.apache.hc.core5.http.message.BasicNameValuePair;
+import org.apache.hc.core5.util.Timeout;
+
 import org.eclipse.jetty.proxy.ConnectHandler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -149,8 +152,8 @@ public final class HttpProxy {
 
             // HttpClient with sane timeouts
             RequestConfig cfg = RequestConfig.custom()
-                .setConnectTimeout(5000)
-                .setSocketTimeout(10000)
+                .setConnectTimeout(Timeout.of(5, TimeUnit.SECONDS))
+                .setResponseTimeout(Timeout.of(10, TimeUnit.SECONDS))
                 .setRedirectsEnabled(false)
                 .build();
 
@@ -167,14 +170,14 @@ public final class HttpProxy {
                 );
                 post.setEntity(new UrlEncodedFormEntity(form, StandardCharsets.UTF_8));
 
-                try (CloseableHttpResponse resp = http.execute(post)) {
-                    int status = resp.getStatusLine().getStatusCode();
-                    String body = resp.getEntity() != null
-                        ? EntityUtils.toString(resp.getEntity(), StandardCharsets.UTF_8)
+                return http.execute(post, response -> {
+                    int status = response.getCode();
+                    String body = response.getEntity() != null
+                        ? EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8)
                         : "";
                     // Expect TB to echo what your local handler served
                     return status == 201 && body.contains("test=" + randomNumber);
-                }
+                });
             }
         } catch (Exception e) {
             Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, e.getMessage());
@@ -217,4 +220,3 @@ public final class HttpProxy {
         }
     }
 }
-

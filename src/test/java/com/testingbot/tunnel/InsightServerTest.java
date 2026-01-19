@@ -1,10 +1,9 @@
 package com.testingbot.tunnel;
 
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.util.EntityUtils;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -78,10 +77,9 @@ class InsightServerTest {
         // When: Making request to metrics endpoint
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:8998/");
-            try (CloseableHttpResponse response = client.execute(request)) {
-
+            client.execute(request, response -> {
                 // Then: Should return 200 OK
-                assertThat(response.getStatusLine().getStatusCode()).isEqualTo(200);
+                assertThat(response.getCode()).isEqualTo(200);
 
                 // And: Content-Type should be JSON
                 assertThat(response.getFirstHeader("Content-Type").getValue())
@@ -95,7 +93,8 @@ class InsightServerTest {
                 assertThat(json.has("uptime")).isTrue();
                 assertThat(json.has("numberOfRequests")).isTrue();
                 assertThat(json.has("bytesTransferred")).isTrue();
-            }
+                return null;
+            });
         }
     }
 
@@ -109,13 +108,14 @@ class InsightServerTest {
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:8997/");
-            try (CloseableHttpResponse response = client.execute(request)) {
+            client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Version should match App.VERSION
                 assertThat(json.get("version").asText()).isEqualTo(App.VERSION.toString());
-            }
+                return null;
+            });
         }
     }
 
@@ -132,14 +132,15 @@ class InsightServerTest {
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:8996/");
-            try (CloseableHttpResponse response = client.execute(request)) {
+            client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Uptime should be greater than 5000ms
                 long uptime = Long.parseLong(json.get("uptime").asText());
                 assertThat(uptime).isGreaterThanOrEqualTo(5000);
-            }
+                return null;
+            });
         }
     }
 
@@ -158,13 +159,14 @@ class InsightServerTest {
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:8995/");
-            try (CloseableHttpResponse response = client.execute(request)) {
+            client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Should return correct request count
                 assertThat(json.get("numberOfRequests").asText()).isEqualTo("3");
-            }
+                return null;
+            });
         }
     }
 
@@ -181,13 +183,14 @@ class InsightServerTest {
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:8994/");
-            try (CloseableHttpResponse response = client.execute(request)) {
+            client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Should return correct bytes
                 assertThat(json.get("bytesTransferred").asLong()).isEqualTo(2048);
-            }
+                return null;
+            });
         }
     }
 
@@ -202,10 +205,11 @@ class InsightServerTest {
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             for (int i = 0; i < 5; i++) {
                 HttpGet request = new HttpGet("http://localhost:8993/");
-                try (CloseableHttpResponse response = client.execute(request)) {
+                client.execute(request, response -> {
                     // Then: Each request should succeed
-                    assertThat(response.getStatusLine().getStatusCode()).isEqualTo(200);
-                }
+                    assertThat(response.getCode()).isEqualTo(200);
+                    return null;
+                });
             }
         }
     }
