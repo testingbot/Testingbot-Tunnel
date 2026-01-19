@@ -82,43 +82,44 @@ Now point your tests to use the tunnel's IP (localhost if the .jar is running on
 ### Ruby
 
 ```ruby
-require "rubygems"
-require 'testingbot'
-gem "selenium-client"
-gem "selenium-webdriver"
 require "selenium-webdriver"
-require "selenium/client"
 
-caps = {
-  :browserName => "internet explorer",
-  :version => "latest",
-  :platform => "WINDOWS"
-}
+options = Selenium::WebDriver::Chrome::Options.new
+options.add_argument("--start-maximized")
+
+caps = Selenium::WebDriver::Remote::Capabilities.new(
+  browser_name: "chrome",
+  browser_version: "latest",
+  platform_name: "WIN10"
+)
 
 urlhub = "http://key:secret@localhost:4445/wd/hub"
 client = Selenium::WebDriver::Remote::Http::Default.new
-client.timeout = 120
+client.read_timeout = 120
 
-webdriver = Selenium::WebDriver.for :remote, :url => urlhub,
-                :desired_capabilities => caps, :http_client => client
-webdriver.navigate.to "http://staging.local"
-puts webdriver.title
-webdriver.quit
+driver = Selenium::WebDriver.for :remote,
+  url: urlhub,
+  capabilities: [caps, options],
+  http_client: client
+
+driver.navigate.to "http://staging.local"
+puts driver.title
+driver.quit
 ```
 
 ### Python
 
 ```python
 from selenium import webdriver
-from selenium.webdriver.common.desired_capabilities import DesiredCapabilities
+from selenium.webdriver.chrome.options import Options
 
-caps = DesiredCapabilities.INTERNET_EXPLORER.copy()
-caps['version'] = 'latest'
-caps['platform'] = 'WINDOWS'
+options = Options()
+options.browser_version = "latest"
+options.platform_name = "WIN10"
 
 driver = webdriver.Remote(
-    command_executor='http://key:secret@localhost:4445/wd/hub',
-    desired_capabilities=caps
+    command_executor="http://key:secret@localhost:4445/wd/hub",
+    options=options
 )
 
 driver.get("http://staging.local")
@@ -130,19 +131,19 @@ driver.quit()
 
 ```java
 import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.remote.DesiredCapabilities;
+import org.openqa.selenium.chrome.ChromeOptions;
 import org.openqa.selenium.remote.RemoteWebDriver;
 import java.net.URL;
 
 public class TestingBotTest {
     public static void main(String[] args) throws Exception {
-        DesiredCapabilities caps = DesiredCapabilities.internetExplorer();
-        caps.setCapability("version", "latest");
-        caps.setCapability("platform", "WINDOWS");
+        ChromeOptions options = new ChromeOptions();
+        options.setPlatformName("WIN10");
+        options.setBrowserVersion("latest");
 
         WebDriver driver = new RemoteWebDriver(
             new URL("http://key:secret@localhost:4445/wd/hub"),
-            caps
+            options
         );
 
         driver.get("http://staging.local");
@@ -156,18 +157,17 @@ public class TestingBotTest {
 
 ```javascript
 const { Builder } = require('selenium-webdriver');
-const { By } = require('selenium-webdriver');
-
-const caps = {
-    browserName: 'internet explorer',
-    version: 'latest',
-    platform: 'WINDOWS'
-};
+const chrome = require('selenium-webdriver/chrome');
 
 (async function example() {
-    let driver = await new Builder()
+    const options = new chrome.Options();
+    options.setBrowserVersion('latest');
+    options.setPlatform('WIN10');
+
+    const driver = await new Builder()
         .usingServer('http://key:secret@localhost:4445/wd/hub')
-        .withCapabilities(caps)
+        .forBrowser('chrome')
+        .setChromeOptions(options)
         .build();
 
     try {
@@ -183,6 +183,7 @@ const caps = {
 
 ```csharp
 using OpenQA.Selenium;
+using OpenQA.Selenium.Chrome;
 using OpenQA.Selenium.Remote;
 using System;
 
@@ -190,14 +191,13 @@ class TestingBotTest
 {
     static void Main(string[] args)
     {
-        DesiredCapabilities caps = new DesiredCapabilities();
-        caps.SetCapability("browserName", "internet explorer");
-        caps.SetCapability("version", "latest");
-        caps.SetCapability("platform", "WINDOWS");
+        var options = new ChromeOptions();
+        options.BrowserVersion = "latest";
+        options.PlatformName = "WIN10";
 
         IWebDriver driver = new RemoteWebDriver(
             new Uri("http://key:secret@localhost:4445/wd/hub"),
-            caps
+            options
         );
 
         driver.Navigate().GoToUrl("http://staging.local");
