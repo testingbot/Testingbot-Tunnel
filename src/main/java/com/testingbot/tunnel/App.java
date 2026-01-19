@@ -3,13 +3,13 @@ package com.testingbot.tunnel;
 import com.testingbot.tunnel.proxy.ProxyAuth;
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
-import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Properties;
 import java.net.Authenticator;
 import java.net.ServerSocket;
@@ -367,15 +367,13 @@ public class App {
         if (System.getenv("TESTINGBOT_KEY") != null && System.getenv("TESTINGBOT_SECRET") != null) {
           return new String[] { System.getenv("TESTINGBOT_KEY"), System.getenv("TESTINGBOT_SECRET") };
         }
-        File dataFile = new File(System.getProperty("user.home") + File.separator + ".testingbot");
-        if (dataFile.exists()) {
-            try {
-                FileInputStream fstream = new FileInputStream(dataFile.getAbsolutePath());
-                // Get the object of DataInputStream
-                DataInputStream in = new DataInputStream(fstream);
-                BufferedReader br = new BufferedReader(new InputStreamReader(in));
+        Path dataFile = Path.of(System.getProperty("user.home"), ".testingbot");
+        if (Files.exists(dataFile)) {
+            try (BufferedReader br = Files.newBufferedReader(dataFile)) {
                 String strLine = br.readLine();
-                return strLine.split(":");
+                if (strLine != null) {
+                    return strLine.split(":");
+                }
             } catch (IOException ignored) {
             }
         }
