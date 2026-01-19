@@ -60,6 +60,7 @@ public class Api {
             if (app.isNoBump()) {
                 nameValuePairs.add(new BasicNameValuePair("no_bump", String.valueOf(app.isNoBump())));
             }
+            nameValuePairs.add(new BasicNameValuePair("shared", String.valueOf(app.isShared())));
             return this._post("https://" + apiHost + "/v1/tunnel/create", nameValuePairs);
         }
         catch (Exception e) {

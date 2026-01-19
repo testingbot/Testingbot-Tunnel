@@ -228,4 +228,39 @@ class CommandLineTest {
         // (depends on App initialization state)
         // Just verify method exists and doesn't throw
     }
+
+    @Test
+    void isShared_shouldReturnFalseByDefault() {
+        // Given: Fresh App instance
+        // When: Checking shared status
+        boolean shared = app.isShared();
+
+        // Then: Should be false by default
+        assertThat(shared).isFalse();
+    }
+
+    @Test
+    void setShared_shouldEnableSharing() {
+        // Given: App with sharing disabled
+        assertThat(app.isShared()).isFalse();
+
+        // When: Enabling sharing
+        app.setShared(true);
+
+        // Then: Sharing should be enabled
+        assertThat(app.isShared()).isTrue();
+    }
+
+    @Test
+    void setShared_shouldDisableSharing() {
+        // Given: App with sharing enabled
+        app.setShared(true);
+        assertThat(app.isShared()).isTrue();
+
+        // When: Disabling sharing
+        app.setShared(false);
+
+        // Then: Sharing should be disabled
+        assertThat(app.isShared()).isFalse();
+    }
 }

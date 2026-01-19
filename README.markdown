@@ -61,6 +61,7 @@ The tunnel comes with various options:
 |-p,--hubport <HUBPORT>|Use this if you want to connect to port 80 on our hub instead of the default port 4444|
 |--pac <arg>|Proxy autoconfiguration. Should be a http(s) URL|
 |-q,--nocache|Bypass our Caching Proxy running on our tunnel VM.|
+|-s,--shared <all>|Share this tunnel among team members. Valid values: all|
 |-v,--version|Displays the current version of the Tunnel|
 |-w,--web <directory>|Point to a directory for testing. Creates a local webserver.|
 |-x,--noproxy|Do not start a local proxy (requires user provided proxy server on port 8087)|

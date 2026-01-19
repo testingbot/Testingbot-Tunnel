@@ -53,6 +53,7 @@ public class App {
     private String pac = null;
     private int metricsPort = 8003;
     private int sshPort = 0;
+    private boolean shared = false;
 
     private static Float getVersionFromProperties() {
         try (InputStream input = App.class.getClassLoader().getResourceAsStream("version.properties")) {
@@ -159,6 +160,10 @@ public class App {
         options.addOption("q", "nocache", false, "Bypass our Caching Proxy running on our tunnel VM.");
         options.addOption("b", "nobump", false, "Do not perform SSL bumping.");
         options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default 8087)");
+
+        Option shared = new Option("s", "shared", true, "Share this tunnel among team members. Valid values: all");
+        shared.setArgName("all");
+        options.addOption(shared);
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
 
@@ -320,6 +325,15 @@ public class App {
             if (commandLine.hasOption("nobump")) {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable SSL bumping. SSL certificates will not be rewritten.");
                 app.noBump = true;
+            }
+
+            if (commandLine.hasOption("shared")) {
+                String sharedValue = commandLine.getOptionValue("shared");
+                if (!"all".equalsIgnoreCase(sharedValue)) {
+                    throw new ParseException("Invalid value for --shared. Only 'all' is supported.");
+                }
+                Logger.getLogger(App.class.getName()).log(Level.INFO, "Tunnel will be shared among team members.");
+                app.shared = true;
             }
 
             if (commandLine.hasOption("hubport")) {
@@ -776,6 +790,20 @@ public class App {
             }
         }
         return sshPort;
+    }
+
+    /**
+     * @return whether the tunnel is shared among team members
+     */
+    public boolean isShared() {
+        return shared;
+    }
+
+    /**
+     * @param shared whether the tunnel should be shared among team members
+     */
+    public void setShared(boolean shared) {
+        this.shared = shared;
     }
 
 }
