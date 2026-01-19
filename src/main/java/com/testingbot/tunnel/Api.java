@@ -5,8 +5,8 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
-import net.iharder.Base64;
 import org.apache.http.HttpHost;
 import org.apache.http.HttpResponse;
 import org.apache.http.auth.AuthScope;
@@ -108,7 +108,7 @@ public class Api {
 
         try (CloseableHttpClient httpClient = builder.build()) {
             String auth = this.clientKey + ":" + this.clientSecret;
-            String encoding = Base64.encodeBytes(auth.getBytes(StandardCharsets.UTF_8));
+            String encoding = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
 
             HttpDelete deleteRequest = new HttpDelete("https://" + apiHost + "/v1/tunnel/" + this.tunnelID);
             deleteRequest.addHeader("accept", "application/json");
@@ -142,7 +142,7 @@ public class Api {
             StringBuilder sb;
             try (CloseableHttpClient httpClient = builder.build()) {
                 String auth = this.clientKey + ":" + this.clientSecret;
-                String encoding = Base64.encodeBytes(auth.getBytes(StandardCharsets.UTF_8));
+                String encoding = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
                 HttpPost postRequest = new HttpPost(url);
                 postRequest.addHeader("accept", "application/json");
                 postRequest.setHeader("Authorization", "Basic " + encoding);
@@ -197,7 +197,7 @@ public class Api {
             StringBuilder sb;
             try (CloseableHttpClient httpClient = builder.build()) {
                 String auth = this.clientKey + ":" + this.clientSecret;
-                String encoding = Base64.encodeBytes(auth.getBytes(StandardCharsets.UTF_8));
+                String encoding = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
                 HttpGet getRequest = new HttpGet(url);
                 getRequest.addHeader("accept", "application/json");
                 getRequest.setHeader("Authorization", "Basic " + encoding);
