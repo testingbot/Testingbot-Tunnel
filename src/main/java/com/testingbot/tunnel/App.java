@@ -161,9 +161,7 @@ public class App {
         options.addOption("b", "nobump", false, "Do not perform SSL bumping.");
         options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default 8087)");
 
-        Option shared = new Option("s", "shared", true, "Share this tunnel among team members. Valid values: all");
-        shared.setArgName("all");
-        options.addOption(shared);
+        options.addOption("s", "shared", false, "Share this tunnel among team members.");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
 
@@ -328,10 +326,6 @@ public class App {
             }
 
             if (commandLine.hasOption("shared")) {
-                String sharedValue = commandLine.getOptionValue("shared");
-                if (!"all".equalsIgnoreCase(sharedValue)) {
-                    throw new ParseException("Invalid value for --shared. Only 'all' is supported.");
-                }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Tunnel will be shared among team members.");
                 app.shared = true;
             }
