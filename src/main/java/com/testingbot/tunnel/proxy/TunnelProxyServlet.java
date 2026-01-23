@@ -103,8 +103,10 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
             proxyRequest.header(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
         }
 
-        if (getServletContext().getAttribute("extra_headers") != null) {
-            HashMap<String, String> headers = (HashMap<String, String>) getServletContext().getAttribute("extra_headers");
+        Object extraHeadersAttr = getServletContext().getAttribute("extra_headers");
+        if (extraHeadersAttr instanceof Map) {
+            @SuppressWarnings("unchecked")
+            Map<String, String> headers = (Map<String, String>) extraHeadersAttr;
             for (Map.Entry<String, String> entry : headers.entrySet()) {
                 String key = entry.getKey();
                 String value = entry.getValue();
@@ -120,18 +122,24 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
 
         final String proxy = getServletConfig().getInitParameter("proxy");
         if (proxy != null && !proxy.isEmpty()) {
-            String[] splitted = proxy.split(":");
-            ProxyConfiguration proxyConfig = client.getProxyConfiguration();
-            HttpProxy httpProxy = new HttpProxy(splitted[0], Integer.parseInt(splitted[1]));
-            proxyConfig.getProxies().add(httpProxy);
+            String[] splitted = proxy.split(":", 2);
+            if (splitted.length < 2) {
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "Invalid proxy format, expected host:port");
+            } else {
+                ProxyConfiguration proxyConfig = client.getProxyConfiguration();
+                HttpProxy httpProxy = new HttpProxy(splitted[0], Integer.parseInt(splitted[1]));
+                proxyConfig.getProxies().add(httpProxy);
 
-            String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
-            if (proxyAuth != null && !proxyAuth.isEmpty()) {
-                String[] credentials = proxyAuth.split(":");
-                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Proxy auth {0} : {1}", new Object[]{credentials[0], credentials[1]});
+                String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
+                if (proxyAuth != null && !proxyAuth.isEmpty()) {
+                    String[] credentials = proxyAuth.split(":", 2);
+                    if (credentials.length >= 2) {
+                        Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Proxy authentication configured");
 
-                String userPass = credentials[0] + ":" + credentials[1];
-                proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder().encodeToString(userPass.getBytes());
+                        String userPass = credentials[0] + ":" + credentials[1];
+                        proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder().encodeToString(userPass.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    }
+                }
             }
         }
 
@@ -140,12 +148,16 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
             final String[] basicAuth = basicAuthString.split(",");
             for (String authCredentials : basicAuth) {
                 String[] credentials = authCredentials.split(":");
+                if (credentials.length < 4) {
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "Invalid basic auth format, expected host:port:user:password");
+                    continue;
+                }
                 auth = client.getAuthenticationStore();
-                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Adding Basic Auth for {0} : {1} : {2}", new Object[]{credentials[0] + ":" + credentials[1], credentials[2], credentials[3]});
+                Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "Adding Basic Auth for {0}:{1}", new Object[]{credentials[0], credentials[1]});
                 try {
                     auth.addAuthentication(new BasicAuthentication(new URI("http://" + credentials[0] + ":" + credentials[1]), Authentication.ANY_REALM, credentials[2], credentials[3]));
                 } catch (URISyntaxException ex) {
-                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, null, ex);
+                    Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.SEVERE, "Invalid URI for basic auth", ex);
                 }
             }
         }
