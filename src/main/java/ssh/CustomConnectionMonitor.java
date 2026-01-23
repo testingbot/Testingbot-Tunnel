@@ -30,7 +30,9 @@ public class CustomConnectionMonitor {
             return;
         }
 
-        app.getHttpProxy().stop();
+        if (app.getHttpProxy() != null) {
+            app.getHttpProxy().stop();
+        }
 
         Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE,
             String.format("[%s] SSH Connection lost! %s", tunnel.getConnectionId(), reason.getMessage()));
@@ -61,7 +63,9 @@ public class CustomConnectionMonitor {
                     retrying = false;
                     timer.cancel();
 
-                    app.getHttpProxy().start();
+                    if (app.getHttpProxy() != null) {
+                        app.getHttpProxy().start();
+                    }
                     tunnel.createPortForwarding();
 
                     Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO,
