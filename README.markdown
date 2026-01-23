@@ -228,12 +228,18 @@ Alternatively:
 $ docker run -p 4445:4445 -e TESTINGBOT_KEY=<key> -e TESTINGBOT_SECRET=<secret> testingbot/tunnel:latest <options>
 ```
 
-To build the docker image, run:
+To build the docker image locally, first build the JAR, then build the image:
 ```
+mvn package -DskipTests
+docker build -t testingbot/tunnel:latest .
+```
+
+For multi-platform builds (requires docker buildx):
+```
+mvn package -DskipTests
 docker buildx build --platform linux/amd64,linux/arm64 \
-  --no-cache \
   --push \
-  -t testingbot/tunnel:4.1 \
+  -t testingbot/tunnel:4.6 \
   -t testingbot/tunnel:latest .
 ```
 
