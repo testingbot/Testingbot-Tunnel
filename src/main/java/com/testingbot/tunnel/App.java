@@ -24,6 +24,8 @@ import java.util.logging.Logger;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.cli.*;
+import ch.qos.logback.classic.LoggerContext;
+import org.slf4j.LoggerFactory;
 import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
@@ -193,6 +195,10 @@ public class App {
                 logger.log(Level.INFO, "Running in debug-mode");
                 logger.setLevel(Level.ALL);
                 app.setDebugMode(true);
+
+                LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+                loggerContext.getLogger("ROOT").setLevel(ch.qos.logback.classic.Level.DEBUG);
+                loggerContext.getLogger("org.apache.hc").setLevel(ch.qos.logback.classic.Level.DEBUG);
             } else {
                 logger.setLevel(Level.INFO);
             }

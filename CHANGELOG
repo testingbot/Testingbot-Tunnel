@@ -1,3 +1,6 @@
+4.6
+* Fix issue where --debug mode was used by default
+
 4.5
 * Update dependencies
 * Introduce `-s` or `--shared` flag to indicate you want to share the tunnel with colleagues on TestingBot. By default, a tunnel is *not shared*.
