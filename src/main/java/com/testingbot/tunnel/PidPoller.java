@@ -32,22 +32,20 @@ public class PidPoller {
           @Override
           public void run() {
               File f = new File(pidFileName);
-              if (f.exists()) {
-                    f.delete();
+              if (f.exists() && !f.delete()) {
+                  Logger.getLogger(PidPoller.class.getName()).log(Level.WARNING, "Could not delete pid file: {0}", pidFileName);
               }
           }
         };
 
         pidFile = new File(fileName);
         if (!pidFile.exists()) {
-            try {
-                FileWriter fw = new FileWriter(pidFile.getAbsoluteFile());
-                try (BufferedWriter bw = new BufferedWriter(fw)) {
-                    bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
-                }
+            try (FileWriter fw = new FileWriter(pidFile.getAbsoluteFile());
+                 BufferedWriter bw = new BufferedWriter(fw)) {
+                bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
                 Logger.getLogger(PidPoller.class.getName()).log(Level.INFO, "Pid file: {0}", pidFile.getAbsoluteFile().toString());
             } catch (IOException ex) {
-                Logger.getLogger(PidPoller.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory");
+                Logger.getLogger(PidPoller.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory", ex);
                 return;
             }
         }
