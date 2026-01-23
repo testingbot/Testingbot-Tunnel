@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.lang.reflect.Field;
+import java.util.concurrent.atomic.AtomicLong;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -113,7 +114,7 @@ class InsightServerTest {
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Version should match App.VERSION
-                assertThat(json.get("version").asText()).isEqualTo(App.VERSION.toString());
+                assertThat(json.get("version").floatValue()).isEqualTo(App.VERSION);
                 return null;
             });
         }
@@ -137,7 +138,7 @@ class InsightServerTest {
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Uptime should be greater than 5000ms
-                long uptime = Long.parseLong(json.get("uptime").asText());
+                long uptime = json.get("uptime").asLong();
                 assertThat(uptime).isGreaterThanOrEqualTo(5000);
                 return null;
             });
@@ -164,7 +165,7 @@ class InsightServerTest {
                 JsonNode json = objectMapper.readTree(body);
 
                 // Then: Should return correct request count
-                assertThat(json.get("numberOfRequests").asText()).isEqualTo("3");
+                assertThat(json.get("numberOfRequests").asLong()).isEqualTo(3);
                 return null;
             });
         }
@@ -220,14 +221,14 @@ class InsightServerTest {
     private void resetStatistics() throws Exception {
         Field requestsField = Statistics.class.getDeclaredField("numberOfRequests");
         requestsField.setAccessible(true);
-        requestsField.setLong(null, 0);
+        ((AtomicLong) requestsField.get(null)).set(0);
 
         Field bytesField = Statistics.class.getDeclaredField("bytesTransferred");
         bytesField.setAccessible(true);
-        bytesField.setLong(null, 0);
+        ((AtomicLong) bytesField.get(null)).set(0);
 
         Field startTimeField = Statistics.class.getDeclaredField("startTime");
         startTimeField.setAccessible(true);
-        startTimeField.setLong(null, 0);
+        ((AtomicLong) startTimeField.get(null)).set(0);
     }
 }
