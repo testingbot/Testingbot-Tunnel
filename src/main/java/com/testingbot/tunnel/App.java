@@ -113,7 +113,7 @@ public class App {
         fastFail.setArgName("OPTIONS");
         options.addOption(fastFail);
 
-        Option metrics = OptionBuilder.withLongOpt("metrics-port").hasArg().withValueSeparator().withDescription("Use the specified port to access metrics. Default port 8003").create();
+        Option metrics = Option.builder().longOpt("metrics-port").hasArg().valueSeparator().desc("Use the specified port to access metrics. Default port 8003").build();
         options.addOption(metrics);
 
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
@@ -125,8 +125,8 @@ public class App {
         basicAuth.setArgName("host:port:user:passwd");
         options.addOption(basicAuth);
 
-        Option pac = OptionBuilder.withLongOpt("pac").hasArg().withDescription("Proxy autoconfiguration. Should be a http(s) URL").create();
-        options.addOption(pac);
+        Option pacOption = Option.builder().longOpt("pac").hasArg().desc("Proxy autoconfiguration. Should be a http(s) URL").build();
+        options.addOption(pacOption);
 
         Option proxyAuth = new Option("z", "proxy-userpwd", true, "Username and password required to access the proxy configured with --proxy.");
         proxyAuth.setArgName("user:pwd");
@@ -381,8 +381,8 @@ public class App {
             public void run() {
                 if (readyFile != null) {
                     File f = new File(readyFile);
-                    if (f.exists()) {
-                        f.delete();
+                    if (f.exists() && !f.delete()) {
+                        Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not delete ready file: " + readyFile);
                     }
                 }
 
@@ -510,11 +510,9 @@ public class App {
             if (f.exists()) {
                 f.setLastModified(System.currentTimeMillis());
             } else {
-                try {
-                    FileWriter fw = new FileWriter(f.getAbsoluteFile());
-                    try (BufferedWriter bw = new BufferedWriter(fw)) {
-                        bw.write("TestingBot Tunnel Ready");
-                    }
+                try (FileWriter fw = new FileWriter(f.getAbsoluteFile());
+                     BufferedWriter bw = new BufferedWriter(fw)) {
+                    bw.write("TestingBot Tunnel Ready");
                 } catch (IOException ex) {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the directory exists and we have permission write to this directory." , ex);
                 }
@@ -546,18 +544,17 @@ public class App {
     }
 
     public void setFreeJettyPort() {
-        ServerSocket serverSocket;
-        int port;
-        try {
-            serverSocket = _findAvailableSocket();
+        try (ServerSocket serverSocket = _findAvailableSocket()) {
             if (serverSocket == null) {
+                Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not find available port for Jetty, using default 8087");
+                setJettyPort(8087);
                 return;
             }
-
-            port = serverSocket.getLocalPort();
-            serverSocket.close();
+            int port = serverSocket.getLocalPort();
             setJettyPort(port);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error finding available port: " + e.getMessage());
+            setJettyPort(8087);
         }
     }
 
@@ -766,19 +763,15 @@ public class App {
     public int getSSHPort() {
         if (sshPort == 0) {
             // find available port
-            ServerSocket serverSocket;
-            int port;
-            try {
-                serverSocket = _findAvailableSocket();
+            try (ServerSocket serverSocket = _findAvailableSocket()) {
                 if (serverSocket == null) {
                     sshPort = 4446;
                     return sshPort;
                 }
-
-                port = serverSocket.getLocalPort();
-                serverSocket.close();
-                sshPort = port;
-            } catch (IOException ignored) {
+                sshPort = serverSocket.getLocalPort();
+            } catch (IOException e) {
+                Logger.getLogger(App.class.getName()).log(Level.WARNING, "Error finding available SSH port: " + e.getMessage());
+                sshPort = 4446;
             }
         }
         return sshPort;
