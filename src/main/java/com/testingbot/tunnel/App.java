@@ -349,7 +349,7 @@ public class App {
             }
 
             if (commandLine.hasOption("web")) {
-                LocalWebServer local = new LocalWebServer(commandLine.getOptionValue("web"));
+                new LocalWebServer(commandLine.getOptionValue("web"));
             }
 
             app.init();
@@ -374,7 +374,8 @@ public class App {
                 if (strLine != null) {
                     return strLine.split(":");
                 }
-            } catch (IOException ignored) {
+            } catch (IOException e) {
+                Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not read credentials from .testingbot file", e);
             }
         }
 
