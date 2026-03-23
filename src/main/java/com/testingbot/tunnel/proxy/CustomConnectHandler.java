@@ -94,13 +94,14 @@ public class CustomConnectHandler extends ConnectHandler {
 
     private void connectToProxy(HttpServletRequest request, String host, int port, Promise<SocketChannel> promise) {
         SocketChannel channel = null;
+        Selector selector = null;
         try {
             channel = SocketChannel.open();
             channel.socket().setTcpNoDelay(true);
             channel.configureBlocking(false);
             channel.connect(newConnectAddress(proxyHost, proxyPort));
 
-            final Selector selector = Selector.open();
+            selector = Selector.open();
             channel.register(selector, SelectionKey.OP_CONNECT);
             while (selector.select() > 0) {
                 final Set<SelectionKey> keys = selector.selectedKeys();
@@ -154,12 +155,7 @@ public class CustomConnectHandler extends ConnectHandler {
                                     proxyHost, proxyPort, host, port);
                         }
 
-                        try {
-                            selector.close();
-                        } catch (final IOException e) {
-                            LOG.error("Error closing selector: {}", e.getMessage(), e);
-                        }
-
+                        selector.close();
                         promise.succeeded(channel);
                         return;
                     }
@@ -173,6 +169,13 @@ public class CustomConnectHandler extends ConnectHandler {
                     channel.close();
                 } catch (IOException t) {
                     LOG.error("Error closing channel after failure: {}", t.getMessage(), t);
+                }
+            }
+            if (selector != null) {
+                try {
+                    selector.close();
+                } catch (IOException t) {
+                    LOG.error("Error closing selector after failure: {}", t.getMessage(), t);
                 }
             }
             promise.failed(x);
