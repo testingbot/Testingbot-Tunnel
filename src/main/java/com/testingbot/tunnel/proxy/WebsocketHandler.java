@@ -16,6 +16,8 @@ import java.nio.channels.SocketChannel;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -109,32 +111,48 @@ public class WebsocketHandler extends HandlerWrapper {
         this.idleTimeout = idleTimeout;
     }
 
-    private void forwardWebSocketUpgradeHeaders(HttpServletRequest clientRequest, EndPoint downstreamEndPoint) throws IOException {
-        // Get the SocketChannel from the EndPoint
-        SocketChannel socketChannel = ((SocketChannelEndPoint) downstreamEndPoint).getChannel();
-
-        // Create the WebSocket upgrade headers
+    private Map<String, String> performWebSocketHandshake(HttpServletRequest clientRequest, SocketChannel channel) throws IOException {
+        // Send WebSocket upgrade request to target
         StringBuilder requestHeaders = new StringBuilder();
-        String method = clientRequest.getMethod();
-        String uri = clientRequest.getRequestURI();
-        String protocol = clientRequest.getProtocol();
-
-        // Add the method, URI, and protocol to the request
-        requestHeaders.append(method).append(" ").append(uri).append(" ").append(protocol).append("\r\n");
-
-        // Forward the headers from the HttpServletRequest to the WebSocket server
+        requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getRequestURI()).append(" ").append(clientRequest.getProtocol()).append("\r\n");
         for (String headerName : Collections.list(clientRequest.getHeaderNames())) {
-            String headerValue = clientRequest.getHeader(headerName);
-            requestHeaders.append(headerName).append(": ").append(headerValue).append("\r\n");
+            requestHeaders.append(headerName).append(": ").append(clientRequest.getHeader(headerName)).append("\r\n");
         }
-        requestHeaders.append("\r\n");  // End of headers
+        requestHeaders.append("\r\n");
 
-        // Write the headers to the SocketChannel
-        ByteBuffer buffer = ByteBuffer.wrap(requestHeaders.toString().getBytes());
-        socketChannel.write(buffer);
+        ByteBuffer writeBuffer = ByteBuffer.wrap(requestHeaders.toString().getBytes("UTF-8"));
+        while (writeBuffer.hasRemaining()) {
+            channel.write(writeBuffer);
+        }
 
-        // Ensure headers are sent
-        socketChannel.socket().getOutputStream().flush();
+        // Read target's WebSocket handshake response (blocking)
+        ByteBuffer readBuffer = ByteBuffer.allocate(4096);
+        StringBuilder responseSB = new StringBuilder();
+        while (!responseSB.toString().contains("\r\n\r\n")) {
+            readBuffer.clear();
+            int n = channel.read(readBuffer);
+            if (n < 0) throw new IOException("Connection closed before WebSocket handshake completed");
+            readBuffer.flip();
+            byte[] bytes = new byte[readBuffer.remaining()];
+            readBuffer.get(bytes);
+            responseSB.append(new String(bytes, "UTF-8"));
+        }
+
+        String fullResponse = responseSB.toString();
+        int headerEnd = fullResponse.indexOf("\r\n\r\n");
+        String headerSection = fullResponse.substring(0, headerEnd);
+        String[] lines = headerSection.split("\r\n");
+
+        Map<String, String> wsResponseHeaders = new LinkedHashMap<>();
+        for (int i = 1; i < lines.length; i++) {
+            int colonIndex = lines[i].indexOf(':');
+            if (colonIndex > 0) {
+                wsResponseHeaders.put(lines[i].substring(0, colonIndex).trim(), lines[i].substring(colonIndex + 1).trim());
+            }
+        }
+
+        LOG.info("WebSocket handshake with target complete, status: {}, headers: {}", lines[0], wsResponseHeaders.size());
+        return wsResponseHeaders;
     }
 
     public int getBufferSize() {
@@ -198,35 +216,41 @@ public class WebsocketHandler extends HandlerWrapper {
 
         try {
             HostPort hostPort = new HostPort(serverAddress);
-            String host = hostPort.getHost();
-            int port = hostPort.getPort(80);
+            final String host = hostPort.getHost();
+            final int port = hostPort.getPort(80);
 
             final HttpChannel httpChannel = baseRequest.getHttpChannel();
             if (!httpChannel.isTunnellingSupported()) {
-                    LOG.info("WS not supported for {}", httpChannel);
-
+                LOG.info("WS not supported for {}", httpChannel);
                 this.sendConnectResponse(request, response, 403);
                 return;
             }
 
             final AsyncContext asyncContext = request.startAsync();
             asyncContext.setTimeout(0L);
-                LOG.info("Connecting to {}:{}", host, port);
+            LOG.info("Connecting to {}:{}", host, port);
 
-            this.connectToServer(request, host, port, new Promise<SocketChannel>() {
-                public void succeeded(SocketChannel channel) {
+            this.getExecutor().execute(() -> {
+                try {
+                    // Connect to target using blocking I/O for the handshake
+                    SocketChannel channel = SocketChannel.open();
+                    channel.socket().setTcpNoDelay(true);
+                    channel.socket().setSoTimeout((int) getConnectTimeout());
+                    channel.connect(new InetSocketAddress(host, port));
+
+                    // Perform the WebSocket handshake with the target synchronously
+                    Map<String, String> wsResponseHeaders = performWebSocketHandshake(request, channel);
+
+                    // Switch to non-blocking for the async relay
+                    channel.configureBlocking(false);
 
                     ConnectContext connectContext = new ConnectContext(request, response, asyncContext, httpChannel.getTunnellingEndPoint());
-                    if (channel.isConnected()) {
-                        WebsocketHandler.this.selector.accept(channel, connectContext);
-                    } else {
-                        WebsocketHandler.this.selector.connect(channel, connectContext);
-                    }
+                    connectContext.getContext().put("wsResponseHeaders", wsResponseHeaders);
 
-                }
-
-                public void failed(Throwable x) {
-                    WebsocketHandler.this.onConnectFailure(request, response, asyncContext, x);
+                    WebsocketHandler.this.selector.accept(channel, connectContext);
+                } catch (Exception e) {
+                    LOG.warn("WebSocket connect/handshake failed", e);
+                    WebsocketHandler.this.onConnectFailure(request, response, asyncContext, e);
                 }
             });
         } catch (Exception x) {
@@ -267,6 +291,7 @@ public class WebsocketHandler extends HandlerWrapper {
         return new InetSocketAddress(host, port);
     }
 
+    @SuppressWarnings("unchecked")
     protected void onConnectSuccess(ConnectContext connectContext,WebsocketHandler.UpstreamConnection upstreamConnection) {
         ConcurrentMap<String, Object> context = connectContext.getContext();
         HttpServletRequest request = connectContext.getRequest();
@@ -276,18 +301,16 @@ public class WebsocketHandler extends HandlerWrapper {
         downstreamConnection.setInputBufferSize(this.getBufferSize());
         upstreamConnection.setConnection(downstreamConnection);
         downstreamConnection.setConnection(upstreamConnection);
-            LOG.info("Connection setup completed: {}<->{}", downstreamConnection, upstreamConnection);
+        LOG.info("Connection setup completed: {}<->{}", downstreamConnection, upstreamConnection);
 
-
-        // Send the WebSocket upgrade response
         HttpServletResponse response = connectContext.getResponse();
 
-        // Forward the WebSocket upgrade headers to the downstream connection
-        try {
-            forwardWebSocketUpgradeHeaders(request, upstreamConnection.getEndPoint());
-        } catch (IOException e) {
-            LOG.error("Error while forwarding WebSocket upgrade headers", e);
-            onConnectFailure(request, response, connectContext.getAsyncContext(), e);
+        // Set the WebSocket response headers from the target's handshake response
+        Map<String, String> wsResponseHeaders = (Map<String, String>) context.get("wsResponseHeaders");
+        if (wsResponseHeaders != null) {
+            for (Map.Entry<String, String> entry : wsResponseHeaders.entrySet()) {
+                response.setHeader(entry.getKey(), entry.getValue());
+            }
         }
 
         this.sendConnectResponse(request, response, 101);
