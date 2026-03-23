@@ -1,3 +1,7 @@
+4.7
+* Fix Websocket issue
+* Update dependencies
+
 4.6
 * Fix issue where --debug mode was used by default
 
