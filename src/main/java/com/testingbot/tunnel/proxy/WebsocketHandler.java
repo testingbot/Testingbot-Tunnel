@@ -14,7 +14,6 @@ import java.nio.channels.SelectableChannel;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -22,7 +21,6 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.Executor;
-import java.util.logging.Level;
 import org.eclipse.jetty.io.ByteBufferPool;
 import org.eclipse.jetty.io.Connection;
 import org.eclipse.jetty.io.EndPoint;
@@ -193,16 +191,6 @@ public class WebsocketHandler extends HandlerWrapper {
 
     public void handle(String target, Request jettyRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
         String serverAddress = jettyRequest.getHttpURI().getAuthority();
-        Enumeration<String> headerNames = request.getHeaderNames();
-        if (headerNames != null) {
-            StringBuilder sb = new StringBuilder();
-            String header;
-
-            while (headerNames.hasMoreElements()) {
-                header = headerNames.nextElement();
-                sb.append(header).append(": ").append(request.getHeader(header)).append(System.lineSeparator());
-            }
-        }
 
         if (request.getHeader("Upgrade") != null && request.getHeader("Upgrade").equalsIgnoreCase("websocket")) {
             this.handleConnect(jettyRequest, request, response, serverAddress);
@@ -231,9 +219,10 @@ public class WebsocketHandler extends HandlerWrapper {
             LOG.info("Connecting to {}:{}", host, port);
 
             this.getExecutor().execute(() -> {
+                SocketChannel channel = null;
                 try {
                     // Connect to target using blocking I/O for the handshake
-                    SocketChannel channel = SocketChannel.open();
+                    channel = SocketChannel.open();
                     channel.socket().setTcpNoDelay(true);
                     channel.socket().setSoTimeout((int) getConnectTimeout());
                     channel.connect(new InetSocketAddress(host, port));
@@ -249,6 +238,7 @@ public class WebsocketHandler extends HandlerWrapper {
 
                     WebsocketHandler.this.selector.accept(channel, connectContext);
                 } catch (Exception e) {
+                    WebsocketHandler.this.close(channel);
                     LOG.warn("WebSocket connect/handshake failed", e);
                     WebsocketHandler.this.onConnectFailure(request, response, asyncContext, e);
                 }
