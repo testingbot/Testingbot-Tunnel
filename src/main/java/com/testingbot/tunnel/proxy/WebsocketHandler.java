@@ -112,7 +112,11 @@ public class WebsocketHandler extends HandlerWrapper {
     private Map<String, String> performWebSocketHandshake(HttpServletRequest clientRequest, SocketChannel channel) throws IOException {
         // Send WebSocket upgrade request to target
         StringBuilder requestHeaders = new StringBuilder();
-        requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getRequestURI()).append(" ").append(clientRequest.getProtocol()).append("\r\n");
+        requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getRequestURI());
+        if (clientRequest.getQueryString() != null) {
+            requestHeaders.append("?").append(clientRequest.getQueryString());
+        }
+        requestHeaders.append(" ").append(clientRequest.getProtocol()).append("\r\n");
         for (String headerName : Collections.list(clientRequest.getHeaderNames())) {
             requestHeaders.append(headerName).append(": ").append(clientRequest.getHeader(headerName)).append("\r\n");
         }
