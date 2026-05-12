@@ -3,6 +3,7 @@ package ssh;
 import com.testingbot.tunnel.App;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -15,7 +16,7 @@ public class CustomConnectionMonitor {
     private final SSHTunnel tunnel;
     private final App app;
     private Timer timer;
-    private boolean retrying = false;
+    private final AtomicBoolean retrying = new AtomicBoolean(false);
     private int retryAttempts = 0;
     private static final long CURRENT_RETRY_DELAY = 5000;
     private static final int MAX_RETRIES = 30;
@@ -37,8 +38,7 @@ public class CustomConnectionMonitor {
         Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.SEVERE,
             String.format("[%s] SSH Connection lost! %s", tunnel.getConnectionId(), reason.getMessage()));
 
-        if (!this.retrying) {
-            this.retrying = true;
+        if (this.retrying.compareAndSet(false, true)) {
             timer = new Timer("Reconnect-" + tunnel.getConnectionId());
             timer.schedule(new ReconnectTask(), CURRENT_RETRY_DELAY);
         }
@@ -60,7 +60,7 @@ public class CustomConnectionMonitor {
 
                 if (tunnel.isAuthenticated()) {
                     // Successful reconnection
-                    retrying = false;
+                    retrying.set(false);
                     timer.cancel();
 
                     if (app.getHttpProxy() != null) {
@@ -89,7 +89,7 @@ public class CustomConnectionMonitor {
 
                 // Give up connecting to this tunnel VM, try another one
                 timer.cancel();
-                retrying = false;
+                retrying.set(false);
                 CustomConnectionMonitor.this.retryAttempts = 0;
 
                 app.stop();

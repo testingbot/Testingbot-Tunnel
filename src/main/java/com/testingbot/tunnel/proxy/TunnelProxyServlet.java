@@ -1,8 +1,10 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.Statistics;
+import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import org.eclipse.jetty.client.HttpClient;
@@ -20,14 +22,69 @@ import org.eclipse.jetty.proxy.AsyncProxyServlet;
 import org.eclipse.jetty.util.Callback;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 public class TunnelProxyServlet extends AsyncProxyServlet {
     private String proxyAuthHeaderValue = null;
+    private List<Pattern> blackList = Collections.emptyList();
+
+    @Override
+    public void init() throws ServletException {
+        super.init();
+        String raw = getServletConfig().getInitParameter("blackList");
+        if (raw != null && !raw.isEmpty()) {
+            List<Pattern> compiled = new ArrayList<>();
+            for (String entry : raw.split(",")) {
+                String trimmed = entry.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                try {
+                    compiled.add(Pattern.compile(trimmed));
+                } catch (PatternSyntaxException ex) {
+                    Logger.getLogger(TunnelProxyServlet.class.getName())
+                        .log(Level.WARNING, "Invalid fast-fail pattern ''{0}'' ignored: {1}",
+                            new Object[]{trimmed, ex.getDescription()});
+                }
+            }
+            this.blackList = Collections.unmodifiableList(compiled);
+        }
+    }
+
+    static boolean hostMatchesAny(String host, List<Pattern> patterns) {
+        if (host == null) {
+            return false;
+        }
+        for (Pattern p : patterns) {
+            if (p.matcher(host).find()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        if (!blackList.isEmpty()) {
+            String host = request.getServerName();
+            if (hostMatchesAny(host, blackList)) {
+                Logger.getLogger(TunnelProxyServlet.class.getName())
+                    .log(Level.INFO, "Fast-fail: rejecting {0} (matched blacklist)", host);
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked by fast-fail policy");
+                return;
+            }
+        }
+        super.service(request, response);
+    }
 
     class TunnelProxyResponseListener extends ProxyResponseListener {
         private final HttpServletRequest request;

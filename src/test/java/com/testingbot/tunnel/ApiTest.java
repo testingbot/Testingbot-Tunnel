@@ -447,6 +447,31 @@ class ApiTest {
     }
 
     @Test
+    void pollTunnel_shouldTimeOutWhenServerNeverResponds() throws Exception {
+        // Given: server that holds the response far longer than our shrunken budget
+        wireMockServer.stubFor(get(urlPathEqualTo("/v1/tunnel/slow"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withFixedDelay(30_000)
+                .withBody("{\"id\":\"slow\"}")));
+
+        api = createApiWithMockServer();
+        // Shrink the response timeout to ~1s for the test
+        api.setTimeoutsForTesting(
+            org.apache.hc.core5.util.Timeout.of(2, java.util.concurrent.TimeUnit.SECONDS),
+            org.apache.hc.core5.util.Timeout.of(1, java.util.concurrent.TimeUnit.SECONDS)
+        );
+
+        long start = System.currentTimeMillis();
+        assertThatThrownBy(() -> api.pollTunnel("slow"))
+            .isInstanceOf(Exception.class);
+        long elapsed = System.currentTimeMillis() - start;
+
+        // Pre-fix behavior: hangs forever. Post-fix: ~1s response timeout.
+        assertThat(elapsed).isLessThan(10_000L);
+    }
+
+    @Test
     void api_multipleSequentialCalls_shouldWork() throws Exception {
         // Given: Multiple stubs
         wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))

@@ -12,25 +12,87 @@ import org.eclipse.jetty.util.Promise;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.Enumeration;
+import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
+import java.util.regex.PatternSyntaxException;
 
 /**
  * Custom ConnectHandler for Jetty 11 that handles proxy connections.
  */
 public class CustomConnectHandler extends ConnectHandler {
+    // Hop-by-hop headers that must not be forwarded per RFC 7230 §6.1
+    private static final Set<String> HOP_BY_HOP_HEADERS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
+            "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
+            "te", "trailer", "transfer-encoding", "upgrade", "proxy-connection", "host"
+    )));
+
+    // Cap on the bytes we'll read from the upstream proxy's CONNECT response before giving up
+    private static final int MAX_RESPONSE_BYTES = 8 * 1024;
+    // selector.select() timeout per iteration
+    private static final long SELECT_TIMEOUT_MS = 15_000L;
+
     private boolean debugMode = false;
 
     private final String proxyHost;
     private final int proxyPort;
     private String proxyAuth = null;
+    private List<Pattern> blackList = Collections.emptyList();
+
+    public void setBlackList(String[] patterns) {
+        if (patterns == null || patterns.length == 0) {
+            this.blackList = Collections.emptyList();
+            return;
+        }
+        List<Pattern> compiled = new ArrayList<>(patterns.length);
+        for (String entry : patterns) {
+            if (entry == null) {
+                continue;
+            }
+            String trimmed = entry.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            try {
+                compiled.add(Pattern.compile(trimmed));
+            } catch (PatternSyntaxException ex) {
+                Logger.getLogger(CustomConnectHandler.class.getName())
+                    .log(Level.WARNING, "Invalid fast-fail pattern ''{0}'' ignored: {1}",
+                        new Object[]{trimmed, ex.getDescription()});
+            }
+        }
+        this.blackList = Collections.unmodifiableList(compiled);
+    }
+
+    static boolean hostBlocked(String hostHeader, List<Pattern> patterns) {
+        if (hostHeader == null || patterns.isEmpty()) {
+            return false;
+        }
+        // requestURI for CONNECT is "host:port"; strip port if present
+        int colon = hostHeader.indexOf(':');
+        String host = colon >= 0 ? hostHeader.substring(0, colon) : hostHeader;
+        host = host.toLowerCase(Locale.ROOT);
+        for (Pattern p : patterns) {
+            if (p.matcher(host).find()) {
+                return true;
+            }
+        }
+        return false;
+    }
 
     public CustomConnectHandler(final App app) {
         final String proxy = app.getProxy();
@@ -49,7 +111,7 @@ public class CustomConnectHandler extends ConnectHandler {
         }
 
         if (app.getProxyAuth() != null) {
-            proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes());
+            proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes(StandardCharsets.UTF_8));
         }
     }
 
@@ -63,7 +125,15 @@ public class CustomConnectHandler extends ConnectHandler {
         Statistics.addRequest();
 
         if (HttpMethod.CONNECT.is(request.getMethod())) {
-            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1} ({2})", new Object[]{method, request.getRequestURL().toString().split(":443")[0].replaceAll("http:", "https:"), response.toString().substring(9, 12)});
+            String authority = request.getRequestURI(); // "host:port" for CONNECT
+            if (hostBlocked(authority, blackList)) {
+                Logger.getLogger(CustomConnectHandler.class.getName())
+                    .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
+                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked by fast-fail policy");
+                baseRequest.setHandled(true);
+                return;
+            }
+            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1}", new Object[]{method, authority});
         }
 
         if (debugMode) {
@@ -103,7 +173,20 @@ public class CustomConnectHandler extends ConnectHandler {
 
             selector = Selector.open();
             channel.register(selector, SelectionKey.OP_CONNECT);
-            while (selector.select() > 0) {
+
+            final long deadline = System.currentTimeMillis() + SELECT_TIMEOUT_MS;
+            StringBuilder responseBuf = null;
+            int totalRead = 0;
+            while (true) {
+                long remaining = deadline - System.currentTimeMillis();
+                if (remaining <= 0) {
+                    throw new IOException("Timed out waiting for upstream proxy " + proxyHost + ":" + proxyPort);
+                }
+                int ready = selector.select(remaining);
+                if (ready == 0) {
+                    // hit selector deadline, loop and recheck
+                    continue;
+                }
                 final Set<SelectionKey> keys = selector.selectedKeys();
                 final Iterator<SelectionKey> iterator = keys.iterator();
                 while (iterator.hasNext()) {
@@ -112,42 +195,72 @@ public class CustomConnectHandler extends ConnectHandler {
 
                     if (key.isConnectable()) {
                         if (!channel.finishConnect()) {
-                            throw new IOException("Failure: channel.finishConnect()");
+                            throw new IOException("finishConnect() returned false for " + proxyHost + ":" + proxyPort);
                         }
 
                         channel.register(selector, SelectionKey.OP_READ);
 
                         final StringBuilder connect = new StringBuilder();
-                        connect.append(request.getMethod()).append(' ').append(host).append(':').append(port).append(' ').append(request.getProtocol());
+                        connect.append("CONNECT ").append(host).append(':').append(port)
+                                .append(' ').append(request.getProtocol()).append("\r\n");
+                        connect.append("Host: ").append(host).append(':').append(port).append("\r\n");
+
                         final Enumeration<String> headerNames = request.getHeaderNames();
                         while (headerNames.hasMoreElements()) {
                             final String headerName = headerNames.nextElement();
+                            if (HOP_BY_HOP_HEADERS.contains(headerName.toLowerCase(Locale.ROOT))) {
+                                continue;
+                            }
                             final String headerValue = request.getHeader(headerName);
-                            connect.append('\n').append(headerName).append(": ").append(headerValue);
+                            if (headerValue == null) continue;
+                            // Drop any value containing CR/LF defensively (header smuggling)
+                            if (headerValue.indexOf('\r') >= 0 || headerValue.indexOf('\n') >= 0) {
+                                continue;
+                            }
+                            connect.append(headerName).append(": ").append(headerValue).append("\r\n");
                         }
 
-                        if (proxyAuth != null)
-                            connect.append("\nProxy-Authorization: Basic ").append(proxyAuth);
+                        if (proxyAuth != null) {
+                            connect.append("Proxy-Authorization: Basic ").append(proxyAuth).append("\r\n");
+                        }
 
-                        connect.append("\r\n\r\n");
+                        connect.append("\r\n");
 
-                        final ByteBuffer buffer = ByteBuffer.wrap(connect.toString().getBytes());
-                        while (buffer.hasRemaining())
+                        final ByteBuffer buffer = ByteBuffer.wrap(connect.toString().getBytes(StandardCharsets.US_ASCII));
+                        while (buffer.hasRemaining()) {
                             channel.write(buffer);
+                        }
+                        responseBuf = new StringBuilder();
                     } else if (key.isReadable() && channel.isConnected()) {
+                        if (responseBuf == null) {
+                            responseBuf = new StringBuilder();
+                        }
                         final ByteBuffer buffer = ByteBuffer.allocate(1024);
-                        final StringBuilder response = new StringBuilder();
-                        while (channel.read(buffer) > 0) {
+                        int n;
+                        while ((n = channel.read(buffer)) > 0) {
                             buffer.flip();
-                            while (buffer.hasRemaining())
-                                response.append((char) buffer.get());
+                            byte[] bytes = new byte[buffer.remaining()];
+                            buffer.get(bytes);
+                            responseBuf.append(new String(bytes, StandardCharsets.US_ASCII));
+                            totalRead += n;
+                            buffer.clear();
+                            if (totalRead > MAX_RESPONSE_BYTES) {
+                                throw new IOException("Upstream proxy response exceeded " + MAX_RESPONSE_BYTES + " bytes");
+                            }
+                        }
+                        if (n < 0) {
+                            throw new IOException("Upstream proxy " + proxyHost + ":" + proxyPort + " closed connection before sending CONNECT response");
+                        }
+                        // Wait until we've seen the end of headers
+                        if (responseBuf.indexOf("\r\n\r\n") < 0) {
+                            continue;
                         }
 
-                        String responseStr = response.toString();
-                        if (!responseStr.contains("200")) {
-                            String errorMsg = String.format("Upstream proxy (%s:%d) rejected CONNECT request to %s:%d. Response: %s",
-                                    proxyHost, proxyPort, host, port, responseStr.split("\r\n")[0]);
-                            throw new IOException(errorMsg);
+                        String statusLine = responseBuf.substring(0, responseBuf.indexOf("\r\n"));
+                        if (!isSuccessfulConnect(statusLine)) {
+                            throw new IOException(String.format(
+                                "Upstream proxy (%s:%d) rejected CONNECT to %s:%d. Status: %s",
+                                proxyHost, proxyPort, host, port, statusLine));
                         }
 
                         if (debugMode) {
@@ -179,6 +292,20 @@ public class CustomConnectHandler extends ConnectHandler {
                 }
             }
             promise.failed(x);
+        }
+    }
+
+    // Parse "HTTP/1.x NNN reason" and return true iff NNN is in [200, 299].
+    static boolean isSuccessfulConnect(String statusLine) {
+        if (statusLine == null) return false;
+        String[] parts = statusLine.split(" ", 3);
+        if (parts.length < 2) return false;
+        if (!parts[0].startsWith("HTTP/")) return false;
+        try {
+            int code = Integer.parseInt(parts[1]);
+            return code >= 200 && code < 300;
+        } catch (NumberFormatException ex) {
+            return false;
         }
     }
 }

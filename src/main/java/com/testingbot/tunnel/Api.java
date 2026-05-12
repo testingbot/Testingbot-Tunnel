@@ -42,10 +42,54 @@ public class Api {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private Supplier<HttpClientBuilder> httpClientBuilderSupplier = HttpClientBuilder::create;
 
+    // Connect timeout = how long to wait for TCP/TLS to come up.
+    // Response timeout = how long to wait once the request is sent.
+    static final Timeout DEFAULT_CONNECT_TIMEOUT = Timeout.of(5, TimeUnit.SECONDS);
+    static final Timeout DEFAULT_RESPONSE_TIMEOUT = Timeout.of(30, TimeUnit.SECONDS);
+
+    private Timeout connectTimeout = DEFAULT_CONNECT_TIMEOUT;
+    private Timeout responseTimeout = DEFAULT_RESPONSE_TIMEOUT;
+
     public Api(App app) {
         this.app = app;
         this.clientKey = app.getClientKey();
         this.clientSecret = app.getClientSecret();
+    }
+
+    /** For testing: shrink the HTTP timeouts so tests don't have to wait 30s. */
+    void setTimeoutsForTesting(Timeout connect, Timeout response) {
+        this.connectTimeout = connect;
+        this.responseTimeout = response;
+    }
+
+    private RequestConfig defaultRequestConfig() {
+        return RequestConfig.custom()
+            .setConnectTimeout(connectTimeout)
+            .setConnectionRequestTimeout(connectTimeout)
+            .setResponseTimeout(responseTimeout)
+            .build();
+    }
+
+    private HttpClientBuilder newBuilderWithProxy() {
+        HttpClientBuilder builder = httpClientBuilderSupplier.get();
+        builder.setDefaultRequestConfig(defaultRequestConfig());
+        if (app.getProxy() != null) {
+            String[] splitted = app.getProxy().split(":", 2);
+            int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
+            if (app.getProxyAuth() != null) {
+                String[] credentials = app.getProxyAuth().split(":", 2);
+                if (credentials.length == 2) {
+                    BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
+                    credsProvider.setCredentials(
+                        new AuthScope(splitted[0], port),
+                        new UsernamePasswordCredentials(credentials[0], credentials[1].toCharArray())
+                    );
+                    builder.setDefaultCredentialsProvider(credsProvider);
+                }
+            }
+            builder.setProxy(new HttpHost("http", splitted[0], port));
+        }
+        return builder;
     }
 
     /**
@@ -104,30 +148,7 @@ public class Api {
     }
 
     public void destroyTunnel() throws Exception {
-        RequestConfig requestConfig = RequestConfig.custom()
-            .setConnectTimeout(Timeout.of(1, TimeUnit.SECONDS))
-            .setConnectionRequestTimeout(Timeout.of(1, TimeUnit.SECONDS))
-            .build();
-
-        HttpClientBuilder builder = httpClientBuilderSupplier.get();
-        builder.setDefaultRequestConfig(requestConfig);
-
-        if (app.getProxy() != null) {
-            String[] splitted = app.getProxy().split(":");
-            int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
-            if (app.getProxyAuth() != null) {
-                String[] credentials = app.getProxyAuth().split(":");
-                BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-                credsProvider.setCredentials(
-                    new AuthScope(splitted[0], port),
-                    new UsernamePasswordCredentials(credentials[0], credentials[1].toCharArray())
-                );
-                builder.setDefaultCredentialsProvider(credsProvider);
-            }
-
-            HttpHost proxy = new HttpHost("http", splitted[0], port);
-            builder.setProxy(proxy);
-        }
+        HttpClientBuilder builder = newBuilderWithProxy();
 
         try (CloseableHttpClient httpClient = builder.build()) {
             String auth = this.clientKey + ":" + this.clientSecret;
@@ -143,24 +164,7 @@ public class Api {
 
     private JsonNode _post(String url, List<NameValuePair> postData) throws Exception {
         try {
-            HttpClientBuilder builder = httpClientBuilderSupplier.get();
-
-            if (app.getProxy() != null) {
-                String[] splitted = app.getProxy().split(":");
-                int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
-                if (app.getProxyAuth() != null) {
-                    String[] credentials = app.getProxyAuth().split(":");
-                    BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-                    credsProvider.setCredentials(
-                        new AuthScope(splitted[0], port),
-                        new UsernamePasswordCredentials(credentials[0], credentials[1].toCharArray())
-                    );
-                    builder.setDefaultCredentialsProvider(credsProvider);
-                }
-
-                HttpHost proxy = new HttpHost("http", splitted[0], port);
-                builder.setProxy(proxy);
-            }
+            HttpClientBuilder builder = newBuilderWithProxy();
 
             String responseBody;
             try (CloseableHttpClient httpClient = builder.build()) {
@@ -195,23 +199,7 @@ public class Api {
 
     private JsonNode _get(String url) throws Exception {
         try {
-            HttpClientBuilder builder = httpClientBuilderSupplier.get();
-            if (app.getProxy() != null) {
-                String[] splitted = app.getProxy().split(":");
-                int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
-                if (app.getProxyAuth() != null) {
-                    String[] credentials = app.getProxyAuth().split(":");
-                    BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-                    credsProvider.setCredentials(
-                        new AuthScope(splitted[0], port),
-                        new UsernamePasswordCredentials(credentials[0], credentials[1].toCharArray())
-                    );
-                    builder.setDefaultCredentialsProvider(credsProvider);
-                }
-
-                HttpHost proxy = new HttpHost("http", splitted[0], port);
-                builder.setProxy(proxy);
-            }
+            HttpClientBuilder builder = newBuilderWithProxy();
 
             String responseBody;
             try (CloseableHttpClient httpClient = builder.build()) {

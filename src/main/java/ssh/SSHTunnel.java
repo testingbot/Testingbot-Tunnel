@@ -9,6 +9,7 @@ import java.io.IOException;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -24,7 +25,7 @@ public class SSHTunnel {
     private Timer keepAliveTimer;
     private Timer connectionMonitorTimer;
     private Timer portForwardingMonitorTimer;
-    private boolean shuttingDown = false;
+    private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final CustomConnectionMonitor connectionMonitor;
     private boolean portForwardingEstablished = false;
 
@@ -81,7 +82,7 @@ public class SSHTunnel {
     }
 
     public void stop(boolean quitting) {
-        this.shuttingDown = true;
+        this.shuttingDown.set(true);
         this.stop();
     }
 
@@ -120,7 +121,7 @@ public class SSHTunnel {
     }
 
     public boolean isShuttingDown() {
-        return shuttingDown;
+        return shuttingDown.get();
     }
 
     public String getConnectionId() {
@@ -157,7 +158,7 @@ public class SSHTunnel {
         @Override
         public void run() {
             try {
-                if (session != null && !session.isConnected() && !shuttingDown) {
+                if (session != null && !session.isConnected() && !shuttingDown.get()) {
                     connectionMonitor.connectionLost(new Exception("Connection lost"));
                 }
             } catch (Exception ex) {
@@ -171,7 +172,7 @@ public class SSHTunnel {
         @Override
         public void run() {
             try {
-                if (session != null && session.isConnected() && !shuttingDown) {
+                if (session != null && session.isConnected() && !shuttingDown.get()) {
                     // Check if port forwarding is still active by testing the forwarded ports
                     String[] forwardedPorts = session.getPortForwardingL();
                     boolean localForwardingActive = false;

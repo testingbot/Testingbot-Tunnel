@@ -61,10 +61,12 @@ public final class HttpProxy {
         httpProxy.setStopAtShutdown(true);
 
         ConnectHandler connectHandler = new CustomConnectHandler(app);
+        ((CustomConnectHandler) connectHandler).setBlackList(app.getFastFail());
         WebsocketHandler websocketHandler = new WebsocketHandler();
 
         ServletContextHandler contextHandler = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
         contextHandler.setContextPath("/");  // Root path for all requests
+        contextHandler.setAttribute("extra_headers", app.getCustomHeaders());
 
         // AsyncProxyServlet for proxying HTTP requests
         ServletHolder proxyServlet = new ServletHolder(new TunnelProxyServlet());
@@ -72,14 +74,7 @@ public final class HttpProxy {
         proxyServlet.setInitParameter("timeout", "120000");
 
         if (app.getFastFail() != null && app.getFastFail().length > 0) {
-            StringBuilder sb = new StringBuilder();
-            for (String domain : app.getFastFail()) {
-                if (!domain.contains(":")) {
-                    domain = domain + ":80"; // default port 80
-                }
-                sb.append(domain).append(",");
-            }
-            proxyServlet.setInitParameter("blackList", sb.toString());
+            proxyServlet.setInitParameter("blackList", String.join(",", app.getFastFail()));
         }
 
         if (app.isDebugMode()) {

@@ -92,6 +92,21 @@ public class App {
         return Runtime.version().feature();
     }
 
+    // RFC 7230 token: 1*tchar
+    private static final java.util.regex.Pattern HEADER_NAME = java.util.regex.Pattern.compile("[!#$%&'*+\\-.^_`|~0-9A-Za-z]+");
+
+    static void validateHeader(String name, String value) throws ParseException {
+        if (name == null || name.isEmpty() || !HEADER_NAME.matcher(name).matches()) {
+            throw new ParseException("Invalid header name in --extra-headers: '" + name + "' (must be an RFC 7230 token)");
+        }
+        if (value == null) {
+            throw new ParseException("Header value for '" + name + "' is null");
+        }
+        if (value.indexOf('\r') >= 0 || value.indexOf('\n') >= 0) {
+            throw new ParseException("Header value for '" + name + "' must not contain CR or LF");
+        }
+    }
+
     public static void main(String... args) throws Exception {
         if (!checkJavaVersion()) {
             System.exit(1);
@@ -282,6 +297,7 @@ public class App {
                 while (keyIterator.hasNext()) {
                     String key = keyIterator.next();
                     String value = obj.get(key).asText();
+                    validateHeader(key, value);
                     app.addCustomHeader(key, value);
                 }
             }
@@ -356,7 +372,7 @@ public class App {
             app.boot();
         } catch (ParseException parseException) {
             System.err.println(parseException.getMessage());
-            System.exit(0);
+            System.exit(2);
         }
     }
     private PidPoller pidPoller;
