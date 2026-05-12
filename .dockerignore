@@ -1,0 +1,40 @@
+# Build artifacts
+target/
+**/target/
+*.jar
+
+# Maven local state
+.mvn/wrapper/maven-wrapper.jar
+dependency-reduced-pom.xml
+
+# Git & GitHub
+.git/
+.gitignore
+.gitattributes
+.github/
+
+# IDE / editor
+.idea/
+*.iml
+.vscode/
+.project
+.classpath
+.settings/
+*.swp
+
+# OS / misc
+.DS_Store
+Thumbs.db
+
+# Local Docker / dev
+Dockerfile
+.dockerignore
+docker-compose*.yml
+
+# Docs that aren't needed in the build context
+README.markdown
+CHANGELOG
+LICENSE
+LICENSE.3RD_PARTY
+SECURITY.md
+CLAUDE.md
