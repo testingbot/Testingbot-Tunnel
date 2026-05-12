@@ -109,8 +109,7 @@ public class WebsocketHandler extends HandlerWrapper {
         this.idleTimeout = idleTimeout;
     }
 
-    private Map<String, String> performWebSocketHandshake(HttpServletRequest clientRequest, SocketChannel channel) throws IOException {
-        // Send WebSocket upgrade request to target
+    static String buildUpgradeRequest(HttpServletRequest clientRequest) {
         StringBuilder requestHeaders = new StringBuilder();
         requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getRequestURI());
         if (clientRequest.getQueryString() != null) {
@@ -121,8 +120,12 @@ public class WebsocketHandler extends HandlerWrapper {
             requestHeaders.append(headerName).append(": ").append(clientRequest.getHeader(headerName)).append("\r\n");
         }
         requestHeaders.append("\r\n");
+        return requestHeaders.toString();
+    }
 
-        ByteBuffer writeBuffer = ByteBuffer.wrap(requestHeaders.toString().getBytes("UTF-8"));
+    private Map<String, String> performWebSocketHandshake(HttpServletRequest clientRequest, SocketChannel channel) throws IOException {
+        // Send WebSocket upgrade request to target
+        ByteBuffer writeBuffer = ByteBuffer.wrap(buildUpgradeRequest(clientRequest).getBytes("UTF-8"));
         while (writeBuffer.hasRemaining()) {
             channel.write(writeBuffer);
         }
