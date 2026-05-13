@@ -1,3 +1,13 @@
+4.8
+* Prometheus `/metrics` endpoint on the existing metrics port, exposing HTTP request rate/duration/size histograms, HTTPS CONNECT counters + handshake duration, SSH tunnel state and reconnects, active connections, error counters, and bundled JVM/process metrics
+* New `--metrics-auth user:password` flag (and `TESTINGBOT_METRICS_AUTH` env var) for optional HTTP Basic auth on `/metrics`
+* Environment variable alternatives for credential-bearing flags to keep secrets out of `ps`: `TESTINGBOT_AUTH`, `TESTINGBOT_PROXY_USERPWD`, `TESTINGBOT_METRICS_AUTH`
+* `examples/docker-compose-prometheus-grafana/` and `examples/grafana-dashboard/`: a ready-to-run Prometheus + Grafana stack with a pre-built dashboard
+* Strip sensitive headers from debug logging
+* Improve basic auth handling
+* Improve logging
+* Update dependencies
+
 4.7
 * Fix Websocket issue
 * Update dependencies

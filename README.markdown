@@ -251,7 +251,7 @@ For multi-platform builds (requires docker buildx):
 mvn package -DskipTests
 docker buildx build --platform linux/amd64,linux/arm64 \
   --push \
-  -t testingbot/tunnel:4.6 \
+  -t testingbot/tunnel:4.8 \
   -t testingbot/tunnel:latest .
 ```
 
