@@ -1,0 +1,58 @@
+---
+services:
+  # Opt-in tunnel service. Enable with `--profile tunnel` if you don't already
+  # have a tunnel running on the host. Requires TESTINGBOT_KEY / TESTINGBOT_SECRET.
+  testingbot-tunnel:
+    image: testingbot/tunnel:latest
+    pull_policy: always
+    restart: on-failure
+    profiles: ["tunnel"]
+    environment:
+      TESTINGBOT_KEY: ${TESTINGBOT_KEY:-}
+      TESTINGBOT_SECRET: ${TESTINGBOT_SECRET:-}
+    # Local proxy + Selenium ports are not required for metrics collection,
+    # but exposing them lets you drive traffic through the tunnel. Port 8003
+    # is published so Prometheus (scraping host.docker.internal:8003) reaches it.
+    ports:
+      - "4445:4445"
+      - "8087:8087"
+      - "8003:8003"
+    command: >
+      --localproxy 8087
+      --metrics-port 8003
+
+  prometheus:
+    image: prom/prometheus:v2.55.0
+    restart: always
+    # host.docker.internal is built-in on Docker Desktop (macOS / Windows).
+    # On Linux, host-gateway resolves it to the host's gateway IP.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - prometheus_data:/prometheus
+      - ./prometheus/:/etc/prometheus/
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yaml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    ports:
+      - "9090:9090"
+
+  grafana:
+    image: grafana/grafana:10.4.3
+    restart: always
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/provisioning/:/etc/grafana/provisioning/
+    env_file:
+      - ./grafana/config.monitoring
+    ports:
+      # Override the host port if 3000 is taken: GRAFANA_PORT=3001 docker compose up
+      - "${GRAFANA_PORT:-3000}:3000"
+
+volumes:
+  prometheus_data:
+  grafana_data:

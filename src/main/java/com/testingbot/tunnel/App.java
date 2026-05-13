@@ -53,6 +53,7 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private int metricsPort = 8003;
+    private String metricsAuth;
     private int sshPort = 0;
     private boolean shared = false;
 
@@ -135,6 +136,10 @@ public class App {
 
         Option metrics = Option.builder().longOpt("metrics-port").hasArg().valueSeparator().desc("Use the specified port to access metrics. Default port 8003").build();
         options.addOption(metrics);
+
+        Option metricsAuthOpt = Option.builder().longOpt("metrics-auth").hasArg().argName("user:password")
+                .desc("Require HTTP Basic auth on the /metrics (Prometheus) endpoint. Format: user:password. Off by default.").build();
+        options.addOption(metricsAuthOpt);
 
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
@@ -373,6 +378,14 @@ public class App {
                 app.setMetricsPort(Integer.parseInt(line));
             }
 
+            if (commandLine.hasOption("metrics-auth")) {
+                String value = commandLine.getOptionValue("metrics-auth");
+                if (value == null || !value.contains(":") || value.startsWith(":")) {
+                    throw new ParseException("--metrics-auth must be in the form user:password");
+                }
+                app.setMetricsAuth(value);
+            }
+
             if (commandLine.hasOption("tunnel-identifier")) {
                 String identifierValue = commandLine.getOptionValue("tunnel-identifier");
                 app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
@@ -478,6 +491,7 @@ public class App {
                 if (tunnel != null) {
                     tunnel.stop();
                 }
+                TunnelMetrics.setTunnelUp(false);
                 try {
                     System.out.println("Shutting down your personal Tunnel Server.");
                     api.destroyTunnel();
@@ -519,6 +533,8 @@ public class App {
             api.setTunnelID(tunnelID);
         }
 
+        TunnelMetrics.setTunnelInfo(App.VERSION, this.tunnelID, this.tunnelIdentifier);
+
         if (Float.parseFloat(tunnelData.get("version").asText()) > App.VERSION) {
             System.err.println("A new version (" + tunnelData.get("version").asText() + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
@@ -541,6 +557,8 @@ public class App {
     }
 
     public void stop() {
+        TunnelMetrics.setTunnelUp(false);
+
         if (tunnel != null) {
             tunnel.stop(true);
         }
@@ -571,6 +589,7 @@ public class App {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 this.startProxies();
+                TunnelMetrics.setTunnelUp(true);
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
             }
@@ -838,6 +857,14 @@ public class App {
      */
     public void setMetricsPort(int metricsPort) {
         this.metricsPort = metricsPort;
+    }
+
+    public String getMetricsAuth() {
+        return metricsAuth;
+    }
+
+    public void setMetricsAuth(String metricsAuth) {
+        this.metricsAuth = metricsAuth;
     }
 
     /**

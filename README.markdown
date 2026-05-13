@@ -57,6 +57,7 @@ The tunnel comes with various options:
 |-j,--localproxy <port>|The port to launch the local proxy on (default 8087).|
 |-l,--logfile <FILE>|Write logging to a file.|
 |--log-level <LEVEL>|Set log verbosity. One of: `error`, `warn`, `info` (default), `debug`, `trace`. Overrides `--debug` if both are given.|
+|--metrics-auth <user:password>|Require HTTP Basic auth on the `/metrics` (Prometheus) endpoint. Off by default.|
 |--metrics-port <port>|Use the specified port to access metrics. Default port 8003|
 |-P,--se-port <PORT>|The local port your Selenium test should connect to. Default port is 4445|
 |-p,--hubport <HUBPORT>|Use this if you want to connect to port 80 on our hub instead of the default port 4444|
@@ -243,6 +244,76 @@ docker buildx build --platform linux/amd64,linux/arm64 \
   -t testingbot/tunnel:4.6 \
   -t testingbot/tunnel:latest .
 ```
+
+
+Monitoring
+----------
+
+The tunnel exposes two endpoints on the metrics port (default `8003`, configurable with `--metrics-port`):
+
+* `GET /` — a small JSON status payload (version, uptime, request count, bytes transferred). Useful as a liveness probe.
+* `GET /metrics` — Prometheus exposition format, ready to be scraped by Prometheus, Grafana Agent, VictoriaMetrics, or any compatible collector.
+
+### What's exposed
+
+All tunnel-specific series use the `testingbot_` prefix. Standard `jvm_*` and `process_*` series are exposed in addition.
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `testingbot_tunnel_info` | gauge | `version`, `tunnel_id`, `identifier` | Static info about the active tunnel. Value is `1`. |
+| `testingbot_tunnel_up` | gauge | — | `1` when the SSH tunnel is connected, `0` otherwise. |
+| `testingbot_tunnel_uptime_seconds` | gauge | — | Seconds since the process started. |
+| `testingbot_tunnel_connect_duration_seconds` | histogram | — | Duration of the SSH connect handshake. |
+| `testingbot_tunnel_connects_total` | counter | — | Successful SSH connects (initial + reconnects). |
+| `testingbot_tunnel_reconnects_total` | counter | — | SSH reconnect attempts. |
+| `testingbot_active_connections` | gauge | — | Currently open client connections to the local proxy. |
+| `testingbot_http_requests_total` | counter | `method`, `code` | HTTP requests proxied through the tunnel. |
+| `testingbot_http_request_duration_seconds` | histogram | `method` | Request duration observed by the local proxy. |
+| `testingbot_http_request_size_bytes` | histogram | `method` | Request payload size (when `Content-Length` is set). |
+| `testingbot_http_response_size_bytes` | histogram | `method` | Response payload size. |
+| `testingbot_http_requests_in_flight` | gauge | `method` | Requests currently being proxied. |
+| `testingbot_https_connect_total` | counter | `code` | HTTPS `CONNECT` requests handled. |
+| `testingbot_https_connect_errors_total` | counter | `reason` | HTTPS `CONNECT` failures (`blacklisted`, `status_4xx`, `upstream_connect_failed`, …). |
+| `testingbot_https_connect_duration_seconds` | histogram | — | Time to establish the HTTPS CONNECT tunnel. |
+| `testingbot_proxy_bytes_transferred_total` | counter | — | Response bytes sent back to clients through the proxy. |
+| `testingbot_errors_total` | counter | `name` | Tunnel errors grouped by name (`ssh_connect`, `ssh_auth`, `ssh_connection_lost`, `client_request_failure`, `blacklisted`). |
+
+### Example scrape config
+
+```yaml
+scrape_configs:
+  - job_name: testingbot-tunnel
+    static_configs:
+      - targets: ['localhost:8003']
+```
+
+To require authentication on `/metrics`, start the tunnel with `--metrics-auth user:password`:
+
+```
+$ java -jar testingbot-tunnel.jar <key> <secret> --metrics-auth ops:s3cret
+```
+
+…and add `basic_auth` to the scrape job:
+
+```yaml
+scrape_configs:
+  - job_name: testingbot-tunnel
+    basic_auth:
+      username: ops
+      password: s3cret
+    static_configs:
+      - targets: ['localhost:8003']
+```
+
+The legacy JSON endpoint at `/` is unaffected by `--metrics-auth`.
+
+### Pre-built Grafana dashboard
+
+A ready-made dashboard is included under [`examples/`](./examples/):
+
+- [`examples/docker-compose-prometheus-grafana/`](./examples/docker-compose-prometheus-grafana/) — a full Docker Compose stack (tunnel + Prometheus + Grafana, with the dashboard auto-provisioned). Run `docker compose up` and open <http://localhost:3000>.
+- [`examples/grafana-dashboard/`](./examples/grafana-dashboard/) — the standalone dashboard JSON, for importing into an existing Grafana instance.
+
 
 Compile from Source
 -------------------

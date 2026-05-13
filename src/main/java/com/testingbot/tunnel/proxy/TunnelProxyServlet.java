@@ -1,12 +1,16 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.Statistics;
+import com.testingbot.tunnel.TunnelMetrics;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.StringWriter;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.Set;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
 import org.eclipse.jetty.client.ProxyConfiguration;
@@ -36,6 +40,21 @@ import java.util.regex.PatternSyntaxException;
 public class TunnelProxyServlet extends AsyncProxyServlet {
     private String proxyAuthHeaderValue = null;
     private List<Pattern> blackList = Collections.emptyList();
+
+    private static final String ATTR_RESPONSE_BYTES = "tb.responseBytes";
+    private static final String ATTR_IN_FLIGHT_LABEL = "tb.inFlightLabel";
+
+    // Keep label cardinality bounded by collapsing non-standard verbs.
+    private static final Set<String> KNOWN_METHODS = new HashSet<>(Arrays.asList(
+            "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "TRACE", "CONNECT"));
+
+    static String methodLabel(HttpServletRequest request) {
+        if (request == null) return "OTHER";
+        String m = request.getMethod();
+        if (m == null) return "OTHER";
+        String upper = m.toUpperCase(java.util.Locale.ROOT);
+        return KNOWN_METHODS.contains(upper) ? upper : "OTHER";
+    }
 
     @Override
     public void init() throws ServletException {
@@ -74,15 +93,35 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
 
     @Override
     protected void service(HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
+        String method = methodLabel(request);
+
         if (!blackList.isEmpty()) {
             String host = request.getServerName();
             if (hostMatchesAny(host, blackList)) {
                 Logger.getLogger(TunnelProxyServlet.class.getName())
                     .log(Level.INFO, "Fast-fail: rejecting {0} (matched blacklist)", host);
+                TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
+                TunnelMetrics.ERRORS_TOTAL.labels("blacklisted").inc();
                 response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked by fast-fail policy");
                 return;
             }
         }
+
+        TunnelMetrics.HTTP_REQUESTS_IN_FLIGHT.labels(method).inc();
+        request.setAttribute(ATTR_IN_FLIGHT_LABEL, method);
+
+        String cl = request.getHeader("Content-Length");
+        if (cl != null) {
+            try {
+                long size = Long.parseLong(cl);
+                if (size >= 0) {
+                    TunnelMetrics.HTTP_REQUEST_SIZE_BYTES.labels(method).observe(size);
+                }
+            } catch (NumberFormatException ignored) {
+                // best-effort; ignore malformed Content-Length
+            }
+        }
+
         super.service(request, response);
     }
 
@@ -107,6 +146,26 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         public void onComplete(Result result) {
             long endTime = System.currentTimeMillis();
             Statistics.addRequest();
+
+            String method = methodLabel(request);
+            int code = response.getStatus();
+            double duration = (endTime - startTime) / 1000.0;
+
+            TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, Integer.toString(code)).inc();
+            TunnelMetrics.HTTP_REQUEST_DURATION_SECONDS.labels(method).observe(duration);
+
+            Object inFlightLabel = request.getAttribute(ATTR_IN_FLIGHT_LABEL);
+            if (inFlightLabel instanceof String) {
+                TunnelMetrics.HTTP_REQUESTS_IN_FLIGHT.labels((String) inFlightLabel).dec();
+                request.removeAttribute(ATTR_IN_FLIGHT_LABEL);
+            }
+
+            Object responseBytes = request.getAttribute(ATTR_RESPONSE_BYTES);
+            if (responseBytes instanceof Long) {
+                TunnelMetrics.HTTP_RESPONSE_SIZE_BYTES.labels(method).observe(((Long) responseBytes).doubleValue());
+            } else {
+                TunnelMetrics.HTTP_RESPONSE_SIZE_BYTES.labels(method).observe(0.0);
+            }
 
             Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.INFO, "[{0}] {1} ({2}) - {3}", new Object[]{request.getMethod(), request.getRequestURL().toString(), response.toString().substring(9, 12), (endTime - startTime) + " ms"});
             if (getServletConfig().getInitParameter("tb_debug") != null) {
@@ -135,11 +194,18 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     @Override
     protected void onResponseContent(HttpServletRequest request, HttpServletResponse response, Response proxyResponse, byte[] buffer, int offset, int length, Callback callback) {
         Statistics.addBytesTransferred(length);
+        TunnelMetrics.PROXY_BYTES_TRANSFERRED_TOTAL.inc(length);
+
+        Object current = request.getAttribute(ATTR_RESPONSE_BYTES);
+        long total = current instanceof Long ? (Long) current : 0L;
+        request.setAttribute(ATTR_RESPONSE_BYTES, total + length);
+
         super.onResponseContent(request, response, proxyResponse, buffer, offset, length, callback);
     }
 
     @Override
     protected void onClientRequestFailure(HttpServletRequest clientRequest, Request proxyRequest, HttpServletResponse proxyResponse, Throwable failure) {
+        TunnelMetrics.ERRORS_TOTAL.labels("client_request_failure").inc();
         if (!clientRequest.getRequestURL().toString().contains("squid-internal")) {
             StringWriter sw = new StringWriter();
             failure.printStackTrace(new PrintWriter(sw));

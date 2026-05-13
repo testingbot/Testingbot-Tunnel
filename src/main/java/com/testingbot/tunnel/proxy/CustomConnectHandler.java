@@ -2,6 +2,8 @@ package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.Statistics;
+import com.testingbot.tunnel.TunnelMetrics;
+import io.prometheus.client.Histogram;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -124,35 +126,53 @@ public class CustomConnectHandler extends ConnectHandler {
         String method = request.getMethod();
         Statistics.addRequest();
 
-        if (HttpMethod.CONNECT.is(request.getMethod())) {
-            String authority = request.getRequestURI(); // "host:port" for CONNECT
-            if (hostBlocked(authority, blackList)) {
-                Logger.getLogger(CustomConnectHandler.class.getName())
-                    .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
-                response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked by fast-fail policy");
-                baseRequest.setHandled(true);
-                return;
-            }
-            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1}", new Object[]{method, authority});
-        }
-
-        if (debugMode) {
-            Enumeration<String> headerNames = request.getHeaderNames();
-            if (headerNames != null) {
-                StringBuilder sb = new StringBuilder();
-                String header;
-
-                while (headerNames.hasMoreElements()) {
-                    header = headerNames.nextElement();
-                    sb.append(header).append(": ")
-                            .append(SensitiveHeaders.redactValue(header, request.getHeader(header)))
-                            .append(System.lineSeparator());
+        boolean isConnect = HttpMethod.CONNECT.is(request.getMethod());
+        Histogram.Timer connectTimer = isConnect ? TunnelMetrics.HTTPS_CONNECT_DURATION_SECONDS.startTimer() : null;
+        try {
+            if (isConnect) {
+                String authority = request.getRequestURI(); // "host:port" for CONNECT
+                if (hostBlocked(authority, blackList)) {
+                    Logger.getLogger(CustomConnectHandler.class.getName())
+                        .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
+                    TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("blacklisted").inc();
+                    TunnelMetrics.HTTPS_CONNECT_TOTAL.labels("403").inc();
+                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked by fast-fail policy");
+                    baseRequest.setHandled(true);
+                    return;
                 }
-                Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
+                Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1}", new Object[]{method, authority});
+            }
+
+            if (debugMode) {
+                Enumeration<String> headerNames = request.getHeaderNames();
+                if (headerNames != null) {
+                    StringBuilder sb = new StringBuilder();
+                    String header;
+
+                    while (headerNames.hasMoreElements()) {
+                        header = headerNames.nextElement();
+                        sb.append(header).append(": ")
+                                .append(SensitiveHeaders.redactValue(header, request.getHeader(header)))
+                                .append(System.lineSeparator());
+                    }
+                    Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
+                }
+            }
+
+            super.handle(target, baseRequest, request, response);
+
+            if (isConnect) {
+                int status = response.getStatus();
+                TunnelMetrics.HTTPS_CONNECT_TOTAL.labels(Integer.toString(status)).inc();
+                if (status >= 400) {
+                    TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("status_" + status).inc();
+                }
+            }
+        } finally {
+            if (connectTimer != null) {
+                connectTimer.observeDuration();
             }
         }
-
-        super.handle(target, baseRequest, request, response);
     }
 
     @Override
@@ -277,6 +297,7 @@ public class CustomConnectHandler extends ConnectHandler {
                 }
             }
         } catch (IOException x) {
+            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("upstream_connect_failed").inc();
             LOG.error("Failed to establish CONNECT tunnel through upstream proxy {}:{} to {}:{}: {}",
                     proxyHost, proxyPort, host, port, x.getMessage());
             if (channel != null) {

@@ -4,6 +4,8 @@ import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.TunnelMetrics;
+import io.prometheus.client.Histogram;
 
 import java.io.IOException;
 import java.util.Timer;
@@ -42,6 +44,7 @@ public class SSHTunnel {
     }
 
     public final void connect() throws Exception {
+        Histogram.Timer histogramTimer = TunnelMetrics.TUNNEL_CONNECT_DURATION_SECONDS.startTimer();
         try {
             /* Now connect */
             long startTime = System.currentTimeMillis();
@@ -51,18 +54,24 @@ public class SSHTunnel {
             session.connect();
             long connectTime = System.currentTimeMillis() - startTime;
 
+            TunnelMetrics.TUNNEL_CONNECTS_TOTAL.inc();
+
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                 String.format("[%s] Secure connection established in %dms", connectionId, connectTime));
         } catch (JSchException ex) {
+            TunnelMetrics.ERRORS_TOTAL.labels("ssh_connect").inc();
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                 String.format("[%s] Connection failed: %s", connectionId, ex.getMessage()), ex);
             throw new Exception("Connection failed: " + ex.getMessage());
+        } finally {
+            histogramTimer.observeDuration();
         }
 
         // Authentication is done during connect() with JSch
         boolean authenticated = session.isConnected();
 
         if (!authenticated) {
+            TunnelMetrics.ERRORS_TOTAL.labels("ssh_auth").inc();
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                 String.format("[%s] Failed authenticating to the tunnel. Please make sure you are supplying correct login credentials.", connectionId));
             throw new Exception("Authentication failed");

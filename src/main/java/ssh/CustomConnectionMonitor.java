@@ -1,6 +1,7 @@
 package ssh;
 
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.TunnelMetrics;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -31,6 +32,9 @@ public class CustomConnectionMonitor {
             return;
         }
 
+        TunnelMetrics.setTunnelUp(false);
+        TunnelMetrics.ERRORS_TOTAL.labels("ssh_connection_lost").inc();
+
         if (app.getHttpProxy() != null) {
             app.getHttpProxy().stop();
         }
@@ -50,6 +54,7 @@ public class CustomConnectionMonitor {
         public void run() {
             try {
                 retryAttempts += 1;
+                TunnelMetrics.TUNNEL_RECONNECTS_TOTAL.inc();
 
                 Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO,
                     String.format("[%s] Attempting to re-establish SSH Connection (attempt %d, delay %dms)",
@@ -67,6 +72,7 @@ public class CustomConnectionMonitor {
                         app.getHttpProxy().start();
                     }
                     tunnel.createPortForwarding();
+                    TunnelMetrics.setTunnelUp(true);
 
                     Logger.getLogger(CustomConnectionMonitor.class.getName()).log(Level.INFO,
                         String.format("[%s] Successfully re-established SSH Connection after %d attempts",

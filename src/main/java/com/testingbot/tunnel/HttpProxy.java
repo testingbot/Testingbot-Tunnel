@@ -24,6 +24,7 @@ import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.message.BasicNameValuePair;
 import org.apache.hc.core5.util.Timeout;
 
+import org.eclipse.jetty.io.Connection;
 import org.eclipse.jetty.proxy.ConnectHandler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
@@ -57,6 +58,17 @@ public final class HttpProxy {
 
         proxyConnector.setPort(app.getJettyPort());
         proxyConnector.setIdleTimeout(400000);
+        proxyConnector.addBean(new Connection.Listener() {
+            @Override
+            public void onOpened(Connection connection) {
+                TunnelMetrics.ACTIVE_CONNECTIONS.inc();
+            }
+
+            @Override
+            public void onClosed(Connection connection) {
+                TunnelMetrics.ACTIVE_CONNECTIONS.dec();
+            }
+        });
         httpProxy.addConnector(proxyConnector);
         httpProxy.setStopAtShutdown(true);
 
