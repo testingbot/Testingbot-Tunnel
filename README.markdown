@@ -37,6 +37,16 @@ You can obtain a free key and secret from https://testingbot.com/members/user/ed
 
 **Hint:** Instead of passing the key and secret to the command, you can have them as environment variables `${TESTINGBOT_KEY}` and `${TESTINGBOT_SECRET}`.
 
+### Avoiding credentials in the process list
+
+CLI options whose value contains a password show up in `ps` / process listings. Three options can be set via environment variables instead. The CLI flag still takes precedence; the env var is used as a fallback when the flag is absent.
+
+| CLI flag | Env var | Format |
+|---------|---------|--------|
+| `--auth` | `TESTINGBOT_AUTH` | `host:port:user:password` — comma-separated for multiple entries |
+| `--proxy-userpwd` | `TESTINGBOT_PROXY_USERPWD` | `user:password` |
+| `--metrics-auth` | `TESTINGBOT_METRICS_AUTH` | `user:password` |
+
 Options
 -------
 

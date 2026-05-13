@@ -138,14 +138,14 @@ public class App {
         options.addOption(metrics);
 
         Option metricsAuthOpt = Option.builder().longOpt("metrics-auth").hasArg().argName("user:password")
-                .desc("Require HTTP Basic auth on the /metrics (Prometheus) endpoint. Format: user:password. Off by default.").build();
+                .desc("Require HTTP Basic auth on the /metrics (Prometheus) endpoint. Format: user:password. Off by default. Env: TESTINGBOT_METRICS_AUTH.").build();
         options.addOption(metricsAuthOpt);
 
         Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
         proxy.setArgName("PROXYHOST:PROXYPORT");
         options.addOption(proxy);
 
-        Option basicAuth = new Option("a", "auth", true, "Performs Basic Authentication for specific hosts.");
+        Option basicAuth = new Option("a", "auth", true, "Performs Basic Authentication for specific hosts. Env: TESTINGBOT_AUTH (comma-separated for multiple entries).");
         basicAuth.setArgs(Option.UNLIMITED_VALUES);
         basicAuth.setArgName("host:port:user:passwd");
         options.addOption(basicAuth);
@@ -153,7 +153,7 @@ public class App {
         Option pacOption = Option.builder().longOpt("pac").hasArg().desc("Proxy autoconfiguration. Should be a http(s) URL").build();
         options.addOption(pacOption);
 
-        Option proxyAuth = new Option("z", "proxy-userpwd", true, "Username and password required to access the proxy configured with --proxy.");
+        Option proxyAuth = new Option("z", "proxy-userpwd", true, "Username and password required to access the proxy configured with --proxy. Env: TESTINGBOT_PROXY_USERPWD.");
         proxyAuth.setArgName("user:pwd");
         options.addOption(proxyAuth);
 
@@ -378,12 +378,14 @@ public class App {
                 app.setMetricsPort(Integer.parseInt(line));
             }
 
-            if (commandLine.hasOption("metrics-auth")) {
-                String value = commandLine.getOptionValue("metrics-auth");
-                if (value == null || !value.contains(":") || value.startsWith(":")) {
-                    throw new ParseException("--metrics-auth must be in the form user:password");
+            String metricsAuthValue = commandLine.hasOption("metrics-auth")
+                    ? commandLine.getOptionValue("metrics-auth")
+                    : System.getenv("TESTINGBOT_METRICS_AUTH");
+            if (metricsAuthValue != null && !metricsAuthValue.isEmpty()) {
+                if (!metricsAuthValue.contains(":") || metricsAuthValue.startsWith(":")) {
+                    throw new ParseException("--metrics-auth / TESTINGBOT_METRICS_AUTH must be in the form user:password");
                 }
-                app.setMetricsAuth(value);
+                app.setMetricsAuth(metricsAuthValue);
             }
 
             if (commandLine.hasOption("tunnel-identifier")) {
@@ -391,19 +393,31 @@ public class App {
                 app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
             }
 
+            String[] authValues = null;
             if (commandLine.hasOption("auth")) {
-                for (String optionValue : commandLine.getOptionValues("auth")) {
+                authValues = commandLine.getOptionValues("auth");
+            } else {
+                String envAuth = System.getenv("TESTINGBOT_AUTH");
+                if (envAuth != null && !envAuth.isEmpty()) {
+                    authValues = envAuth.split(",");
+                }
+            }
+            if (authValues != null) {
+                for (String optionValue : authValues) {
                     if (optionValue.split(":").length < 4) {
                         throw new ParseException("ERROR: Auth value must contain host:port:user:password value: " + optionValue);
                     }
                 }
-                app.setBasicAuth(commandLine.getOptionValues("auth"));
+                app.setBasicAuth(authValues);
             }
 
-            if (commandLine.hasOption("proxy-userpwd")) {
-                String line = commandLine.getOptionValue("proxy-userpwd");
-                app.setProxyAuth(line);
+            String proxyAuthValue = commandLine.hasOption("proxy-userpwd")
+                    ? commandLine.getOptionValue("proxy-userpwd")
+                    : System.getenv("TESTINGBOT_PROXY_USERPWD");
+            if (proxyAuthValue != null && !proxyAuthValue.isEmpty()) {
+                app.setProxyAuth(proxyAuthValue);
             }
+
             if (commandLine.hasOption("noproxy")) {
                 app.noProxy = true;
             }
