@@ -46,7 +46,7 @@ The tunnel comes with various options:
 |---------|-------------|
 |-a,--auth <host:port:user:passwd>|Performs Basic Authentication for specific hosts.|
 |-b,--nobump|Do not perform SSL bumping.|
-|-d,--debug|Enables debug messages. Will output request/response headers.|
+|-d,--debug|Enables debug messages. Will output request/response headers. Alias for `--log-level debug`.|
 |-dns,--dns|Use a custom DNS server. For example: 8.8.8.8|
 |--doctor|Perform sanity/health checks to detect possible misconfiguration or problems.|
 |--extra-headers <JSON Map with Header Key and Value>|Inject extra headers in the requests the tunnel makes.|
@@ -56,6 +56,7 @@ The tunnel comes with various options:
 |-i,--tunnel-identifier <id>|Add an identifier to this tunnel connection. In case of multiple tunnels, specify this identifier in your desired capabilities to use this specific tunnel.|
 |-j,--localproxy <port>|The port to launch the local proxy on (default 8087).|
 |-l,--logfile <FILE>|Write logging to a file.|
+|--log-level <LEVEL>|Set log verbosity. One of: `error`, `warn`, `info` (default), `debug`, `trace`. Overrides `--debug` if both are given.|
 |--metrics-port <port>|Use the specified port to access metrics. Default port 8003|
 |-P,--se-port <PORT>|The local port your Selenium test should connect to. Default port is 4445|
 |-p,--hubport <HUBPORT>|Use this if you want to connect to port 80 on our hub instead of the default port 4444|

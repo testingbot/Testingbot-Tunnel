@@ -18,7 +18,6 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
-import java.util.logging.Handler;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -116,7 +115,11 @@ public class App {
         final Options options = new Options();
 
         options.addOption("h", "help", false, "Displays help text");
-        options.addOption("d", "debug", false, "Enables debug messages");
+        options.addOption("d", "debug", false, "Enables debug messages (alias for --log-level debug)");
+
+        Option logLevel = new Option(null, "log-level", true, "Set log verbosity. One of: error, warn, info (default), debug, trace. Overrides --debug if both are given.");
+        logLevel.setArgName("LEVEL");
+        options.addOption(logLevel);
 
         Option readyfile = new Option("f", "readyfile", true, "This file will be touched when the tunnel is ready for usage");
         readyfile.setArgName("FILE");
@@ -205,28 +208,91 @@ public class App {
             logger.addHandler(handler);
 
             App app = new App();
-            if (commandLine.hasOption("debug")) {
-                System.setProperty("org.eclipse.jetty.LEVEL", "DEBUG");
-                logger.log(Level.INFO, "Running in debug-mode");
-                logger.setLevel(Level.ALL);
-                app.setDebugMode(true);
 
-                LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
-                loggerContext.getLogger("ROOT").setLevel(ch.qos.logback.classic.Level.DEBUG);
-                loggerContext.getLogger("org.apache.hc").setLevel(ch.qos.logback.classic.Level.DEBUG);
-            } else {
-                logger.setLevel(Level.INFO);
+            String levelArg = commandLine.getOptionValue("log-level");
+            if (levelArg == null && commandLine.hasOption("debug")) {
+                levelArg = "debug";
+            }
+            if (levelArg == null) {
+                levelArg = "info";
+            }
+
+            Level julLevel;
+            ch.qos.logback.classic.Level logbackLevel;
+            String jettyLevel;
+            switch (levelArg.toLowerCase(java.util.Locale.ROOT)) {
+                case "error":
+                    julLevel = Level.SEVERE;
+                    logbackLevel = ch.qos.logback.classic.Level.ERROR;
+                    jettyLevel = "ERROR";
+                    break;
+                case "warn":
+                case "warning":
+                    julLevel = Level.WARNING;
+                    logbackLevel = ch.qos.logback.classic.Level.WARN;
+                    jettyLevel = "WARN";
+                    break;
+                case "info":
+                    julLevel = Level.INFO;
+                    logbackLevel = ch.qos.logback.classic.Level.INFO;
+                    jettyLevel = "INFO";
+                    break;
+                case "debug":
+                    julLevel = Level.ALL;
+                    logbackLevel = ch.qos.logback.classic.Level.DEBUG;
+                    jettyLevel = "DEBUG";
+                    break;
+                case "trace":
+                    julLevel = Level.ALL;
+                    logbackLevel = ch.qos.logback.classic.Level.TRACE;
+                    jettyLevel = "TRACE";
+                    break;
+                default:
+                    throw new ParseException("Invalid --log-level '" + levelArg + "'. Use one of: error, warn, info, debug, trace.");
+            }
+
+            logger.setLevel(julLevel);
+            System.setProperty("org.eclipse.jetty.LEVEL", jettyLevel);
+
+            LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
+            loggerContext.getLogger("ROOT").setLevel(logbackLevel);
+            loggerContext.getLogger("org.apache.hc").setLevel(logbackLevel);
+
+            boolean debugLike = (logbackLevel.toInt() <= ch.qos.logback.classic.Level.DEBUG.toInt());
+            if (debugLike) {
+                loggerContext.getLogger("org.eclipse.jetty").setLevel(logbackLevel);
+                loggerContext.getLogger("com.testingbot.tunnel.proxy").setLevel(logbackLevel);
+                logger.log(Level.INFO, "Running in debug-mode");
+                app.setDebugMode(true);
             }
 
             if (commandLine.hasOption("logfile")) {
+                String logfilePath = commandLine.getOptionValue("logfile");
                 try {
-                    Handler handlerFile = new FileHandler(commandLine.getOptionValue("logfile"));
+                    FileHandler handlerFile = new FileHandler(logfilePath, true);
                     handlerFile.setFormatter(new LogFormatter());
                     handlerFile.setLevel(Level.ALL);
-                    Logger.getLogger(App.class.getName()).addHandler(handlerFile);
-                    Logger.getLogger(App.class.getName()).log(Level.INFO, "Logging to file {0}", commandLine.getOptionValue("logfile"));
+                    // Attach to App's logger (useParentHandlers=false above) AND to the JUL root
+                    // so messages from sibling loggers (HttpProxy, SSHTunnel, Doctor, ...) land in the file too.
+                    logger.addHandler(handlerFile);
+                    Logger.getLogger("").addHandler(handlerFile);
+
+                    ch.qos.logback.classic.encoder.PatternLayoutEncoder encoder = new ch.qos.logback.classic.encoder.PatternLayoutEncoder();
+                    encoder.setContext(loggerContext);
+                    encoder.setPattern("%d{ISO8601} [%thread] %-5level %logger{36} - %msg%n");
+                    encoder.start();
+                    ch.qos.logback.core.FileAppender<ch.qos.logback.classic.spi.ILoggingEvent> fileAppender = new ch.qos.logback.core.FileAppender<>();
+                    fileAppender.setContext(loggerContext);
+                    fileAppender.setName("FILE");
+                    fileAppender.setFile(logfilePath);
+                    fileAppender.setAppend(true);
+                    fileAppender.setEncoder(encoder);
+                    fileAppender.start();
+                    loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME).addAppender(fileAppender);
+
+                    logger.log(Level.INFO, "Logging to file {0}", logfilePath);
                 } catch (IOException | SecurityException e) {
-                    System.err.println("Cannot write logfile to " + commandLine.getOptionValue("logfile") + ".\nMake sure the directory exists and that we have the proper rights to write to this directory.");
+                    System.err.println("Cannot write logfile to " + logfilePath + ".\nMake sure the directory exists and we have permission to write there.");
                 }
             }
 
