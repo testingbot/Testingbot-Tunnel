@@ -522,7 +522,12 @@ public class App {
         }
 
         if (!this.noProxy) {
-            this.httpProxy = new HttpProxy(this);
+            try {
+                this.httpProxy = new HttpProxy(this);
+            } catch (HttpProxy.HttpProxyStartException ex) {
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE, ex.getMessage());
+                System.exit(1);
+            }
             if (this.getProxy() == null && !this.httpProxy.testProxy()) {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "! Tunnel might not work properly, test failed");
             }

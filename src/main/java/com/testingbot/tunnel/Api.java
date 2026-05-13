@@ -181,12 +181,11 @@ public class Api {
             }
 
             try {
-                String jsonData = responseBody.replaceAll("\\\\", "");
-                if (!jsonData.startsWith("{")) {
-                    jsonData = jsonData.substring(1, (jsonData.length() - 1));
+                JsonNode root = objectMapper.readTree(responseBody);
+                if (root.isTextual()) {
+                    root = objectMapper.readTree(root.asText());
                 }
-
-                return objectMapper.readTree(jsonData);
+                return root;
             }
             catch (Exception e) {
                 throw new Exception("Json parse error: " + e.getMessage() + " for " + responseBody);
@@ -218,12 +217,11 @@ public class Api {
             }
 
             try {
-                String jsonData = responseBody.replaceAll("\\\\", "");
-                if (!jsonData.startsWith("{")) {
-                    jsonData = jsonData.substring(1, (jsonData.length() - 1));
+                JsonNode root = objectMapper.readTree(responseBody);
+                if (root.isTextual()) {
+                    root = objectMapper.readTree(root.asText());
                 }
-
-                return objectMapper.readTree(jsonData);
+                return root;
             }
             catch (Exception e) {
                 throw new Exception("Json parse error: " + e.getMessage() + " for " + responseBody);

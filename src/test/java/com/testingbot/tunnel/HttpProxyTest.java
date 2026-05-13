@@ -7,6 +7,7 @@ import java.net.ServerSocket;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class HttpProxyTest {
 
@@ -68,6 +69,16 @@ class HttpProxyTest {
         assertThat(result).isFalse(); // Expected in test environment
     }
     
+    @Test
+    void start_whenPortAlreadyBound_throwsHttpProxyStartException() throws Exception {
+        try (ServerSocket blocker = new ServerSocket(0)) {
+            app.setJettyPort(blocker.getLocalPort());
+            assertThatThrownBy(() -> new HttpProxy(app))
+                .isInstanceOf(HttpProxy.HttpProxyStartException.class)
+                .hasMessageContaining(Integer.toString(blocker.getLocalPort()));
+        }
+    }
+
     private int findFreePort() {
         try (ServerSocket socket = new ServerSocket(0)) {
             return socket.getLocalPort();

@@ -144,7 +144,9 @@ public class CustomConnectHandler extends ConnectHandler {
 
                 while (headerNames.hasMoreElements()) {
                     header = headerNames.nextElement();
-                    sb.append(header).append(": ").append(request.getHeader(header)).append(System.lineSeparator());
+                    sb.append(header).append(": ")
+                            .append(SensitiveHeaders.redactValue(header, request.getHeader(header)))
+                            .append(System.lineSeparator());
                 }
                 Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
             }

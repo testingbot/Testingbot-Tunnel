@@ -501,4 +501,36 @@ class ApiTest {
         assertThat(createResult.get("id").asText()).isEqualTo("seq-1");
         assertThat(pollResult.get("state").asText()).isEqualTo("RUNNING");
     }
+
+    @Test
+    void createTunnel_preservesBackslashesInStringValues() throws Exception {
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"id\":\"backslash\",\"path\":\"C:\\\\Users\\\\test\",\"message\":\"line1\\nline2\"}")));
+
+        api = createApiWithMockServer();
+
+        JsonNode result = api.createTunnel();
+
+        assertThat(result.get("path").asText()).isEqualTo("C:\\Users\\test");
+        assertThat(result.get("message").asText()).isEqualTo("line1\nline2");
+    }
+
+    @Test
+    void createTunnel_handlesJsonEncodedAsString() throws Exception {
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("\"{\\\"id\\\":\\\"wrapped\\\",\\\"state\\\":\\\"READY\\\"}\"")));
+
+        api = createApiWithMockServer();
+
+        JsonNode result = api.createTunnel();
+
+        assertThat(result.get("id").asText()).isEqualTo("wrapped");
+        assertThat(result.get("state").asText()).isEqualTo("READY");
+    }
 }

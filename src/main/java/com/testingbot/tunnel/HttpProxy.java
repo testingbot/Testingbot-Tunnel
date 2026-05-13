@@ -125,8 +125,15 @@ public final class HttpProxy {
         try {
             httpProxy.start();
         } catch (Exception ex) {
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, "Could not set up local http proxy. Please make sure this program can open port {0} on this computer.", Integer.toString(app.getJettyPort()));
-            System.exit(1);
+            throw new HttpProxyStartException(
+                "Could not set up local http proxy. Please make sure this program can open port "
+                        + app.getJettyPort() + " on this computer.", ex);
+        }
+    }
+
+    public static final class HttpProxyStartException extends RuntimeException {
+        public HttpProxyStartException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 
