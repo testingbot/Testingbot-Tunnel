@@ -204,7 +204,7 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
         if (basicAuthString != null) {
             final String[] basicAuth = basicAuthString.split(",");
             for (String authCredentials : basicAuth) {
-                String[] credentials = authCredentials.split(":");
+                String[] credentials = authCredentials.split(":", 4);
                 if (credentials.length < 4) {
                     Logger.getLogger(TunnelProxyServlet.class.getName()).log(Level.WARNING, "Invalid basic auth format, expected host:port:user:password");
                     continue;

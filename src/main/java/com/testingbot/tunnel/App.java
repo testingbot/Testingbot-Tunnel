@@ -388,7 +388,7 @@ public class App {
             try (BufferedReader br = Files.newBufferedReader(dataFile)) {
                 String strLine = br.readLine();
                 if (strLine != null) {
-                    return strLine.split(":");
+                    return strLine.split(":", 2);
                 }
             } catch (IOException e) {
                 Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not read credentials from .testingbot file", e);
