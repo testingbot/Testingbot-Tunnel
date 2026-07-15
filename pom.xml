@@ -146,6 +146,12 @@
               <goal>shade</goal>
             </goals>
             <configuration>
+              <!-- Publish a thin main artifact (project classes only, with dependencies declared
+                   in the POM) so Maven consumers such as the Jenkins plugin get the real, correctly
+                   versioned dependencies transitively instead of a fat jar that shadows them.
+                   The runnable uber jar is attached under the "shaded" classifier for CLI/Docker use. -->
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>shaded</shadedClassifierName>
               <minimizeJar>true</minimizeJar>
               <filters>
                 <filter>
@@ -254,7 +260,7 @@
               <executable>java</executable>
               <arguments>
                 <argument>-jar</argument>
-                <argument>${project.build.directory}/${project.build.finalName}.jar</argument>
+                <argument>${project.build.directory}/${project.build.finalName}-shaded.jar</argument>
                 <argument>--version</argument>
               </arguments>
             </configuration>

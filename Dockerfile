@@ -15,7 +15,7 @@ RUN mvn -B -ntp -DskipTests \
         -Dmaven.javadoc.skip=true \
         -Dmaven.source.skip=true \
         package \
-    && mv target/TestingBotTunnel-*.jar target/testingbot-tunnel.jar
+    && mv target/TestingBotTunnel-*-shaded.jar target/testingbot-tunnel.jar
 
 # -------- Runtime stage --------
 FROM eclipse-temurin:11-jre-jammy
