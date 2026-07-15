@@ -77,6 +77,10 @@
         <extensions>true</extensions>
         <configuration>
           <publishingServerId>central</publishingServerId>
+          <!-- Actually release to Maven Central instead of leaving the deployment in a
+               "pending/validated" state that needs a manual "Publish" click in the portal. -->
+          <autoPublish>true</autoPublish>
+          <waitUntil>published</waitUntil>
         </configuration>
       </plugin>
       <plugin>
@@ -152,6 +156,11 @@
                    The runnable uber jar is attached under the "shaded" classifier for CLI/Docker use. -->
               <shadedArtifactAttached>true</shadedArtifactAttached>
               <shadedClassifierName>shaded</shadedClassifierName>
+              <!-- Keep the real dependencies in the published POM. Because the uber jar is only an
+                   attached artifact (not the main one), the main jar is thin and its consumers must
+                   resolve Jetty/HTTP/commons-cli/etc. transitively; the default dependency-reduced
+                   POM would strip exactly those and leave consumers with unresolvable classes. -->
+              <createDependencyReducedPom>false</createDependencyReducedPom>
               <minimizeJar>true</minimizeJar>
               <filters>
                 <filter>
