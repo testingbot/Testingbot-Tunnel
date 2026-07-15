@@ -43,11 +43,19 @@ jobs:
         MAVEN_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
         GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
 
-    # Upload the JAR as a release asset
+    # The published Maven artifact is now the thin jar; use the runnable "shaded" jar as the
+    # downloadable CLI release asset, keeping the familiar TestingBotTunnel-<version>.jar name.
+    - name: Prepare runnable jar for release
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        mkdir -p release-assets
+        cp target/TestingBotTunnel-${VERSION}-shaded.jar release-assets/TestingBotTunnel-${VERSION}.jar
+
+    # Upload the runnable JAR as a release asset
     - name: Upload JAR to GitHub Releases
       uses: softprops/action-gh-release@v1
       with:
-        files: target/TestingBotTunnel-*.jar
+        files: release-assets/TestingBotTunnel-*.jar
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
