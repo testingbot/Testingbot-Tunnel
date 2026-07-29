@@ -2,6 +2,7 @@ package ssh;
 
 import com.testingbot.tunnel.Api;
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.TunnelFailedException;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.logging.Level;
@@ -51,6 +52,11 @@ public class TunnelPoller {
                     this.counter += 1;
                     Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.get("state").asText());
                 }
+            } catch (TunnelFailedException tunnelFailedException) {
+                // the tunnel became ready but could not be set up; this runs on a
+                // timer thread so there is nobody to propagate to, report it here
+                timer.cancel();
+                Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, tunnelFailedException.getMessage());
             } catch (Exception ex) {
                 timer.cancel();
                 Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, "Unable to poll for tunnel status.");

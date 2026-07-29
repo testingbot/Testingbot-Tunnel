@@ -463,14 +463,21 @@ public class App {
 
             app.init();
             app.boot();
+            // The pid file lets an external supervisor stop this process; it is
+            // only meaningful when running as a command line client.
+            app.trackPid();
         } catch (ParseException parseException) {
             System.err.println(parseException.getMessage());
             System.exit(2);
+        } catch (TunnelFailedException tunnelFailedException) {
+            System.err.println(tunnelFailedException.getMessage());
+            System.exit(tunnelFailedException.getExitCode());
         }
     }
     private PidPoller pidPoller;
     private TunnelPoller poller;
     private HttpForwarder httpForwarder;
+    private Thread cleanupThread;
 
     private String[] getUserData() {
         if (System.getenv("TESTINGBOT_KEY") != null && System.getenv("TESTINGBOT_SECRET") != null) {
@@ -492,7 +499,7 @@ public class App {
     }
 
     public void init() {
-        Thread cleanupThread = new Thread() {
+        cleanupThread = new Thread() {
             @Override
             public void run() {
                 if (readyFile != null) {
@@ -518,27 +525,27 @@ public class App {
         Runtime.getRuntime().addShutdownHook(cleanupThread);
     }
 
+    Api createApi() {
+        return new Api(this);
+    }
+
     public void boot() throws Exception {
-        api = new Api(this);
+        api = createApi();
         JsonNode tunnelData = null;
 
         try {
             tunnelData = api.createTunnel();
         } catch (Exception e) {
-            System.err.println("Creating a new tunnel failed, please make sure you're supplying correct credentials and that you can connect to the TestingBot network.\nUse --doctor to verify if everything is set up correctly.");
-            System.err.println(e.getMessage());
-            System.exit(1);
+            throw new TunnelFailedException("Creating a new tunnel failed, please make sure you're supplying correct credentials and that you can connect to the TestingBot network.\nUse --doctor to verify if everything is set up correctly.\n" + e.getMessage(), 1, e);
         }
 
         if (tunnelData.has("error")) {
-            System.err.println("An error ocurred: " + tunnelData.get("error").asText());
+            String error = "An error ocurred: " + tunnelData.get("error").asText();
             if (tunnelData.get("error").asText().contains("401")) {
-            	System.err.println("Missing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit");
+                error += "\nMissing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit";
             }
-            System.exit(1);
+            throw new TunnelFailedException(error, 1);
         }
-
-        trackPid();
 
         startInsightServer();
 
@@ -585,11 +592,31 @@ public class App {
             poller.cancel();
         }
 
-        try {
-            System.out.println("Shutting down your personal Tunnel Server.");
-            api.destroyTunnel();
-        } catch (Exception ex) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+        if (pidPoller != null) {
+            pidPoller.cancel();
+            pidPoller = null;
+        }
+
+        // Without this, an embedder that starts a tunnel per job leaks one
+        // shutdown hook per App instance for the lifetime of the JVM.
+        if (cleanupThread != null) {
+            try {
+                Runtime.getRuntime().removeShutdownHook(cleanupThread);
+            } catch (IllegalStateException alreadyShuttingDown) {
+                // the JVM is on its way down and will run the hook itself
+            }
+            cleanupThread = null;
+        }
+
+        // api is null when stop() is called after boot() failed, which is the
+        // normal path for an embedder cleaning up in a finally block.
+        if (api != null) {
+            try {
+                System.out.println("Shutting down your personal Tunnel Server.");
+                api.destroyTunnel();
+            } catch (Exception ex) {
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            }
         }
     }
 
@@ -607,6 +634,10 @@ public class App {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
             }
+        } catch (TunnelFailedException tunnelFailedException) {
+            // fatal: let it reach the caller of boot() so the command line
+            // client can exit and an embedder can handle it
+            throw tunnelFailedException;
         } catch (Exception ex) {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Something went wrong while setting up the Tunnel.");
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
@@ -624,8 +655,7 @@ public class App {
             try {
                 this.httpProxy = new HttpProxy(this);
             } catch (HttpProxy.HttpProxyStartException ex) {
-                Logger.getLogger(App.class.getName()).log(Level.SEVERE, ex.getMessage());
-                System.exit(1);
+                throw new TunnelFailedException(ex.getMessage(), 1, ex);
             }
             if (this.getProxy() == null && !this.httpProxy.testProxy()) {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "! Tunnel might not work properly, test failed");
@@ -650,7 +680,7 @@ public class App {
     public void doctor() {
         Doctor doctor = new Doctor(this);
         if (doctor.hasFailures()) {
-            System.exit(1);
+            throw new TunnelFailedException("Doctor detected one or more problems, see the output above.", 1);
         }
     }
 
