@@ -262,6 +262,10 @@ public class App {
             LoggerContext loggerContext = (LoggerContext) LoggerFactory.getILoggerFactory();
             loggerContext.getLogger("ROOT").setLevel(logbackLevel);
             loggerContext.getLogger("org.apache.hc").setLevel(logbackLevel);
+            // Never enable HttpClient wire/header logging: it dumps request bodies
+            // (client_key/client_secret form fields) and Authorization headers in cleartext.
+            loggerContext.getLogger("org.apache.hc.client5.http.wire").setLevel(ch.qos.logback.classic.Level.ERROR);
+            loggerContext.getLogger("org.apache.hc.client5.http.headers").setLevel(ch.qos.logback.classic.Level.ERROR);
 
             boolean debugLike = (logbackLevel.toInt() <= ch.qos.logback.classic.Level.DEBUG.toInt());
             if (debugLike) {
@@ -629,9 +633,13 @@ public class App {
                 this.serverIP = _serverIP;
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
-                this.startProxies();
+                boolean healthy = this.startProxies();
                 TunnelMetrics.setTunnelUp(true);
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
+                if (healthy) {
+                    Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
+                } else {
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "The Tunnel is up (ip: {0}) but its self-test failed; tests may not work until this is resolved.", _serverIP);
+                }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
             }
         } catch (TunnelFailedException tunnelFailedException) {
@@ -644,11 +652,13 @@ public class App {
         }
     }
 
-    private void startProxies() {
+    private boolean startProxies() {
+        boolean healthy = true;
         httpForwarder = new HttpForwarder(this);
 
         if (!httpForwarder.testForwarding()) {
             Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", Integer.toString(getSeleniumPort()));
+            healthy = false;
         }
 
         if (!this.noProxy) {
@@ -657,8 +667,13 @@ public class App {
             } catch (HttpProxy.HttpProxyStartException ex) {
                 throw new TunnelFailedException(ex.getMessage(), 1, ex);
             }
+            if (tunnel != null && !tunnel.verifyReverseForwardDelivery()) {
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Reverse port forwarding cannot reach the local proxy on port {0}, traffic through the tunnel will fail", Integer.toString(getJettyPort()));
+                healthy = false;
+            }
             if (this.getProxy() == null && !this.httpProxy.testProxy()) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "! Tunnel might not work properly, test failed");
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Tunnel might not work properly, test failed");
+                healthy = false;
             }
         }
 
@@ -675,6 +690,8 @@ public class App {
                 }
             }
         }
+
+        return healthy;
     }
 
     public void doctor() {

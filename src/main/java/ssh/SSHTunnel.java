@@ -112,20 +112,41 @@ public class SSHTunnel {
         }
     }
 
+    // Delivery target for the reverse forward. JSch connects to this host for every
+    // forwarded-tcpip channel; "0.0.0.0" is not connectable on macOS (TB-253), and
+    // "localhost" could resolve to ::1 while Jetty listens on IPv4 only.
+    static final String REVERSE_FORWARD_HOST = "127.0.0.1";
+
     public void createPortForwarding() {
         try {
-            session.setPortForwardingR(2010, "0.0.0.0", app.getJettyPort());
+            session.setPortForwardingR(2010, REVERSE_FORWARD_HOST, app.getJettyPort());
             String hubHost = "hub.testingbot.com";
             session.setPortForwardingL(app.getSSHPort(), hubHost, app.getHubPort());
 
             portForwardingEstablished = true;
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
-                String.format("[%s] Port forwarding established: %s:2010 -> localhost:%d, localhost:%d -> %s:%d",
-                    connectionId, server, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
+                String.format("[%s] Port forwarding established: %s:2010 -> %s:%d, localhost:%d -> %s:%d",
+                    connectionId, server, REVERSE_FORWARD_HOST, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
         } catch (JSchException ex) {
             portForwardingEstablished = false;
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                 String.format("[%s] Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.", connectionId), ex);
+        }
+    }
+
+    /**
+     * Verifies the reverse forward can actually deliver traffic by performing the
+     * same raw socket connect JSch does for every forwarded-tcpip channel. JSch
+     * swallows connect failures silently, so without this check a dead reverse
+     * forward looks healthy (TB-253). Only meaningful once the local proxy is
+     * listening on the jetty port.
+     */
+    public boolean verifyReverseForwardDelivery() {
+        try (java.net.Socket socket = new java.net.Socket()) {
+            socket.connect(new java.net.InetSocketAddress(REVERSE_FORWARD_HOST, app.getJettyPort()), 5000);
+            return true;
+        } catch (IOException ex) {
+            return false;
         }
     }
 
@@ -178,6 +199,8 @@ public class SSHTunnel {
     }
 
     class PortForwardingMonitorTask extends TimerTask {
+        private boolean reverseDeliveryHealthy = true;
+
         @Override
         public void run() {
             try {
@@ -200,6 +223,19 @@ public class SSHTunnel {
                             String.format("[%s] Local port forwarding lost, attempting to restart", connectionId));
                         restartPortForwarding();
                     }
+
+                    // The reverse forward (2010 -> local jetty port) has no JSch-side
+                    // status API, so probe the delivery target directly.
+                    boolean reverseDeliveryOk = verifyReverseForwardDelivery();
+                    if (!reverseDeliveryOk && reverseDeliveryHealthy) {
+                        Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
+                            String.format("[%s] Reverse port forwarding is broken: cannot connect to %s:%d. Traffic through the tunnel will fail until a local proxy is listening on this port.",
+                                connectionId, REVERSE_FORWARD_HOST, app.getJettyPort()));
+                    } else if (reverseDeliveryOk && !reverseDeliveryHealthy) {
+                        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
+                            String.format("[%s] Reverse port forwarding delivery to %s:%d restored", connectionId, REVERSE_FORWARD_HOST, app.getJettyPort()));
+                    }
+                    reverseDeliveryHealthy = reverseDeliveryOk;
                 }
             } catch (Exception ex) {
                 Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
