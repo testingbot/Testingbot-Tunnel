@@ -130,7 +130,12 @@ public class CustomConnectHandler extends ConnectHandler {
         Histogram.Timer connectTimer = isConnect ? TunnelMetrics.HTTPS_CONNECT_DURATION_SECONDS.startTimer() : null;
         try {
             if (isConnect) {
-                String authority = request.getRequestURI(); // "host:port" for CONNECT
+                // For CONNECT, the authority ("host:port") lives on the parsed HttpURI;
+                // HttpServletRequest.getRequestURI() only returns the path component.
+                String authority = baseRequest.getHttpURI().getAuthority();
+                if (authority == null || authority.isEmpty()) {
+                    authority = request.getHeader("Host");
+                }
                 if (hostBlocked(authority, blackList)) {
                     Logger.getLogger(CustomConnectHandler.class.getName())
                         .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
@@ -140,7 +145,9 @@ public class CustomConnectHandler extends ConnectHandler {
                     baseRequest.setHandled(true);
                     return;
                 }
-                Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, "[{0}] {1}", new Object[]{method, authority});
+                Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO,
+                        "[CONNECT] {0} -> {1}",
+                        new Object[]{request.getRemoteAddr(), authority != null ? authority : "<unknown>"});
             }
 
             if (debugMode) {
