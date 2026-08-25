@@ -78,9 +78,12 @@
         <configuration>
           <publishingServerId>central</publishingServerId>
           <!-- Actually release to Maven Central instead of leaving the deployment in a
-               "pending/validated" state that needs a manual "Publish" click in the portal. -->
+               "pending/validated" state that needs a manual "Publish" click in the portal.
+               Wait only for validation: Central's publish queue can exceed the plugin's
+               30-minute poll window (it did for 4.9), and with autoPublish the release
+               proceeds server-side regardless of whether we keep polling. -->
           <autoPublish>true</autoPublish>
-          <waitUntil>published</waitUntil>
+          <waitUntil>validated</waitUntil>
         </configuration>
       </plugin>
       <plugin>
