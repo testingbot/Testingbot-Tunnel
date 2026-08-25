@@ -9,9 +9,16 @@ on:
 # must never be hostage to Maven Central: for 4.9 the Central publish queue
 # outlasted the plugin's poll window, the job "failed", and the release and
 # docker steps were skipped while Central went on to publish anyway.
+# Workflow permissions are least-privilege by default (see the maven-publish
+# hardening); only the job that creates the GitHub release gets write access.
+permissions:
+  contents: read
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # creates the release and uploads the jar asset
 
     steps:
     - name: Checkout code
