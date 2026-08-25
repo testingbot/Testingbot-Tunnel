@@ -1,0 +1,18 @@
+version: 2
+updates:
+  - package-ecosystem: maven
+    directory: "/"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR per week for routine patch/minor bumps; majors stay separate
+      # (Jetty 12 and Jakarta EE migrations must never ride in on a routine PR).
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
