@@ -35,7 +35,7 @@ jobs:
       run: mvn clean test
       
     - name: Generate test report
-      uses: dorny/test-reporter@v1
+      uses: dorny/test-reporter@v3
       if: success() || failure()
       with:
         name: Maven Tests (Java ${{ matrix.java-version }})
