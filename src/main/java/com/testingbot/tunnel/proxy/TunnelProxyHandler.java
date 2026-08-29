@@ -27,6 +27,8 @@ import org.eclipse.jetty.client.Socks5;
 import org.eclipse.jetty.client.Socks5Proxy;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpScheme;
+import org.eclipse.jetty.http.HttpURI;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.Content;
 import org.eclipse.jetty.proxy.ProxyHandler;
@@ -268,6 +270,38 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         return counter;
     }
 
+    /**
+     * Builds the proxy-to-server request without routing the target through {@link java.net.URI}.
+     *
+     * <p>{@link ProxyHandler}'s implementation calls {@code HttpURI.toURI()}, and
+     * {@code java.net.URI} enforces RFC 2396, which forbids characters Jetty's own lenient
+     * {@code HttpURI} parser has already accepted -- braces, pipes and a bare {@code %} among
+     * them. The result was an IllegalArgumentException surfacing as a 500 for query strings
+     * that arrive perfectly often in practice ({@code ?filter={"a":1\}}, {@code ?next=a|b},
+     * {@code ?q=100%}).
+     *
+     * <p>Handing the raw path and query to {@code Request.path(String)} avoids the conversion:
+     * it tries {@code java.net.URI} itself but falls back to the string verbatim when parsing
+     * fails, which is the leniency a forward proxy needs. The invariant we want is simply that
+     * anything the server accepted, the proxy can forward.
+     */
+    @Override
+    protected org.eclipse.jetty.client.Request newProxyToServerRequest(Request clientToProxyRequest,
+                                                                       HttpURI newHttpURI) {
+        int port = newHttpURI.getPort();
+        if (port <= 0) {
+            port = HttpScheme.HTTPS.is(newHttpURI.getScheme()) ? 443 : 80;
+        }
+        String pathQuery = newHttpURI.getPathQuery();
+        if (pathQuery == null || pathQuery.isEmpty()) {
+            pathQuery = "/";
+        }
+        return getHttpClient().newRequest(newHttpURI.getHost(), port)
+                .scheme(newHttpURI.getScheme())
+                .path(pathQuery)
+                .method(clientToProxyRequest.getMethod());
+    }
+
     @Override
     protected void addProxyHeaders(Request clientToProxyRequest,
                                    org.eclipse.jetty.client.Request proxyToServerRequest) {
@@ -324,8 +358,23 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                                                   Response proxyToClientResponse,
                                                   Callback proxyToClientCallback,
                                                   Throwable failure) {
-        TunnelMetrics.ERRORS_TOTAL.labels("client_request_failure").inc();
         String uri = String.valueOf(clientToProxyRequest.getHttpURI());
+
+        // A malformed target never reaches the network, so answering 502 (the base class
+        // default) blames the customer's site for our inability to build the request -- and
+        // sends them debugging a server that is perfectly healthy. The only URIs that get
+        // this far are ones Jetty's lenient server parser accepted but its client rejected,
+        // in practice a "%" that is not followed by two hex digits.
+        if (failure instanceof IllegalArgumentException) {
+            TunnelMetrics.ERRORS_TOTAL.labels("malformed_request_uri").inc();
+            LOG.log(Level.WARNING, "Malformed request URI, not forwarded: {0} {1} ({2})",
+                    new Object[]{clientToProxyRequest.getMethod(), uri, failure.getMessage()});
+            Response.writeError(clientToProxyRequest, proxyToClientResponse, proxyToClientCallback,
+                    HttpStatus.BAD_REQUEST_400, "Malformed request URI: " + failure.getMessage());
+            return;
+        }
+
+        TunnelMetrics.ERRORS_TOTAL.labels("client_request_failure").inc();
         if (!uri.contains("squid-internal")) {
             LOG.log(Level.WARNING, "{0} for request {1} - {2}",
                     new Object[]{failure.getMessage(), clientToProxyRequest.getMethod(), uri});
