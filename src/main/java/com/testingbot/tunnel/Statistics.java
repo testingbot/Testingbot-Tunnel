@@ -51,17 +51,16 @@ public class Statistics {
     }
 
     /**
-     * Folds the live connector total into the accumulated figure and drops the supplier.
+     * Banks bytes from a connector that is about to reset its statistics.
      *
-     * <p>Called when the local proxy stops. Jetty's ConnectionStatistics belongs to the
-     * connector and resets with it, so on an SSH reconnect the reported byte total would
-     * otherwise fall back to zero.
+     * <p>Called when the local proxy stops. Jetty resets a connector's ConnectionStatistics in
+     * doStart(), so without this an SSH reconnect would drop the reported total back to zero.
+     * Only the restarting connector's own figure may be banked -- banking the whole registry
+     * re-counts listeners that never reset, inflating the total on every reconnect.
      */
-    public static void carryBytesTransferred() {
-        LongSupplier supplier = bytesTransferredSupplier;
-        if (supplier != null) {
-            bytesTransferred.add(supplier.getAsLong());
-            bytesTransferredSupplier = null;
+    public static void bankBytesTransferred(long bytes) {
+        if (bytes > 0) {
+            bytesTransferred.add(bytes);
         }
     }
 

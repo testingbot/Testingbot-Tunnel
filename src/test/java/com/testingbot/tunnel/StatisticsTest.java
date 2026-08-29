@@ -156,18 +156,18 @@ class StatisticsTest {
     }
 
     @Test
-    void bytesTransferred_accumulatesAcrossSuppliers() {
+    void bytesTransferred_addsBankedBytesToTheLiveSupplier() {
         Statistics.reset();
         long[] live = {500L};
         Statistics.setBytesTransferredSupplier(() -> live[0]);
         assertThat(Statistics.getBytesTransferred()).isEqualTo(500L);
 
-        Statistics.carryBytesTransferred();
+        // What HttpProxy.stop() does: bank the connector Jetty is about to reset.
+        Statistics.bankBytesTransferred(500L);
         live[0] = 0L;
         assertThat(Statistics.getBytesTransferred()).isEqualTo(500L);
 
-        long[] fresh = {70L};
-        Statistics.setBytesTransferredSupplier(() -> fresh[0]);
+        live[0] = 70L;
         assertThat(Statistics.getBytesTransferred()).isEqualTo(570L);
         Statistics.reset();
     }

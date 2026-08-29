@@ -2,7 +2,10 @@ package com.testingbot.tunnel.integration;
 
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
+import com.testingbot.tunnel.ConnectionMetrics;
 import com.testingbot.tunnel.Statistics;
+import com.testingbot.tunnel.TunnelMetrics;
+import org.eclipse.jetty.io.ConnectionStatistics;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -37,9 +40,27 @@ class BytesTransferredLifecycleTest {
         }
     }
 
+    /**
+     * Stands in for HttpForwarder's listener: registered in the same registry, but owned by a
+     * connector HttpProxy never restarts, so its counter is never reset. App.startProxies()
+     * always creates the forwarder first, so this is the production arrangement.
+     */
+    private static final long SELENIUM_BYTES = 700L;
+
     @BeforeEach
     void setUp() throws Exception {
         Statistics.reset();
+        TunnelMetrics.connectionMetrics().add(ConnectionMetrics.SELENIUM, new ConnectionStatistics() {
+            @Override
+            public long getReceivedBytes() {
+                return SELENIUM_BYTES;
+            }
+
+            @Override
+            public long getSentBytes() {
+                return 0L;
+            }
+        });
         proxyPort = findFreePort();
         App app = new App();
         app.setJettyPort(proxyPort);
@@ -97,6 +118,24 @@ class BytesTransferredLifecycleTest {
             Thread.sleep(50);
         }
         return Statistics.getBytesTransferred();
+    }
+
+    @Test
+    void restartDoesNotReCountListenersItDoesNotOwn() throws Exception {
+        // Banking the whole registry on stop() re-counted the Selenium listener every time,
+        // so a long-lived tunnel's reported total grew without bound across reconnects while
+        // no traffic moved at all.
+        long before = Statistics.getBytesTransferred();
+
+        for (int i = 0; i < 3; i++) {
+            httpProxy.stop();
+            httpProxy.start();
+            waitForPort(proxyPort);
+        }
+
+        assertThat(Statistics.getBytesTransferred())
+                .as("reconnects alone must not add bytes")
+                .isEqualTo(before);
     }
 
     @Test

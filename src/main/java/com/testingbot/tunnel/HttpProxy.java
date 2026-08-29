@@ -49,8 +49,8 @@ public final class HttpProxy {
     private final Server httpProxy;
     private final int randomNumber = (int )(Math.random() * 50 + 1);
     private final Thread shutDownHook;
-    /** Re-armed on every start(); Jetty resets the connector statistics it reads. */
-    private java.util.function.LongSupplier bytesSupplier;
+    /** This connector's own statistics; Jetty resets them whenever it restarts. */
+    private ConnectionStatistics proxyConnectionStats;
 
     /** Relay buffer size; Jetty's default is 4 KiB, which is small for bulk tunnelling. */
     static final int TUNNEL_BUFFER_SIZE = 32 * 1024;
@@ -115,12 +115,12 @@ public final class HttpProxy {
         ConnectionMetrics connectionMetrics = TunnelMetrics.connectionMetrics();
         connectionMetrics.add(ConnectionMetrics.PROXY, connectionStats);
         // Jetty's ConnectionStatistics only records bytes when a connection CLOSES, and it
-        // resets when the connector restarts on an SSH reconnect. Reporting it directly made
-        // the status endpoint drop to zero on every reconnect, so stop() folds the connector's
-        // figure into an accumulated total and start() re-arms the supplier against the fresh
-        // statistics. Note the total still trails live traffic by whatever is still open.
-        this.bytesSupplier = connectionMetrics::totalBytes;
-        Statistics.setBytesTransferredSupplier(bytesSupplier);
+        // resets when this connector restarts on an SSH reconnect. Reporting it directly made
+        // the status endpoint drop to zero on every reconnect, so stop() banks this connector's
+        // figure and the supplier keeps reading the live registry on top of it. Note the total
+        // still trails live traffic by whatever is still open.
+        this.proxyConnectionStats = connectionStats;
+        Statistics.setBytesTransferredSupplier(connectionMetrics::totalBytes);
 
         httpProxy.addConnector(proxyConnector);
         httpProxy.setStopAtShutdown(true);
@@ -198,16 +198,18 @@ public final class HttpProxy {
             Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
         }
         // After stop(), so connections closed during the graceful shutdown are included.
-        Statistics.carryBytesTransferred();
+        // Only this connector's bytes: it is the only one Jetty is about to reset. The Selenium
+        // forwarder's listener is registered in the same registry but is never restarted here,
+        // so banking the registry total re-counted it on every reconnect.
+        if (proxyConnectionStats != null) {
+            Statistics.bankBytesTransferred(
+                    proxyConnectionStats.getReceivedBytes() + proxyConnectionStats.getSentBytes());
+        }
     }
 
     public void start() {
         try {
             httpProxy.start();
-            // Jetty resets ConnectionStatistics in doStart(), and stop() detached the supplier
-            // once its value was banked. Without re-arming here the reported byte total froze
-            // permanently at the first SSH reconnect -- worse than the reset it replaced.
-            Statistics.setBytesTransferredSupplier(bytesSupplier);
         } catch (Exception ex) {
             throw new HttpProxyStartException(
                 "Could not set up local http proxy. Please make sure this program can open port "
