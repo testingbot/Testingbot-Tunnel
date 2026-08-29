@@ -141,8 +141,9 @@ public class App {
                 .desc("Require HTTP Basic auth on the /metrics (Prometheus) endpoint. Format: user:password. Off by default. Env: TESTINGBOT_METRICS_AUTH.").build();
         options.addOption(metricsAuthOpt);
 
-        Option proxy = new Option("Y", "proxy", true, "Specify an upstream proxy.");
-        proxy.setArgName("PROXYHOST:PROXYPORT");
+        Option proxy = new Option("Y", "proxy", true,
+            "Specify an upstream proxy. Accepts host:port (HTTP), http://host:port or socks5://host:port.");
+        proxy.setArgName("[SCHEME://]PROXYHOST:PROXYPORT");
         options.addOption(proxy);
 
         Option basicAuth = new Option("a", "auth", true, "Performs Basic Authentication for specific hosts. Env: TESTINGBOT_AUTH (comma-separated for multiple entries).");

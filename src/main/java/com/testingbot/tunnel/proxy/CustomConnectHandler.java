@@ -56,6 +56,8 @@ public class CustomConnectHandler extends ConnectHandler {
 
     private final String proxyHost;
     private final int proxyPort;
+    private final ProxySpec proxySpec;
+    private final String proxyUserPassword;
     private String proxyAuth = null;
     private List<Pattern> blackList = Collections.emptyList();
 
@@ -101,23 +103,21 @@ public class CustomConnectHandler extends ConnectHandler {
     }
 
     public CustomConnectHandler(final App app) {
-        final String proxy = app.getProxy();
-        if (proxy != null) {
-            final int colon = proxy.indexOf(':');
-            if (colon != -1) {
-                proxyHost = proxy.substring(0, colon);
-                proxyPort = Integer.parseInt(proxy.substring(colon + 1));
-            } else {
-                proxyHost = proxy;
-                proxyPort = 80;
-            }
+        this.proxySpec = ProxySpec.parse(app.getProxy());
+        this.proxyUserPassword = app.getProxyAuth();
+
+        if (proxySpec != null) {
+            proxyHost = proxySpec.getHost();
+            proxyPort = proxySpec.getPort();
         } else {
             proxyHost = null;
             proxyPort = -1;
         }
 
-        if (app.getProxyAuth() != null) {
-            proxyAuth = Base64.getEncoder().encodeToString(app.getProxyAuth().getBytes(StandardCharsets.UTF_8));
+        // Proxy-Authorization only applies to an HTTP upstream proxy; SOCKS authenticates
+        // inside its own handshake.
+        if (proxyUserPassword != null && (proxySpec == null || !proxySpec.isSocks5())) {
+            proxyAuth = Base64.getEncoder().encodeToString(proxyUserPassword.getBytes(StandardCharsets.UTF_8));
         }
     }
 
@@ -199,9 +199,51 @@ public class CustomConnectHandler extends ConnectHandler {
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         if (proxyHost == null) {
             super.connectToServer(request, host, port, promise);
+        } else if (proxySpec.isSocks5()) {
+            connectViaSocks5(host, port, promise);
         } else {
             connectToProxy(request, host, port, promise);
         }
+    }
+
+    /**
+     * Opens the tunnel through a SOCKS5 upstream proxy. The handshake is short and blocking,
+     * so it runs on the executor rather than being woven into the selector loop the HTTP
+     * CONNECT path uses; the channel is switched back to non-blocking before Jetty gets it.
+     */
+    private void connectViaSocks5(String host, int port, Promise<SocketChannel> promise) {
+        getExecutor().execute(() -> {
+            SocketChannel channel = null;
+            try {
+                channel = SocketChannel.open();
+                channel.socket().setTcpNoDelay(true);
+                channel.socket().connect(newConnectAddress(proxyHost, proxyPort), (int) getConnectTimeout());
+
+                String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
+                Socks5Client.connect(channel, host, port,
+                        credentials == null ? null : credentials[0],
+                        credentials == null ? null : credentials[1]);
+
+                channel.configureBlocking(false);
+                if (debugMode) {
+                    LOG.info("Established SOCKS5 tunnel through {}:{} to {}:{}",
+                            proxyHost, proxyPort, host, port);
+                }
+                promise.succeeded(channel);
+            } catch (Throwable x) {
+                TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("upstream_connect_failed").inc();
+                LOG.error("Failed to establish SOCKS5 tunnel through {}:{} to {}:{}: {}",
+                        proxyHost, proxyPort, host, port, x.getMessage());
+                if (channel != null) {
+                    try {
+                        channel.close();
+                    } catch (IOException ignored) {
+                        // already failing; nothing useful to do
+                    }
+                }
+                promise.failed(x);
+            }
+        });
     }
 
     private void connectToProxy(Request request, String host, int port, Promise<SocketChannel> promise) {

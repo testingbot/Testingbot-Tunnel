@@ -23,6 +23,8 @@ import org.eclipse.jetty.client.BasicAuthentication;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
 import org.eclipse.jetty.client.ProxyConfiguration;
+import org.eclipse.jetty.client.Socks5;
+import org.eclipse.jetty.client.Socks5Proxy;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpStatus;
@@ -72,10 +74,26 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     public void setUpstreamProxy(String hostPort, String userPassword) {
         this.upstreamProxy = hostPort;
         this.upstreamProxyAuth = userPassword;
-        if (userPassword != null && !userPassword.isEmpty()) {
+        // Proxy-Authorization is an HTTP-proxy mechanism. SOCKS authenticates during its own
+        // handshake, so sending the header there would leak the credentials to the origin.
+        ProxySpec spec = ProxySpec.parse(hostPort);
+        boolean httpProxy = spec == null || !spec.isSocks5();
+        if (httpProxy && userPassword != null && !userPassword.isEmpty()) {
             this.proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(userPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
+    }
+
+    /** Splits "user:password"; the password may itself contain colons. */
+    static String[] splitCredentials(String userPassword) {
+        if (userPassword == null || userPassword.isEmpty()) {
+            return null;
+        }
+        int colon = userPassword.indexOf(':');
+        if (colon < 0) {
+            return null;
+        }
+        return new String[]{userPassword.substring(0, colon), userPassword.substring(colon + 1)};
     }
 
     public void setBasicAuth(String[] basicAuth) {
@@ -141,17 +159,27 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         client.setRequestBufferSize(CLIENT_BUFFER_SIZE);
         client.setResponseBufferSize(CLIENT_BUFFER_SIZE);
 
-        if (upstreamProxy != null && !upstreamProxy.isEmpty()) {
-            String[] split = upstreamProxy.split(":", 2);
-            if (split.length < 2) {
-                LOG.log(Level.WARNING, "Invalid proxy format, expected host:port");
-            } else {
-                ProxyConfiguration proxyConfig = client.getProxyConfiguration();
-                // Jetty 12.1 returns an immutable list from getProxies(); addProxy() is the mutator.
-                proxyConfig.addProxy(new HttpProxy(split[0], Integer.parseInt(split[1])));
-                if (upstreamProxyAuth != null && !upstreamProxyAuth.isEmpty()) {
-                    LOG.log(Level.INFO, "Proxy authentication configured");
+        ProxySpec spec = ProxySpec.parse(upstreamProxy);
+        if (upstreamProxy != null && !upstreamProxy.isEmpty() && spec == null) {
+            LOG.log(Level.WARNING,
+                    "Invalid proxy format ''{0}''; expected host:port, http://host:port or socks5://host:port",
+                    upstreamProxy);
+        } else if (spec != null) {
+            // Jetty 12.1 returns an immutable list from getProxies(); addProxy() is the mutator.
+            ProxyConfiguration proxyConfig = client.getProxyConfiguration();
+            if (spec.isSocks5()) {
+                Socks5Proxy socks = new Socks5Proxy(spec.getHost(), spec.getPort());
+                String[] credentials = splitCredentials(upstreamProxyAuth);
+                if (credentials != null) {
+                    socks.putAuthenticationFactory(
+                            new Socks5.UsernamePasswordAuthenticationFactory(credentials[0], credentials[1]));
                 }
+                proxyConfig.addProxy(socks);
+            } else {
+                proxyConfig.addProxy(new HttpProxy(spec.getHost(), spec.getPort()));
+            }
+            if (upstreamProxyAuth != null && !upstreamProxyAuth.isEmpty()) {
+                LOG.log(Level.INFO, "Proxy authentication configured");
             }
         }
 
