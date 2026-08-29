@@ -1,6 +1,7 @@
 package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
+import com.testingbot.tunnel.proxy.CustomDnsResolver;
 import com.testingbot.tunnel.proxy.TunnelProxyHandler;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
@@ -119,11 +120,17 @@ public final class HttpProxy {
         // connections cut mid-response.
         httpProxy.setStopTimeout(STOP_TIMEOUT_MS);
 
+        // One resolver shared by all three dial paths, so --dns applies to plain HTTP,
+        // HTTPS CONNECT and the WebSocket relay alike. Null when --dns was not given.
+        CustomDnsResolver dnsResolver = CustomDnsResolver.create(app.getDnsServer());
+
         ConnectHandler connectHandler = new CustomConnectHandler(app);
         ((CustomConnectHandler) connectHandler).setBlackList(app.getFastFail());
+        ((CustomConnectHandler) connectHandler).setDnsResolver(dnsResolver);
         tuneTunnelRelay(connectHandler);
 
         WebsocketHandler websocketHandler = new WebsocketHandler();
+        websocketHandler.setDnsResolver(dnsResolver);
         tuneTunnelRelay(websocketHandler);
 
         TunnelProxyHandler proxyHandler = new TunnelProxyHandler();
@@ -133,6 +140,7 @@ public final class HttpProxy {
         proxyHandler.setDebugMode(app.isDebugMode());
         proxyHandler.setUpstreamProxy(app.getProxy(), app.getProxyAuth());
         proxyHandler.setBasicAuth(app.getBasicAuth());
+        proxyHandler.setDnsResolver(dnsResolver);
 
         connectHandler.setHandler(proxyHandler);
         websocketHandler.setHandler(connectHandler);

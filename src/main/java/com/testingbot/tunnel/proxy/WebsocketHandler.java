@@ -45,8 +45,27 @@ public class WebsocketHandler extends ConnectHandler {
     private static final String WS_RESPONSE_HEADERS_ATTRIBUTE =
             WebsocketHandler.class.getName() + ".wsResponseHeaders";
 
+    private CustomDnsResolver dnsResolver;
+
     public WebsocketHandler() {
         super();
+    }
+
+    public void setDnsResolver(CustomDnsResolver dnsResolver) {
+        this.dnsResolver = dnsResolver;
+    }
+
+    /** Honours --dns for the WebSocket relay's outbound connection. */
+    @Override
+    protected InetSocketAddress newConnectAddress(String host, int port) {
+        if (dnsResolver != null) {
+            try {
+                return new InetSocketAddress(dnsResolver.resolve(host)[0], port);
+            } catch (java.net.UnknownHostException ex) {
+                LOG.warn("Custom DNS could not resolve {}: {}", host, ex.getMessage());
+            }
+        }
+        return super.newConnectAddress(host, port);
     }
 
     public WebsocketHandler(Handler handler) {

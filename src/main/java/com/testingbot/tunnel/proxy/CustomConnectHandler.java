@@ -53,6 +53,7 @@ public class CustomConnectHandler extends ConnectHandler {
     private static final long SELECT_TIMEOUT_MS = 15_000L;
 
     private boolean debugMode = false;
+    private CustomDnsResolver dnsResolver;
 
     private final String proxyHost;
     private final int proxyPort;
@@ -119,6 +120,27 @@ public class CustomConnectHandler extends ConnectHandler {
         if (proxyUserPassword != null && (proxySpec == null || !proxySpec.isSocks5())) {
             proxyAuth = Base64.getEncoder().encodeToString(proxyUserPassword.getBytes(StandardCharsets.UTF_8));
         }
+    }
+
+    public void setDnsResolver(CustomDnsResolver dnsResolver) {
+        this.dnsResolver = dnsResolver;
+    }
+
+    /**
+     * Resolves the CONNECT target through the configured DNS server when there is one.
+     * ConnectHandler calls this for every tunnel it opens, so it is the single place the
+     * CONNECT path needs to honour --dns.
+     */
+    @Override
+    protected java.net.InetSocketAddress newConnectAddress(String host, int port) {
+        if (dnsResolver != null) {
+            try {
+                return new java.net.InetSocketAddress(dnsResolver.resolve(host)[0], port);
+            } catch (java.net.UnknownHostException ex) {
+                LOG.warn("Custom DNS could not resolve {}: {}", host, ex.getMessage());
+            }
+        }
+        return super.newConnectAddress(host, port);
     }
 
     public void setDebugMode(boolean mode) {

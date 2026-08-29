@@ -52,6 +52,7 @@ public class App {
     private String proxyAuth;
     private String[] basicAuth;
     private String pac = null;
+    private String dnsServer = null;
     private int metricsPort = 8003;
     private String metricsAuth;
     private int sshPort = 0;
@@ -174,7 +175,10 @@ public class App {
         extraHeaders.setArgName("JSON Map with Header Key and Value");
         options.addOption(extraHeaders);
 
-        Option dns = new Option("dns", "dns", true, "Use a custom DNS server. For example: 8.8.8.8");
+        Option dns = new Option("dns", "dns", true,
+            "Resolve hostnames with a specific DNS server instead of the system resolver."
+            + " Accepts host or host:port, e.g. 8.8.8.8 or 10.0.0.53:5353."
+            + " Falls back to the system resolver if the server cannot answer.");
         dns.setArgName("server");
         options.addOption(dns);
 
@@ -465,8 +469,11 @@ public class App {
             }
 
             if (commandLine.hasOption("dns")) {
-                System.setProperty("sun.net.spi.nameservice.nameservers", commandLine.getOptionValue("dns"));
-                System.setProperty("sun.net.spi.nameservice.provider.1", "dns,sun");
+                // Note: this used to set sun.net.spi.nameservice.*, the JDK 8 pluggable
+                // nameservice SPI. That SPI was removed in JDK 9, so the option silently did
+                // nothing for years. Resolution now goes through CustomDnsResolver, which the
+                // proxy and CONNECT paths consult when dialling.
+                app.setDnsServer(commandLine.getOptionValue("dns"));
             }
 
             if (commandLine.hasOption("web")) {
@@ -902,6 +909,15 @@ public class App {
     /**
      * @return the pac
      */
+    /** DNS server for the "dns" option, or null to use the platform resolver. */
+    public String getDnsServer() {
+        return dnsServer;
+    }
+
+    public void setDnsServer(String dnsServer) {
+        this.dnsServer = dnsServer;
+    }
+
     public String getPac() {
         return pac;
     }
