@@ -348,6 +348,10 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      <!-- Nothing here uses the Servlet layer any more, but WireMock (test scope) pulls
+           jetty-ee10-servlet in transitively. Without this BOM its version drifts from
+           jetty.version and the mismatch fails at runtime with NoSuchMethodError against
+           jetty-util. Managed here only; not a dependency of the shipped jar. -->
       <dependency>
         <groupId>org.eclipse.jetty.ee10</groupId>
         <artifactId>jetty-ee10-bom</artifactId>
@@ -401,15 +405,6 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-proxy</artifactId>
-    </dependency>
-    <!-- Servlet support is environment-scoped in Jetty 12; ee10 == jakarta.servlet 6.0. -->
-    <dependency>
-      <groupId>org.eclipse.jetty.ee10</groupId>
-      <artifactId>jetty-ee10-servlet</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty.ee10</groupId>
-      <artifactId>jetty-ee10-proxy</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.httpcomponents.client5</groupId>

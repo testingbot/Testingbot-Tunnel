@@ -14,8 +14,6 @@ import org.apache.hc.core5.http.io.entity.EntityUtils;
 
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,20 +70,9 @@ class UpstreamProxyTest {
 
     private void startLocalProxyWithUpstream(String proxyHost, String proxyAuth) throws Exception {
         localProxyServer = new Server(0);
-        ServletContextHandler context = new ServletContextHandler();
-        context.setContextPath("/");
-
-        ServletHolder servletHolder = new ServletHolder(new TunnelProxyServlet());
-        if (proxyHost != null) {
-            servletHolder.setInitParameter("proxy", proxyHost);
-        }
-        if (proxyAuth != null) {
-            servletHolder.setInitParameter("proxyAuth", proxyAuth);
-        }
-        servletHolder.setInitParameter("jetty", "8087");
-
-        context.addServlet(servletHolder, "/*");
-        localProxyServer.setHandler(context);
+        TunnelProxyHandler proxyHandler = new TunnelProxyHandler();
+        proxyHandler.setUpstreamProxy(proxyHost, proxyAuth);
+        localProxyServer.setHandler(proxyHandler);
         localProxyServer.start();
 
         localProxyPort = ((ServerConnector) localProxyServer.getConnectors()[0]).getLocalPort();

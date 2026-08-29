@@ -1,7 +1,7 @@
 package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
-import com.testingbot.tunnel.proxy.TunnelProxyServlet;
+import com.testingbot.tunnel.proxy.TunnelProxyHandler;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -38,8 +38,6 @@ import org.eclipse.jetty.server.handler.StateTrackingHandler;
 import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.VirtualThreads;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
-import org.eclipse.jetty.ee10.servlet.ServletHolder;
-import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 
 /**
  *
@@ -57,6 +55,8 @@ public final class HttpProxy {
     static final long TUNNEL_IDLE_TIMEOUT_MS = 300_000L;
     /** How long shutdown waits for in-flight requests to finish. */
     static final long STOP_TIMEOUT_MS = 5_000L;
+    /** Idle timeout for the proxy's outbound HTTP client. */
+    static final long PROXY_IDLE_TIMEOUT_MS = 120_000L;
     /** Under --debug, how long a handler may hold its callback before being reported. */
     static final long HANDLER_CALLBACK_TIMEOUT_MS = 60_000L;
 
@@ -126,44 +126,15 @@ public final class HttpProxy {
         WebsocketHandler websocketHandler = new WebsocketHandler();
         tuneTunnelRelay(websocketHandler);
 
-        ServletContextHandler contextHandler = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
-        contextHandler.setContextPath("/");  // Root path for all requests
-        contextHandler.setAttribute("extra_headers", app.getCustomHeaders());
+        TunnelProxyHandler proxyHandler = new TunnelProxyHandler();
+        proxyHandler.setIdleTimeoutMs(PROXY_IDLE_TIMEOUT_MS);
+        proxyHandler.setBlackList(app.getFastFail());
+        proxyHandler.setExtraHeaders(app.getCustomHeaders());
+        proxyHandler.setDebugMode(app.isDebugMode());
+        proxyHandler.setUpstreamProxy(app.getProxy(), app.getProxyAuth());
+        proxyHandler.setBasicAuth(app.getBasicAuth());
 
-        // AsyncProxyServlet for proxying HTTP requests
-        ServletHolder proxyServlet = new ServletHolder(new TunnelProxyServlet());
-        proxyServlet.setInitParameter("idleTimeout", "120000");
-        proxyServlet.setInitParameter("timeout", "120000");
-
-        if (app.getFastFail() != null && app.getFastFail().length > 0) {
-            proxyServlet.setInitParameter("blackList", String.join(",", app.getFastFail()));
-        }
-
-        if (app.isDebugMode()) {
-            proxyServlet.setInitParameter("tb_debug", "true");
-        }
-
-        if (app.getProxy() != null) {
-            proxyServlet.setInitParameter("proxy", app.getProxy());
-        }
-
-        if (app.getProxyAuth() != null) {
-            proxyServlet.setInitParameter("proxyAuth", app.getProxyAuth());
-        }
-
-        if (app.getBasicAuth() != null) {
-            proxyServlet.setInitParameter("basicAuth", String.join(",", app.getBasicAuth()));
-        }
-
-        proxyServlet.setInitParameter("jetty", String.valueOf(app.getJettyPort()));
-
-        contextHandler.addServlet(proxyServlet, "/*");  // Proxy all HTTP requests
-
-        // In Jetty 12 both WebsocketHandler and ConnectHandler are Handler.Wrappers: each
-        // inspects the request, takes it over if it owns it (WS upgrade / CONNECT), and
-        // otherwise delegates to the handler it wraps. So the chain is nested rather than
-        // a flat sequence, preserving the Jetty 11 order: WS -> CONNECT -> proxy servlet.
-        connectHandler.setHandler(contextHandler);
+        connectHandler.setHandler(proxyHandler);
         websocketHandler.setHandler(connectHandler);
 
         // GracefulHandler tracks in-flight requests so stop() can drain them; it must sit
