@@ -114,6 +114,18 @@ public final class TunnelMetrics {
             .help("Duration of the initial SSH connect handshake.")
             .register();
 
+    /**
+     * Proxy failures by classified reason. The label matches the X-TestingBot-Error header
+     * on the response, so a dashboard spike and a header in a bug report name the same thing.
+     * Complements the coarser ERRORS_TOTAL and HTTPS_CONNECT_ERRORS_TOTAL, which existing
+     * dashboards depend on and which keep their current meaning.
+     */
+    public static final Counter PROXY_ERRORS_TOTAL = Counter.build()
+            .name("testingbot_proxy_errors_total")
+            .help("Proxy failures by classified reason, matching the X-TestingBot-Error header.")
+            .labelNames("reason")
+            .register();
+
     public static final Counter ERRORS_TOTAL = Counter.build()
             .name("testingbot_errors_total")
             .help("Tunnel errors by name.")
