@@ -3,6 +3,7 @@ package com.testingbot.tunnel.integration;
 import com.sun.net.httpserver.HttpServer;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
+import com.testingbot.tunnel.Statistics;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -194,5 +195,38 @@ class ProxyChainIntegrationTest {
             assertThat(n).isGreaterThan(0);
             assertThat(new String(buffer, 0, n)).isEqualTo("PING-RELAY");
         }
+    }
+
+    @Test
+    void tunnelledBytes_areCounted() throws Exception {
+        // Byte totals used to come from the proxy servlet's response callback, which only
+        // ever saw plain HTTP -- so CONNECT traffic, the bulk of what a tunnel carries, was
+        // invisible. They now come from the connector, which sees everything.
+        long before = Statistics.getBytesTransferred();
+
+        try (Socket socket = new Socket("127.0.0.1", proxyPort)) {
+            socket.setSoTimeout(10_000);
+            socket.getOutputStream().write(("CONNECT 127.0.0.1:" + originPort + " HTTP/1.1\r\n"
+                    + "Host: 127.0.0.1:" + originPort + "\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+
+            BufferedReader reader = new BufferedReader(
+                    new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+            assertThat(reader.readLine()).contains(" 200");
+
+            // Push bytes through the established tunnel.
+            socket.getOutputStream().write(("GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                    + "Connection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            reader.readLine();
+        }
+
+        // The connector flushes its counters as connections close; allow a moment.
+        long after = before;
+        for (int i = 0; i < 50 && after <= before; i++) {
+            Thread.sleep(100);
+            after = Statistics.getBytesTransferred();
+        }
+        assertThat(after).isGreaterThan(before);
     }
 }

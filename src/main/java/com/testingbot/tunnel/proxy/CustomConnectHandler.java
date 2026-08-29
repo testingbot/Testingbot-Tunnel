@@ -137,15 +137,8 @@ public class CustomConnectHandler extends ConnectHandler {
             if (authority == null || authority.isEmpty()) {
                 authority = request.getHeaders().get(HttpHeader.HOST);
             }
-            if (hostBlocked(authority, blackList)) {
-                Logger.getLogger(CustomConnectHandler.class.getName())
-                    .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
-                TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("blacklisted").inc();
-                TunnelMetrics.HTTPS_CONNECT_TOTAL.labels("403").inc();
-                Response.writeError(request, response, callback, HttpStatus.FORBIDDEN_403,
-                        "Blocked by fast-fail policy");
-                return true;
-            }
+            // Blocked destinations are rejected in validateDestination(), which
+            // ConnectHandler already consults before dialling out.
             Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO,
                     "[CONNECT] {0} -> {1}",
                     new Object[]{Request.getRemoteAddr(request), authority != null ? authority : "<unknown>"});
@@ -183,6 +176,23 @@ public class CustomConnectHandler extends ConnectHandler {
             connectTimer.observeDuration();
         }
         return handled;
+    }
+
+    /**
+     * Fast-fail policy hook. {@link ConnectHandler#handleConnect} calls this before opening a
+     * connection and answers 403 itself when it returns false, so the blacklist lives here
+     * rather than being intercepted earlier in {@link #handle}.
+     */
+    @Override
+    public boolean validateDestination(String host, int port) {
+        if (hostBlocked(host, blackList)) {
+            Logger.getLogger(CustomConnectHandler.class.getName())
+                .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0}:{1} (matched blacklist)",
+                     new Object[]{host, port});
+            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("blacklisted").inc();
+            return false;
+        }
+        return super.validateDestination(host, port);
     }
 
     @Override

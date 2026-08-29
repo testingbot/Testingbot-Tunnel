@@ -23,7 +23,7 @@ import org.apache.hc.core5.util.Timeout;
 
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpStatus;
-import org.eclipse.jetty.io.Connection;
+import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.io.Content;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.HttpConfiguration;
@@ -47,35 +47,56 @@ public final class HttpProxy {
     private final int randomNumber = (int )(Math.random() * 50 + 1);
     private final Thread shutDownHook;
 
+    /** Relay buffer size; Jetty's default is 4 KiB, which is small for bulk tunnelling. */
+    static final int TUNNEL_BUFFER_SIZE = 32 * 1024;
+    /** Relay idle timeout; must outlast quiet periods on an otherwise live tunnel. */
+    static final long TUNNEL_IDLE_TIMEOUT_MS = 300_000L;
+
     public HttpProxy(App app) {
         this.app = app;
 
         this.httpProxy = new Server();
 
         HttpConfiguration http_config = new HttpConfiguration();
+        // Don't advertise "Server: Jetty(<version>)" to every client; the exact version
+        // is of no use to callers and only helps someone matching known CVEs.
+        http_config.setSendServerVersion(false);
 
         ServerConnector proxyConnector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
 
         proxyConnector.setPort(app.getJettyPort());
         proxyConnector.setIdleTimeout(400000);
-        proxyConnector.addBean(new Connection.Listener() {
+
+        // Jetty counts bytes and connections on the connector itself, so tunnelled
+        // traffic (CONNECT, WebSocket) is included -- unlike the per-request counting
+        // in the proxy servlet, which only ever saw plain HTTP.
+        ConnectionStatistics connectionStats = new ConnectionStatistics();
+        proxyConnector.addBean(connectionStats);
+        proxyConnector.addBean(new org.eclipse.jetty.io.Connection.Listener() {
             @Override
-            public void onOpened(Connection connection) {
+            public void onOpened(org.eclipse.jetty.io.Connection connection) {
                 TunnelMetrics.ACTIVE_CONNECTIONS.inc();
             }
 
             @Override
-            public void onClosed(Connection connection) {
+            public void onClosed(org.eclipse.jetty.io.Connection connection) {
                 TunnelMetrics.ACTIVE_CONNECTIONS.dec();
             }
         });
+        ConnectionMetrics connectionMetrics = new ConnectionMetrics(connectionStats);
+        TunnelMetrics.registerConnectionMetrics(connectionMetrics);
+        Statistics.setBytesTransferredSupplier(connectionMetrics::totalBytes);
+
         httpProxy.addConnector(proxyConnector);
         httpProxy.setStopAtShutdown(true);
 
         ConnectHandler connectHandler = new CustomConnectHandler(app);
         ((CustomConnectHandler) connectHandler).setBlackList(app.getFastFail());
+        tuneTunnelRelay(connectHandler);
+
         WebsocketHandler websocketHandler = new WebsocketHandler();
+        tuneTunnelRelay(websocketHandler);
 
         ServletContextHandler contextHandler = new ServletContextHandler(ServletContextHandler.NO_SESSIONS);
         contextHandler.setContextPath("/");  // Root path for all requests
@@ -123,6 +144,17 @@ public final class HttpProxy {
         shutDownHook = new Thread(new ShutDownHook(httpProxy));
 
         Runtime.getRuntime().addShutdownHook(shutDownHook);
+    }
+
+    /**
+     * Both handlers relay bulk traffic, so Jetty's defaults (4 KiB buffers, 30s idle) are
+     * conservative: larger buffers mean fewer syscalls per megabyte, and a longer idle
+     * timeout keeps quiet-but-live tunnels (an open WebSocket, a paused download) from
+     * being torn down under the client.
+     */
+    private static void tuneTunnelRelay(ConnectHandler handler) {
+        handler.setBufferSize(TUNNEL_BUFFER_SIZE);
+        handler.setIdleTimeout(TUNNEL_IDLE_TIMEOUT_MS);
     }
 
     public void stop() {

@@ -10,6 +10,20 @@ public final class TunnelMetrics {
     private TunnelMetrics() {
     }
 
+    private static ConnectionMetrics connectionMetrics;
+
+    /**
+     * Registers connector-level connection statistics. Idempotent: the local proxy can be
+     * restarted within one process, and Prometheus rejects duplicate registrations.
+     */
+    public static synchronized void registerConnectionMetrics(ConnectionMetrics metrics) {
+        if (connectionMetrics != null) {
+            io.prometheus.client.CollectorRegistry.defaultRegistry.unregister(connectionMetrics);
+        }
+        connectionMetrics = metrics;
+        metrics.register();
+    }
+
     public static final Counter HTTP_REQUESTS_TOTAL = Counter.build()
             .name("testingbot_http_requests_total")
             .help("Total HTTP requests proxied through the tunnel.")

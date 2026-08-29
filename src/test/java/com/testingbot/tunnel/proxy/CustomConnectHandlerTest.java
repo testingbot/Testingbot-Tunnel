@@ -171,4 +171,29 @@ class CustomConnectHandlerTest {
         assertThatCode(() -> handler.setBlackList(new String[]{})).doesNotThrowAnyException();
         assertThatCode(() -> handler.setBlackList(new String[]{"", null, "  "})).doesNotThrowAnyException();
     }
+
+    @Test
+    void validateDestination_rejectsBlacklistedHost() {
+        // ConnectHandler consults validateDestination() before dialling out and answers 403
+        // itself, so this is where the fast-fail policy has to bite.
+        CustomConnectHandler handler = new CustomConnectHandler(new App());
+        handler.setBlackList(new String[]{"blocked\\.example\\.com"});
+
+        assertThat(handler.validateDestination("blocked.example.com", 443)).isFalse();
+    }
+
+    @Test
+    void validateDestination_allowsOtherHosts() {
+        CustomConnectHandler handler = new CustomConnectHandler(new App());
+        handler.setBlackList(new String[]{"blocked\\.example\\.com"});
+
+        assertThat(handler.validateDestination("allowed.example.com", 443)).isTrue();
+    }
+
+    @Test
+    void validateDestination_allowsEverythingWhenNoBlacklist() {
+        CustomConnectHandler handler = new CustomConnectHandler(new App());
+
+        assertThat(handler.validateDestination("anything.example.com", 443)).isTrue();
+    }
 }
