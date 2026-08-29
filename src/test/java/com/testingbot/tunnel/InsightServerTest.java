@@ -230,4 +230,92 @@ class InsightServerTest {
         startTimeField.setAccessible(true);
         startTimeField.setLong(null, 0);
     }
+
+    private static int freePort() throws Exception {
+        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
+            return s.getLocalPort();
+        }
+    }
+
+    @Test
+    void prometheusEndpoint_shouldReturnExpositionFormat() throws Exception {
+        int port = freePort();
+        app.setMetricsPort(port);
+        insightServer = new InsightServer(app);
+        Thread.sleep(500);
+
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpGet request = new HttpGet("http://localhost:" + port + "/metrics");
+            client.execute(request, response -> {
+                assertThat(response.getCode()).isEqualTo(200);
+                assertThat(response.getFirstHeader("Content-Type").getValue())
+                    .contains("text/plain");
+                String body = EntityUtils.toString(response.getEntity());
+                // Prometheus exposition: HELP/TYPE preamble plus our own metrics.
+                assertThat(body).contains("# HELP");
+                assertThat(body).contains("# TYPE");
+                assertThat(body).contains("testingbot_");
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void prometheusEndpoint_withAuth_shouldRejectAnonymous() throws Exception {
+        int port = freePort();
+        app.setMetricsPort(port);
+        app.setMetricsAuth("user:secret");
+        insightServer = new InsightServer(app);
+        Thread.sleep(500);
+
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpGet request = new HttpGet("http://localhost:" + port + "/metrics");
+            client.execute(request, response -> {
+                assertThat(response.getCode()).isEqualTo(401);
+                assertThat(response.getFirstHeader("WWW-Authenticate").getValue())
+                    .contains("Basic realm");
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void prometheusEndpoint_withAuth_shouldAcceptCorrectCredentials() throws Exception {
+        int port = freePort();
+        app.setMetricsPort(port);
+        app.setMetricsAuth("user:secret");
+        insightServer = new InsightServer(app);
+        Thread.sleep(500);
+
+        String credentials = java.util.Base64.getEncoder()
+            .encodeToString("user:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpGet request = new HttpGet("http://localhost:" + port + "/metrics");
+            request.addHeader("Authorization", "Basic " + credentials);
+            client.execute(request, response -> {
+                assertThat(response.getCode()).isEqualTo(200);
+                assertThat(EntityUtils.toString(response.getEntity())).contains("testingbot_");
+                return null;
+            });
+        }
+    }
+
+    @Test
+    void prometheusEndpoint_withAuth_shouldStillServeJsonStatusUnprotected() throws Exception {
+        // Only /metrics is protected; the JSON status stays open, as before.
+        int port = freePort();
+        app.setMetricsPort(port);
+        app.setMetricsAuth("user:secret");
+        insightServer = new InsightServer(app);
+        Thread.sleep(500);
+
+        try (CloseableHttpClient client = HttpClients.createDefault()) {
+            HttpGet request = new HttpGet("http://localhost:" + port + "/");
+            client.execute(request, response -> {
+                assertThat(response.getCode()).isEqualTo(200);
+                return null;
+            });
+        }
+    }
 }

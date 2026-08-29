@@ -1,51 +1,44 @@
 package com.testingbot.tunnel;
 
-import io.prometheus.client.servlet.jakarta.exporter.MetricsServlet;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.ee10.servlet.FilterHolder;
-import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee10.servlet.ServletHolder;
-
-import jakarta.servlet.Filter;
-import jakarta.servlet.FilterChain;
-import jakarta.servlet.FilterConfig;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.ServletRequest;
-import jakarta.servlet.ServletResponse;
-import jakarta.servlet.http.HttpServlet;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-
+import io.prometheus.client.CollectorRegistry;
+import io.prometheus.client.exporter.common.TextFormat;
 import java.io.IOException;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.EnumSet;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.io.Content;
+import org.eclipse.jetty.server.Handler;
+import org.eclipse.jetty.server.Request;
+import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.Server;
+import org.eclipse.jetty.server.handler.PathMappingsHandler;
+import org.eclipse.jetty.util.Callback;
 
+/**
+ * Serves tunnel status: a small JSON document at {@code /} and Prometheus exposition at
+ * {@code /metrics}.
+ *
+ * <p>Built on Jetty's core Handler API rather than servlets. Two endpoints returning fixed
+ * strings do not need a servlet container, and avoiding one keeps the Jakarta EE stack --
+ * and the Prometheus servlet bridge -- out of the dependency tree entirely.
+ */
 public class InsightServer {
+
     public InsightServer(App app) {
         // Make sure all collectors are registered before any scrape arrives.
         TunnelMetrics.init();
 
         Server server = new Server(app.getMetricsPort());
 
-        ServletContextHandler handler = new ServletContextHandler(ServletContextHandler.SESSIONS);
-        server.setHandler(handler);
-
-        // Legacy JSON status at /
-        handler.addServlet(JsonServlet.class, "");
-        handler.addServlet(JsonServlet.class, "/");
-
-        // Prometheus exposition at /metrics
-        ServletHolder metricsHolder = new ServletHolder(new MetricsServlet());
-        handler.addServlet(metricsHolder, "/metrics");
-
-        String auth = app.getMetricsAuth();
-        if (auth != null && !auth.isEmpty()) {
-            FilterHolder filterHolder = new FilterHolder(new BasicAuthFilter(auth));
-            handler.addFilter(filterHolder, "/metrics", EnumSet.of(jakarta.servlet.DispatcherType.REQUEST));
-        }
+        PathMappingsHandler routes = new PathMappingsHandler();
+        routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/"), new JsonStatusHandler());
+        routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/metrics"),
+                protect(new MetricsHandler(), app.getMetricsAuth()));
+        server.setHandler(routes);
 
         try {
             server.start();
@@ -57,55 +50,72 @@ public class InsightServer {
         }
     }
 
-    public static class JsonServlet extends HttpServlet {
+    /** Wraps {@code handler} in Basic auth when --metrics-auth was supplied. */
+    private static Handler protect(Handler handler, String userColonPassword) {
+        if (userColonPassword == null || userColonPassword.isEmpty()) {
+            return handler;
+        }
+        BasicAuthHandler auth = new BasicAuthHandler(userColonPassword);
+        auth.setHandler(handler);
+        return auth;
+    }
+
+    static class JsonStatusHandler extends Handler.Abstract {
         @Override
-        protected void doGet(HttpServletRequest req, HttpServletResponse resp) throws IOException {
+        public boolean handle(Request request, Response response, Callback callback) {
             TunnelMetrics.refreshUptime(Statistics.getStartTime());
-            resp.setContentType("application/json");
-            resp.setStatus(HttpServletResponse.SC_OK);
-            resp.getWriter().println("{\"version\":\"" + App.VERSION + "\", \"uptime\":\"" + (System.currentTimeMillis() - Statistics.getStartTime()) + "\","
-                + "\"numberOfRequests\":\"" + Statistics.getNumberOfRequests() + "\", \"bytesTransferred\":" + Statistics.getBytesTransferred() + "}");
+            String body = "{\"version\":\"" + App.VERSION + "\", \"uptime\":\""
+                + (System.currentTimeMillis() - Statistics.getStartTime()) + "\","
+                + "\"numberOfRequests\":\"" + Statistics.getNumberOfRequests() + "\", "
+                + "\"bytesTransferred\":" + Statistics.getBytesTransferred() + "}\n";
+            response.setStatus(HttpStatus.OK_200);
+            response.getHeaders().put(HttpHeader.CONTENT_TYPE, "application/json");
+            Content.Sink.write(response, true, body, callback);
+            return true;
+        }
+    }
+
+    static class MetricsHandler extends Handler.Abstract {
+        @Override
+        public boolean handle(Request request, Response response, Callback callback) throws IOException {
+            // Honour the Accept header the same way the Prometheus servlet bridge does, so
+            // scrapers negotiating OpenMetrics still get what they asked for.
+            String contentType = TextFormat.chooseContentType(request.getHeaders().get(HttpHeader.ACCEPT));
+            StringWriter body = new StringWriter();
+            TextFormat.writeFormat(contentType, body,
+                    CollectorRegistry.defaultRegistry.metricFamilySamples());
+
+            response.setStatus(HttpStatus.OK_200);
+            response.getHeaders().put(HttpHeader.CONTENT_TYPE, contentType);
+            Content.Sink.write(response, true, body.toString(), callback);
+            return true;
         }
     }
 
     /**
-     * Minimal HTTP Basic auth filter for the /metrics endpoint.
+     * Minimal HTTP Basic auth for the /metrics endpoint.
      * Compares against the user:password value passed via --metrics-auth.
      */
-    static final class BasicAuthFilter implements Filter {
+    static final class BasicAuthHandler extends Handler.Wrapper {
         private final String expectedHeader;
 
-        BasicAuthFilter(String userColonPassword) {
+        BasicAuthHandler(String userColonPassword) {
             this.expectedHeader = "Basic " + Base64.getEncoder()
                 .encodeToString(userColonPassword.getBytes(StandardCharsets.UTF_8));
         }
 
         @Override
-        public void init(FilterConfig filterConfig) {
-            // no-op
-        }
-
-        @Override
-        public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
-                throws IOException, ServletException {
-            HttpServletRequest req = (HttpServletRequest) request;
-            HttpServletResponse resp = (HttpServletResponse) response;
-
-            String header = req.getHeader("Authorization");
+        public boolean handle(Request request, Response response, Callback callback) throws Exception {
+            String header = request.getHeaders().get(HttpHeader.AUTHORIZATION);
             if (header == null || !constantTimeEquals(header, expectedHeader)) {
-                resp.setHeader("WWW-Authenticate", "Basic realm=\"testingbot-tunnel\"");
-                resp.sendError(HttpServletResponse.SC_UNAUTHORIZED);
-                return;
+                response.getHeaders().put(HttpHeader.WWW_AUTHENTICATE, "Basic realm=\"testingbot-tunnel\"");
+                Response.writeError(request, response, callback, HttpStatus.UNAUTHORIZED_401);
+                return true;
             }
-            chain.doFilter(request, response);
+            return super.handle(request, response, callback);
         }
 
-        @Override
-        public void destroy() {
-            // no-op
-        }
-
-        private static boolean constantTimeEquals(String a, String b) {
+        static boolean constantTimeEquals(String a, String b) {
             byte[] aB = a.getBytes(StandardCharsets.UTF_8);
             byte[] bB = b.getBytes(StandardCharsets.UTF_8);
             if (aB.length != bB.length) {
