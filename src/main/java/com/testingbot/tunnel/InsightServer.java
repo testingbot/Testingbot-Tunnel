@@ -33,11 +33,17 @@ public class InsightServer {
         // Make sure all collectors are registered before any scrape arrives.
         TunnelMetrics.init();
 
-        Server server = new Server(app.getMetricsPort());
+        Server server = new Server();
+        org.eclipse.jetty.server.ServerConnector connector =
+                new org.eclipse.jetty.server.ServerConnector(server);
+        connector.setPort(app.getMetricsPort());
+        server.addConnector(connector);
 
-        // Cheap, and makes a runaway scraper visible rather than mysterious.
+        // On the CONNECTOR, not the Server. Connection.Listener beans are attached to new
+        // connections from the connector's event listeners, so a Server-level bean is never
+        // consulted and every listener="metrics" series stayed permanently zero.
         ConnectionStatistics metricsStats = new ConnectionStatistics();
-        server.addBean(metricsStats);
+        connector.addBean(metricsStats);
         TunnelMetrics.connectionMetrics().add(ConnectionMetrics.METRICS, metricsStats);
 
         PathMappingsHandler routes = new PathMappingsHandler();
@@ -86,10 +92,24 @@ public class InsightServer {
         public boolean handle(Request request, Response response, Callback callback) throws IOException {
             // Honour the Accept header the same way the Prometheus servlet bridge does, so
             // scrapers negotiating OpenMetrics still get what they asked for.
+            // Prometheus scrapes /metrics, not /, so refreshing uptime only on the JSON
+            // endpoint left this gauge frozen for the normal setup.
+            TunnelMetrics.refreshUptime(Statistics.getStartTime());
+
             String contentType = TextFormat.chooseContentType(request.getHeaders().get(HttpHeader.ACCEPT));
             StringWriter body = new StringWriter();
-            TextFormat.writeFormat(contentType, body,
-                    CollectorRegistry.defaultRegistry.metricFamilySamples());
+            // Honour ?name[]= filtering, which the Prometheus servlet used to support and some
+            // scrape configs rely on to fetch a subset.
+            java.util.Set<String> requested = new java.util.HashSet<>(
+                    org.eclipse.jetty.util.UrlEncoded.decodeQuery(
+                            request.getHttpURI().getQuery() == null ? "" : request.getHttpURI().getQuery())
+                        .getValues("name[]") == null
+                            ? java.util.List.of()
+                            : org.eclipse.jetty.util.UrlEncoded.decodeQuery(
+                                request.getHttpURI().getQuery()).getValues("name[]"));
+            TextFormat.writeFormat(contentType, body, requested.isEmpty()
+                    ? CollectorRegistry.defaultRegistry.metricFamilySamples()
+                    : CollectorRegistry.defaultRegistry.filteredMetricFamilySamples(requested));
 
             response.setStatus(HttpStatus.OK_200);
             response.getHeaders().put(HttpHeader.CONTENT_TYPE, contentType);

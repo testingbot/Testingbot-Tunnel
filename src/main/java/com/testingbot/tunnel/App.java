@@ -788,29 +788,21 @@ public class App {
      * @throws IllegalArgumentException if proxy format is invalid
      */
     public void setProxy(String p) {
-        if (p != null && !p.trim().isEmpty()) {
-            // Validate proxy format: hostname:port or hostname or IP:port
-            String trimmed = p.trim();
-            if (trimmed.contains(":")) {
-                String[] parts = trimmed.split(":", 2);
-                if (parts.length != 2 || parts[0].isEmpty()) {
-                    throw new IllegalArgumentException("Invalid proxy format. Expected 'host:port' but got: " + p);
-                }
-                try {
-                    int port = Integer.parseInt(parts[1]);
-                    if (port < 1 || port > 65535) {
-                        throw new IllegalArgumentException("Invalid proxy port. Must be between 1-65535 but got: " + port);
-                    }
-                } catch (NumberFormatException e) {
-                    throw new IllegalArgumentException("Invalid proxy port. Must be a number but got: " + parts[1]);
-                }
-            } else if (trimmed.isEmpty()) {
-                throw new IllegalArgumentException("Proxy hostname cannot be empty");
-            }
-            proxy = trimmed;
-        } else {
+        if (p == null || p.trim().isEmpty()) {
             proxy = p;
+            return;
         }
+        String trimmed = p.trim();
+        // Validation lives in ProxySpec so the CLI accepts exactly the forms the proxy layer
+        // understands. Parsing it here separately is what let "--proxy socks5://host:port" --
+        // a form this option advertises -- die with NumberFormatException before the tunnel
+        // even started.
+        if (com.testingbot.tunnel.proxy.ProxySpec.parse(trimmed) == null) {
+            throw new IllegalArgumentException(
+                "Invalid --proxy value: " + p
+                + ". Expected host:port, http://host:port or socks5://host:port.");
+        }
+        proxy = trimmed;
     }
 
     public String getProxy() {

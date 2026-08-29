@@ -73,7 +73,7 @@ public final class ConfigFile {
             if (option == null) {
                 throw new ParseException("Unknown setting '" + key + "' in config file " + path);
             }
-            if (isPresent(args, key)) {
+            if (isPresent(args, key, options)) {
                 // An explicit command-line flag beats the file.
                 continue;
             }
@@ -85,8 +85,13 @@ public final class ConfigFile {
             }
         }
 
-        merged.addAll(trailing);
-        return merged.toArray(new String[0]);
+        // Positional credentials go BEFORE the expanded flags. Appended last they are swallowed
+        // by any preceding option declared with UNLIMITED_VALUES (--auth), which makes a config
+        // combining auth with credentials fail to start -- and can echo the API key in the error.
+        List<String> out = new ArrayList<>(List.of(args));
+        out.addAll(trailing);
+        out.addAll(merged.subList(args.length, merged.size()));
+        return out.toArray(new String[0]);
     }
 
     /** Preserves client-key before client-secret, since they are positional. */
@@ -127,14 +132,31 @@ public final class ConfigFile {
                 || v.equalsIgnoreCase("on") || v.isEmpty();
     }
 
-    /** True when --key or -key already appears on the command line. */
-    static boolean isPresent(String[] args, String key) {
+    /**
+     * True when the option already appears on the command line, in long or short form.
+     *
+     * <p>Short aliases matter: nearly every option has one ({@code -P}, {@code -a}, {@code -Y}),
+     * and missing them meant a config entry was not suppressed, so both ended up parsed and the
+     * documented "command line wins" rule quietly did not hold.
+     */
+    static boolean isPresent(String[] args, String key, Options options) {
+        String shortOpt = null;
+        if (options != null) {
+            Option option = options.getOption(key);
+            if (option != null) {
+                shortOpt = option.getOpt();
+            }
+        }
         for (String arg : args) {
             if (arg == null) {
                 continue;
             }
             if (arg.equals("--" + key) || arg.equals("-" + key)
                     || arg.startsWith("--" + key + "=")) {
+                return true;
+            }
+            if (shortOpt != null && !shortOpt.equals(key)
+                    && (arg.equals("-" + shortOpt) || arg.startsWith("-" + shortOpt + "="))) {
                 return true;
             }
         }

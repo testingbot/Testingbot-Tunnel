@@ -81,8 +81,12 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         this.upstreamProxyAuth = userPassword;
         // Proxy-Authorization is an HTTP-proxy mechanism. SOCKS authenticates during its own
         // handshake, so sending the header there would leak the credentials to the origin.
+        // Only when an HTTP upstream proxy will actually be configured. spec is null when
+        // --proxy is absent or unparseable, and in that case requests go straight to origins:
+        // stamping Proxy-Authorization on those would hand the customer's proxy credentials to
+        // every website their tests visit.
         ProxySpec spec = ProxySpec.parse(hostPort);
-        boolean httpProxy = spec == null || !spec.isSocks5();
+        boolean httpProxy = spec != null && !spec.isSocks5();
         if (httpProxy && userPassword != null && !userPassword.isEmpty()) {
             this.proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(userPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -322,6 +326,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         return getHttpClient().newRequest(newHttpURI.getHost(), port)
                 .scheme(newHttpURI.getScheme())
                 .path(pathQuery)
+                // Jetty 11's ProxyServlet applied a total exchange timeout from its "timeout"
+                // init parameter; Jetty 12's ProxyHandler never calls Request.timeout(), so a
+                // response that trickles forever was no longer bounded by anything.
+                .timeout(idleTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
                 .method(clientToProxyRequest.getMethod());
     }
 
@@ -334,8 +342,29 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             if (proxyAuthHeaderValue != null) {
                 fields.put(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
             }
+            // Jetty 11's AbstractProxyServlet added these; Jetty 12's ProxyHandler sends only
+            // Via and Forwarded, so targets that key off X-Forwarded-* (very common for staging
+            // environments behind a load balancer) silently stopped seeing them.
+            String remote = Request.getRemoteAddr(clientToProxyRequest);
+            if (remote != null) {
+                fields.add("X-Forwarded-For", remote);
+            }
+            HttpURI clientUri = clientToProxyRequest.getHttpURI();
+            if (clientUri.getScheme() != null) {
+                fields.add("X-Forwarded-Proto", clientUri.getScheme());
+            }
+            String hostHeader = clientToProxyRequest.getHeaders().get(HttpHeader.HOST);
+            if (hostHeader != null) {
+                fields.add("X-Forwarded-Host", hostHeader);
+            }
+            String local = Request.getServerName(clientToProxyRequest);
+            if (local != null) {
+                fields.add("X-Forwarded-Server", local);
+            }
+            // add(), not put(): the old servlet appended, so a header the client already sent
+            // AND --extra-headers configured reached the origin with both values.
             for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
-                fields.put(entry.getKey(), entry.getValue());
+                fields.add(entry.getKey(), entry.getValue());
             }
         });
     }

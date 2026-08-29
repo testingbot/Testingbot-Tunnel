@@ -56,7 +56,7 @@ class ProxyValidationTest {
         // When/Then: Setting proxy should throw exception
         assertThatThrownBy(() -> app.setProxy("proxy.example.com:99999"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid proxy port");
+                .hasMessageContaining("Invalid --proxy value");
     }
 
     @Test
@@ -65,7 +65,7 @@ class ProxyValidationTest {
         // When/Then: Setting proxy should throw exception
         assertThatThrownBy(() -> app.setProxy("proxy.example.com:-1"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid proxy port");
+                .hasMessageContaining("Invalid --proxy value");
     }
 
     @Test
@@ -74,7 +74,7 @@ class ProxyValidationTest {
         // When/Then: Setting proxy should throw exception
         assertThatThrownBy(() -> app.setProxy("proxy.example.com:abc"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid proxy port");
+                .hasMessageContaining("Invalid --proxy value");
     }
 
     @Test
@@ -83,7 +83,7 @@ class ProxyValidationTest {
         // When/Then: Setting proxy should throw exception
         assertThatThrownBy(() -> app.setProxy(":8080"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Invalid proxy format");
+                .hasMessageContaining("Invalid --proxy value");
     }
 
     @Test

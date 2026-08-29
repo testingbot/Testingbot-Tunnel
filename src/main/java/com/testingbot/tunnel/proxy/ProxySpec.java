@@ -71,8 +71,14 @@ public final class ProxySpec {
             value = value.substring(scheme + 3);
         }
 
+        // A bare hostname keeps working and defaults by scheme, as it did before ProxySpec
+        // existed. Returning null here instead made "--proxy corp-proxy" silently dial origins
+        // directly, bypassing an egress proxy the user believed was in force.
         int colon = value.lastIndexOf(':');
-        if (colon <= 0 || colon == value.length() - 1) {
+        if (colon < 0) {
+            return value.isEmpty() ? null : new ProxySpec(type, value, defaultPort(type));
+        }
+        if (colon == 0 || colon == value.length() - 1) {
             return null;
         }
         String host = value.substring(0, colon);
@@ -86,6 +92,10 @@ public final class ProxySpec {
             return null;
         }
         return new ProxySpec(type, host, port);
+    }
+
+    private static int defaultPort(Type type) {
+        return type == Type.SOCKS5 ? 1080 : 80;
     }
 
     @Override

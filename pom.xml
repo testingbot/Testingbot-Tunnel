@@ -216,6 +216,19 @@
                   </includes>
                 </filter>
                 <filter>
+                  <!-- dnsjava is a multi-release jar. Its
+                       META-INF/services/java.net.spi.InetAddressResolverProvider names a class
+                       that exists only under META-INF/versions/18/, and the shaded jar carries no
+                       Multi-Release manifest attribute, so on any JVM >= 18 the first hostname
+                       lookup dies with ServiceConfigurationError and the tunnel cannot resolve
+                       anything at all. We never use the SPI (CustomDnsResolver constructs
+                       SimpleResolver directly), so drop the registration. -->
+                  <artifact>dnsjava:dnsjava</artifact>
+                  <excludes>
+                    <exclude>META-INF/services/java.net.spi.InetAddressResolverProvider</exclude>
+                  </excludes>
+                </filter>
+                <filter>
                   <artifact>*:*</artifact>
                   <excludes>
                     <exclude>META-INF/*.SF</exclude>

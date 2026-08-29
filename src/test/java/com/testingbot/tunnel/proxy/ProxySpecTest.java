@@ -36,11 +36,20 @@ class ProxySpecTest {
     }
 
     @Test
+    void portlessValues_takeTheSchemeDefault() {
+        // A bare host is what people put in http_proxy and in --proxy; rejecting it left
+        // "corp-proxy" silently unset instead of proxying on the default port.
+        assertThat(ProxySpec.parse("corp-proxy").getPort()).isEqualTo(80);
+        assertThat(ProxySpec.parse("corp-proxy").getHost()).isEqualTo("corp-proxy");
+        assertThat(ProxySpec.parse("http://corp-proxy").getPort()).isEqualTo(80);
+        assertThat(ProxySpec.parse("socks5://corp-proxy").getPort()).isEqualTo(1080);
+    }
+
+    @Test
     void malformedValues_returnNull() {
         assertThat(ProxySpec.parse(null)).isNull();
         assertThat(ProxySpec.parse("")).isNull();
         assertThat(ProxySpec.parse("   ")).isNull();
-        assertThat(ProxySpec.parse("no-port")).isNull();
         assertThat(ProxySpec.parse("host:")).isNull();
         assertThat(ProxySpec.parse(":8080")).isNull();
         assertThat(ProxySpec.parse("host:not-a-number")).isNull();

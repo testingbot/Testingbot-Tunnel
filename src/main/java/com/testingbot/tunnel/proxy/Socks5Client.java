@@ -144,21 +144,31 @@ final class Socks5Client {
     }
 
     private static void writeFully(SocketChannel channel, ByteBuffer buffer) throws IOException {
-        while (buffer.hasRemaining()) {
-            if (channel.write(buffer) < 0) {
-                throw new IOException("Upstream SOCKS proxy closed the connection during handshake");
-            }
-        }
+        // Via the socket adaptor so SO_TIMEOUT applies; SocketChannel ignores it.
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        channel.socket().getOutputStream().write(bytes);
+        channel.socket().getOutputStream().flush();
     }
 
+    /**
+     * Reads exactly {@code length} bytes, subject to the socket's SO_TIMEOUT.
+     *
+     * <p>Reading via {@link SocketChannel#read} instead would ignore SO_TIMEOUT, so a SOCKS
+     * proxy that accepted the connection and then stalled would hang this thread forever --
+     * and with it the CONNECT request whose callback is never completed.
+     */
     private static ByteBuffer readFully(SocketChannel channel, int length) throws IOException {
-        ByteBuffer buffer = ByteBuffer.allocate(length);
-        while (buffer.hasRemaining()) {
-            if (channel.read(buffer) < 0) {
+        byte[] bytes = new byte[length];
+        int off = 0;
+        java.io.InputStream in = channel.socket().getInputStream();
+        while (off < length) {
+            int n = in.read(bytes, off, length - off);
+            if (n < 0) {
                 throw new IOException("Upstream SOCKS proxy closed the connection during handshake");
             }
+            off += n;
         }
-        buffer.flip();
-        return buffer;
+        return ByteBuffer.wrap(bytes);
     }
 }

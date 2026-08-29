@@ -112,6 +112,10 @@ public final class HttpProxy {
         });
         ConnectionMetrics connectionMetrics = TunnelMetrics.connectionMetrics();
         connectionMetrics.add(ConnectionMetrics.PROXY, connectionStats);
+        // Jetty's ConnectionStatistics only records bytes when a connection CLOSES, and it
+        // resets when the proxy restarts on an SSH reconnect. Reporting it directly made the
+        // status endpoint lag live traffic and drop to zero on every reconnect, so carry the
+        // connector's figure on top of what previous incarnations already moved.
         Statistics.setBytesTransferredSupplier(connectionMetrics::totalBytes);
 
         httpProxy.addConnector(proxyConnector);
@@ -182,6 +186,8 @@ public final class HttpProxy {
     }
 
     public void stop() {
+        // Preserve the byte total before the connector's statistics go away with the server.
+        Statistics.carryBytesTransferred();
         Runtime.getRuntime().removeShutdownHook(shutDownHook);
 
         try {

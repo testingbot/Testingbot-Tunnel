@@ -47,10 +47,30 @@ public class Statistics {
      */
     public static long getBytesTransferred() {
         LongSupplier supplier = bytesTransferredSupplier;
-        return supplier != null ? supplier.getAsLong() : bytesTransferred.sum();
+        return bytesTransferred.sum() + (supplier != null ? supplier.getAsLong() : 0L);
     }
 
-    /** Wired by {@link HttpProxy} so byte totals include CONNECT and WebSocket traffic. */
+    /**
+     * Folds the live connector total into the accumulated figure and drops the supplier.
+     *
+     * <p>Called when the local proxy stops. Jetty's ConnectionStatistics belongs to the
+     * connector and resets with it, so on an SSH reconnect the reported byte total would
+     * otherwise fall back to zero.
+     */
+    public static void carryBytesTransferred() {
+        LongSupplier supplier = bytesTransferredSupplier;
+        if (supplier != null) {
+            bytesTransferred.add(supplier.getAsLong());
+            bytesTransferredSupplier = null;
+        }
+    }
+
+    /**
+     * Wired by {@link HttpProxy} so byte totals include CONNECT and WebSocket traffic.
+     *
+     * <p>Note the connector records a connection's bytes when it closes, so long-lived tunnels
+     * contribute only once finished; the figure trails live traffic rather than tracking it.
+     */
     public static void setBytesTransferredSupplier(LongSupplier supplier) {
         bytesTransferredSupplier = supplier;
     }

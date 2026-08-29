@@ -1,6 +1,8 @@
 package com.testingbot.tunnel;
 
 import org.apache.commons.cli.Option;
+import org.apache.commons.cli.CommandLine;
+import org.apache.commons.cli.DefaultParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.junit.jupiter.api.BeforeEach;
@@ -9,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -28,6 +31,10 @@ class ConfigFileTest {
         options.addOption("Y", "proxy", true, "upstream proxy");
         options.addOption("b", "nobump", false, "no ssl bump");
         options.addOption("q", "nocache", false, "no cache");
+        // Mirrors App's declaration: --auth greedily consumes following positional arguments.
+        Option basicAuth = new Option("a", "auth", true, "basic auth");
+        basicAuth.setArgs(Option.UNLIMITED_VALUES);
+        options.addOption(basicAuth);
         Option config = new Option(null, "config", true, "config file");
         options.addOption(config);
     }
@@ -70,14 +77,29 @@ class ConfigFileTest {
     }
 
     @Test
-    void credentials_areAppendedAsPositionalArguments() throws Exception {
+    void credentials_areEmittedAsPositionalArgumentsInKeyThenSecretOrder() throws Exception {
         Path file = write("client-key = KEY123\nclient-secret = SECRET456\nse-port = 4446\n");
 
         String[] expanded = ConfigFile.expand(new String[]{"--config", file.toString()}, options);
 
-        // Positional args must come last and in key-then-secret order.
-        assertThat(expanded[expanded.length - 2]).isEqualTo("KEY123");
-        assertThat(expanded[expanded.length - 1]).isEqualTo("SECRET456");
+        assertThat(expanded).containsSequence("KEY123", "SECRET456");
+        // They must precede the flags expanded from the same file, not follow them.
+        assertThat(List.of(expanded).indexOf("SECRET456"))
+                .isLessThan(List.of(expanded).indexOf("--se-port"));
+    }
+
+    @Test
+    void credentials_survivePrecedingUnlimitedValuesOption() throws Exception {
+        // --auth takes UNLIMITED_VALUES, so it consumes every following positional argument.
+        // With the credentials appended last, commons-cli handed them to --auth and the tunnel
+        // started with no key at all -- reporting it in a message that echoed the API key.
+        Path file = write("auth = host:80:user:pass\nclient-key = KEY123\nclient-secret = SECRET456\n");
+
+        String[] expanded = ConfigFile.expand(new String[]{"--config", file.toString()}, options);
+        CommandLine parsed = new DefaultParser().parse(options, expanded);
+
+        assertThat(parsed.getArgs()).containsExactly("KEY123", "SECRET456");
+        assertThat(parsed.getOptionValues("auth")).containsExactly("host:80:user:pass");
     }
 
     @Test

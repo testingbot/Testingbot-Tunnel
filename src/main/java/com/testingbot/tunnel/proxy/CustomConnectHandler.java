@@ -91,9 +91,18 @@ public class CustomConnectHandler extends ConnectHandler {
         if (hostHeader == null || patterns.isEmpty()) {
             return false;
         }
-        // requestURI for CONNECT is "host:port"; strip port if present
-        int colon = hostHeader.indexOf(':');
-        String host = colon >= 0 ? hostHeader.substring(0, colon) : hostHeader;
+        // May arrive as "host", "host:port" or a bracketed IPv6 literal. Truncating at the
+        // first colon turned "[::1]" into "[", so no pattern could ever match an IPv6 target.
+        String host = hostHeader;
+        if (host.startsWith("[")) {
+            int close = host.indexOf(']');
+            host = close > 0 ? host.substring(1, close) : host;
+        } else {
+            int colon = host.indexOf(':');
+            if (colon >= 0 && host.indexOf(':', colon + 1) < 0) {
+                host = host.substring(0, colon);   // host:port, not a bare IPv6 literal
+            }
+        }
         host = host.toLowerCase(Locale.ROOT);
         for (Pattern p : patterns) {
             if (p.matcher(host).find()) {
@@ -149,9 +158,13 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     public boolean handle(Request request, Response response, Callback callback) throws Exception {
-        Statistics.addRequest();
-
         boolean isConnect = HttpMethod.CONNECT.is(request.getMethod());
+        if (isConnect) {
+            // Only CONNECTs. Plain HTTP passes through here on its way to TunnelProxyHandler,
+            // which counts it on completion; counting in both places doubled the request total
+            // reported by the status endpoint.
+            Statistics.addRequest();
+        }
         if (isConnect) {
             // For CONNECT, the authority ("host:port") lives on the parsed HttpURI;
             // the path component alone would not carry it.
@@ -188,9 +201,10 @@ public class CustomConnectHandler extends ConnectHandler {
             connectTimer.observeDuration();
             int status = response.getStatus();
             TunnelMetrics.HTTPS_CONNECT_TOTAL.labels(Integer.toString(status)).inc();
-            if (status >= 400) {
-                TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("status_" + status).inc();
-            }
+            // Deliberately no error increment here. Failures are already counted once, with a
+            // classified reason, in onConnectFailure/validateDestination; adding a status_* label
+            // for the same event made every failure count two or three times under parallel
+            // taxonomies and inflated any sum() over the family.
         });
 
         boolean handled = super.handle(request, response, observed);
@@ -215,11 +229,22 @@ public class CustomConnectHandler extends ConnectHandler {
     @Override
     protected void onConnectFailure(Request request, Response response, Callback callback,
                                     Throwable failure) {
+        if (proxyHost == null) {
+            TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
+        }
         ProxyErrors.Reason reason = ProxyErrors.classify(failure);
         TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels(reason.reason().replace('-', '_')).inc();
         LOG.warn("CONNECT failed ({}): {}", reason.reason(),
                 failure == null ? "unknown" : failure.getMessage());
         ProxyErrors.write(request, response, callback, reason);
+    }
+
+    @Override
+    protected void onConnectSuccess(ConnectContext connectContext, UpstreamConnection upstreamConnection) {
+        if (proxyHost == null) {
+            TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
+        }
+        super.onConnectSuccess(connectContext, upstreamConnection);
     }
 
     @Override
@@ -236,10 +261,16 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
-        Promise<SocketChannel> timed = TunnelMetrics.timedDial("connect", promise);
         if (proxyHost == null) {
-            super.connectToServer(request, host, port, timed);
-        } else if (proxySpec.isSocks5()) {
+            // Not timed here: Jetty's default connectToServer succeeds the promise as soon as
+            // the non-blocking connect is *initiated*, so wrapping it recorded every dial as an
+            // instant success and never saw a refusal. The direct path is measured in
+            // onConnectSuccess/onConnectFailure instead, where the outcome is actually known.
+            super.connectToServer(request, host, port, promise);
+            return;
+        }
+        Promise<SocketChannel> timed = TunnelMetrics.timedDial("connect", promise);
+        if (proxySpec.isSocks5()) {
             connectViaSocks5(host, port, timed);
         } else {
             connectToProxy(request, host, port, timed);
@@ -258,6 +289,10 @@ public class CustomConnectHandler extends ConnectHandler {
                 channel = SocketChannel.open();
                 channel.socket().setTcpNoDelay(true);
                 channel.socket().connect(newConnectAddress(proxyHost, proxyPort), (int) getConnectTimeout());
+                // Bounds the handshake reads too, not just the TCP connect: without this a
+                // SOCKS proxy that stalls mid-handshake pins this thread and the CONNECT
+                // callback is never completed, so the client request hangs forever.
+                channel.socket().setSoTimeout((int) getConnectTimeout());
 
                 String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
                 Socks5Client.connect(channel, host, port,
@@ -271,7 +306,6 @@ public class CustomConnectHandler extends ConnectHandler {
                 }
                 promise.succeeded(channel);
             } catch (Throwable x) {
-                TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("upstream_connect_failed").inc();
                 LOG.error("Failed to establish SOCKS5 tunnel through {}:{} to {}:{}: {}",
                         proxyHost, proxyPort, host, port, x.getMessage());
                 if (channel != null) {
@@ -397,8 +431,11 @@ public class CustomConnectHandler extends ConnectHandler {
                     }
                 }
             }
-        } catch (IOException x) {
-            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("upstream_connect_failed").inc();
+        } catch (Throwable x) {
+            // Throwable, not IOException: an unresolvable --proxy host makes channel.connect
+            // throw UnresolvedAddressException, a RuntimeException. That escaped the method,
+            // leaking the SocketChannel on every CONNECT and leaving the dial promise (and so
+            // the client's request) uncompleted.
             LOG.error("Failed to establish CONNECT tunnel through upstream proxy {}:{} to {}:{}: {}",
                     proxyHost, proxyPort, host, port, x.getMessage());
             if (channel != null) {

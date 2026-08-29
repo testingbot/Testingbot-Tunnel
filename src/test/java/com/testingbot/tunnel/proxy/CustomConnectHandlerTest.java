@@ -196,4 +196,23 @@ class CustomConnectHandlerTest {
 
         assertThat(handler.validateDestination("anything.example.com", 443)).isTrue();
     }
+
+    @Test
+    void hostBlocked_matchesBracketedIpv6Literals() {
+        // "[::1]:443" used to be truncated at the first colon, leaving "[", so no pattern
+        // could ever match an IPv6 destination and fast-fail silently let it through.
+        List<Pattern> patterns = List.of(Pattern.compile("::1"));
+
+        assertThat(CustomConnectHandler.hostBlocked("[::1]:443", patterns)).isTrue();
+        assertThat(CustomConnectHandler.hostBlocked("[::1]", patterns)).isTrue();
+    }
+
+    @Test
+    void hostBlocked_stripsThePortButNotABareIpv6Literal() {
+        assertThat(CustomConnectHandler.hostBlocked("example.com:443",
+                List.of(Pattern.compile("^example\\.com$")))).isTrue();
+        // Unbracketed and multi-colon: a bare IPv6 literal, so nothing may be stripped.
+        assertThat(CustomConnectHandler.hostBlocked("fe80::1",
+                List.of(Pattern.compile("^fe80::1$")))).isTrue();
+    }
 }

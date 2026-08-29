@@ -35,6 +35,31 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
         this.app = app;
     }
 
+    /**
+     * Same override as {@link TunnelProxyHandler}: ProxyHandler's default builds the outbound
+     * request with {@code HttpURI.toURI()}, and {@code java.net.URI} rejects characters Jetty's
+     * server parser accepts. Without it a Selenium request such as
+     * {@code /wd/hub/status?caps={"browser":"chrome"}} 500s before reaching the hub -- the exact
+     * class of input TB-314 fixed on the other proxy and missed on this one.
+     */
+    @Override
+    protected org.eclipse.jetty.client.Request newProxyToServerRequest(Request clientToProxyRequest,
+                                                                       HttpURI newHttpURI) {
+        int port = newHttpURI.getPort();
+        if (port <= 0) {
+            port = HttpScheme.HTTPS.is(newHttpURI.getScheme()) ? 443 : 80;
+        }
+        String pathQuery = newHttpURI.getPathQuery();
+        if (pathQuery == null || pathQuery.isEmpty()) {
+            pathQuery = "/";
+        }
+        return getHttpClient().newRequest(newHttpURI.getHost(), port)
+                .scheme(newHttpURI.getScheme())
+                .path(pathQuery)
+                .timeout(FORWARD_IDLE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                .method(clientToProxyRequest.getMethod());
+    }
+
     @Override
     protected void configureHttpClient(HttpClient httpClient) {
         super.configureHttpClient(httpClient);

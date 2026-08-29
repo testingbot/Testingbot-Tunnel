@@ -42,6 +42,9 @@ public class WebsocketHandler extends ConnectHandler {
     protected static final Logger LOG = LoggerFactory.getLogger(WebsocketHandler.class);
 
     // Carries the target's handshake response headers from connectToServer() to onConnectSuccess().
+    /** Cap on the handshake response we will buffer before giving up. */
+    private static final int MAX_HANDSHAKE_BYTES = 16 * 1024;
+
     private static final String WS_RESPONSE_HEADERS_ATTRIBUTE =
             WebsocketHandler.class.getName() + ".wsResponseHeaders";
 
@@ -72,6 +75,13 @@ public class WebsocketHandler extends ConnectHandler {
         super(handler);
     }
 
+    /**
+     * Hop-by-hop headers must not be replayed to the target. Proxy-Authorization in
+     * particular is meant for us, not the origin; the CONNECT path already strips these.
+     */
+    private static final java.util.Set<String> HOP_BY_HOP = java.util.Set.of(
+            "proxy-authorization", "proxy-connection", "proxy-authenticate", "keep-alive", "te", "trailer");
+
     static String buildUpgradeRequest(Request clientRequest) {
         StringBuilder requestHeaders = new StringBuilder();
         requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getHttpURI().getPath());
@@ -80,46 +90,62 @@ public class WebsocketHandler extends ConnectHandler {
         }
         requestHeaders.append(" ").append(clientRequest.getConnectionMetaData().getHttpVersion().asString()).append("\r\n");
         for (HttpField field : clientRequest.getHeaders()) {
+            if (HOP_BY_HOP.contains(field.getName().toLowerCase(java.util.Locale.ROOT))) {
+                continue;
+            }
             requestHeaders.append(field.getName()).append(": ").append(field.getValue()).append("\r\n");
         }
         requestHeaders.append("\r\n");
         return requestHeaders.toString();
     }
 
-    private Map<String, String> performWebSocketHandshake(Request clientRequest, SocketChannel channel) throws IOException {
-        // Send WebSocket upgrade request to target
-        ByteBuffer writeBuffer = ByteBuffer.wrap(buildUpgradeRequest(clientRequest).getBytes(StandardCharsets.UTF_8));
-        while (writeBuffer.hasRemaining()) {
-            channel.write(writeBuffer);
-        }
+    private Map<String, String> performWebSocketHandshake(Request clientRequest, SocketChannel channel)
+            throws IOException {
+        // Read and write through the socket adaptor rather than the channel: SO_TIMEOUT is
+        // honoured by these streams and ignored by SocketChannel.read(), so the previous code
+        // could block forever on a target that accepted the connection and then said nothing.
+        java.net.Socket socket = channel.socket();
+        socket.setSoTimeout((int) getConnectTimeout());
+        socket.getOutputStream().write(buildUpgradeRequest(clientRequest).getBytes(StandardCharsets.UTF_8));
+        socket.getOutputStream().flush();
 
-        // Read target's WebSocket handshake response (blocking)
-        ByteBuffer readBuffer = ByteBuffer.allocate(4096);
+        // One byte at a time up to the header terminator. Reading in blocks would consume
+        // bytes belonging to the WebSocket stream itself -- servers that send an opening frame
+        // immediately after the 101 (socket.io and friends do) had that frame silently dropped.
+        java.io.InputStream in = socket.getInputStream();
         StringBuilder responseSB = new StringBuilder();
         while (responseSB.indexOf("\r\n\r\n") < 0) {
-            readBuffer.clear();
-            int n = channel.read(readBuffer);
-            if (n < 0) throw new IOException("Connection closed before WebSocket handshake completed");
-            readBuffer.flip();
-            byte[] bytes = new byte[readBuffer.remaining()];
-            readBuffer.get(bytes);
-            responseSB.append(new String(bytes, StandardCharsets.UTF_8));
+            int b = in.read();
+            if (b < 0) {
+                throw new IOException("Connection closed before WebSocket handshake completed");
+            }
+            responseSB.append((char) b);
+            if (responseSB.length() > MAX_HANDSHAKE_BYTES) {
+                throw new IOException("WebSocket handshake response exceeded " + MAX_HANDSHAKE_BYTES + " bytes");
+            }
         }
 
-        String fullResponse = responseSB.toString();
-        int headerEnd = fullResponse.indexOf("\r\n\r\n");
-        String headerSection = fullResponse.substring(0, headerEnd);
+        String headerSection = responseSB.substring(0, responseSB.indexOf("\r\n\r\n"));
         String[] lines = headerSection.split("\r\n");
+
+        // Relaying a non-101 response as if it were a WebSocket stream leaves the client
+        // believing the upgrade succeeded and hides the real reason (auth, redirect, refusal).
+        if (lines.length == 0 || !lines[0].contains("101")) {
+            throw new IOException("Target refused the WebSocket upgrade: "
+                    + (lines.length > 0 ? lines[0] : "empty response"));
+        }
 
         Map<String, String> wsResponseHeaders = new LinkedHashMap<>();
         for (int i = 1; i < lines.length; i++) {
             int colonIndex = lines[i].indexOf(':');
             if (colonIndex > 0) {
-                wsResponseHeaders.put(lines[i].substring(0, colonIndex).trim(), lines[i].substring(colonIndex + 1).trim());
+                wsResponseHeaders.put(lines[i].substring(0, colonIndex).trim(),
+                        lines[i].substring(colonIndex + 1).trim());
             }
         }
 
-        LOG.info("WebSocket handshake with target complete, status: {}, headers: {}", lines[0], wsResponseHeaders.size());
+        LOG.info("WebSocket handshake with target complete, status: {}, headers: {}",
+                lines[0], wsResponseHeaders.size());
         return wsResponseHeaders;
     }
 
@@ -160,8 +186,11 @@ public class WebsocketHandler extends ConnectHandler {
                 // Connect to the target using blocking I/O for the handshake
                 channel = SocketChannel.open();
                 channel.socket().setTcpNoDelay(true);
-                channel.socket().setSoTimeout((int) getConnectTimeout());
-                channel.connect(new InetSocketAddress(host, port));
+                // newConnectAddress() applies --dns. Dialling InetSocketAddress directly here
+                // is what made the custom resolver dead code on this path despite being wired.
+                // socket().connect(addr, timeout) is also the only form that bounds the connect;
+                // SocketChannel.connect ignores SO_TIMEOUT entirely.
+                channel.socket().connect(newConnectAddress(host, port), (int) getConnectTimeout());
 
                 Map<String, String> wsResponseHeaders = performWebSocketHandshake(request, channel);
 
