@@ -2,6 +2,8 @@ package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.Statistics;
 import com.testingbot.tunnel.TunnelMetrics;
+import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.ArrayList;
@@ -63,6 +65,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private String upstreamProxyAuth;
     private String[] basicAuth;
     private boolean debugMode;
+    private CustomDnsResolver dnsResolver;
     private long idleTimeoutMs = 120_000L;
 
     public void setBlackList(String[] patterns) {
@@ -100,6 +103,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     public void setBasicAuth(String[] basicAuth) {
         this.basicAuth = basicAuth;
+    }
+
+    public void setDnsResolver(CustomDnsResolver dnsResolver) {
+        this.dnsResolver = dnsResolver;
     }
 
     public void setDebugMode(boolean debugMode) {
@@ -154,6 +161,23 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     protected void configureHttpClient(HttpClient client) {
         super.configureHttpClient(client);
         client.setIdleTimeout(idleTimeoutMs);
+
+        if (dnsResolver != null) {
+            // Jetty resolves asynchronously; the lookup is blocking, so hand it to the client's
+            // executor rather than running it on the caller's thread.
+            client.setSocketAddressResolver((host, port, context, promise) ->
+                client.getExecutor().execute(() -> {
+                    try {
+                        List<InetSocketAddress> resolved = new ArrayList<>();
+                        for (InetAddress address : dnsResolver.resolve(host)) {
+                            resolved.add(new InetSocketAddress(address, port));
+                        }
+                        promise.succeeded(resolved);
+                    } catch (Throwable x) {
+                        promise.failed(x);
+                    }
+                }));
+        }
         // A forward proxy fans out to many origins at once and relays bodies rather than
         // parsing them, so Jetty's request/response defaults (sized for an application
         // client talking to one server) are low on both counts.
