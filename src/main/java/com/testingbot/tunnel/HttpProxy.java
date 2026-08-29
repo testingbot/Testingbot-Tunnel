@@ -33,7 +33,11 @@ import org.eclipse.jetty.server.Response;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.handler.ConnectHandler;
+import org.eclipse.jetty.server.handler.GracefulHandler;
+import org.eclipse.jetty.server.handler.StateTrackingHandler;
 import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.util.VirtualThreads;
+import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.eclipse.jetty.ee10.servlet.ServletHolder;
 import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 
@@ -51,11 +55,32 @@ public final class HttpProxy {
     static final int TUNNEL_BUFFER_SIZE = 32 * 1024;
     /** Relay idle timeout; must outlast quiet periods on an otherwise live tunnel. */
     static final long TUNNEL_IDLE_TIMEOUT_MS = 300_000L;
+    /** How long shutdown waits for in-flight requests to finish. */
+    static final long STOP_TIMEOUT_MS = 5_000L;
+    /** Under --debug, how long a handler may hold its callback before being reported. */
+    static final long HANDLER_CALLBACK_TIMEOUT_MS = 60_000L;
+
+    /**
+     * A tunnel is I/O-bound and holds many mostly-idle connections, which is exactly the
+     * shape virtual threads suit. They only exist on Java 21+, and the supported baseline
+     * is 17, so this is opportunistic: on an older JVM {@code VirtualThreads.areSupported()}
+     * is false and Jetty's normal pooled threads are used unchanged.
+     */
+    private static QueuedThreadPool newThreadPool() {
+        QueuedThreadPool pool = new QueuedThreadPool();
+        pool.setName("tb-tunnel");
+        if (VirtualThreads.areSupported()) {
+            pool.setVirtualThreadsExecutor(VirtualThreads.getDefaultVirtualThreadsExecutor());
+            Logger.getLogger(HttpProxy.class.getName())
+                .log(Level.INFO, "Using virtual threads for the local proxy");
+        }
+        return pool;
+    }
 
     public HttpProxy(App app) {
         this.app = app;
 
-        this.httpProxy = new Server();
+        this.httpProxy = new Server(newThreadPool());
 
         HttpConfiguration http_config = new HttpConfiguration();
         // Don't advertise "Server: Jetty(<version>)" to every client; the exact version
@@ -90,6 +115,9 @@ public final class HttpProxy {
 
         httpProxy.addConnector(proxyConnector);
         httpProxy.setStopAtShutdown(true);
+        // Give in-flight requests a chance to finish on shutdown instead of having their
+        // connections cut mid-response.
+        httpProxy.setStopTimeout(STOP_TIMEOUT_MS);
 
         ConnectHandler connectHandler = new CustomConnectHandler(app);
         ((CustomConnectHandler) connectHandler).setBlackList(app.getFastFail());
@@ -137,7 +165,24 @@ public final class HttpProxy {
         // a flat sequence, preserving the Jetty 11 order: WS -> CONNECT -> proxy servlet.
         connectHandler.setHandler(contextHandler);
         websocketHandler.setHandler(connectHandler);
-        httpProxy.setHandler(websocketHandler);
+
+        // GracefulHandler tracks in-flight requests so stop() can drain them; it must sit
+        // outermost to see every request.
+        GracefulHandler gracefulHandler = new GracefulHandler();
+        gracefulHandler.setHandler(websocketHandler);
+
+        if (app.isDebugMode()) {
+            // Jetty 12 handlers own a Callback that must be completed exactly once. This
+            // codebase implements several by hand, and getting that wrong shows up as a
+            // hang rather than an exception. StateTrackingHandler reports the misuse
+            // instead, so it is worth the overhead when debugging.
+            StateTrackingHandler stateTracking = new StateTrackingHandler();
+            stateTracking.setHandlerCallbackTimeout(HANDLER_CALLBACK_TIMEOUT_MS);
+            stateTracking.setHandler(gracefulHandler);
+            httpProxy.setHandler(stateTracking);
+        } else {
+            httpProxy.setHandler(gracefulHandler);
+        }
 
         start();
 
