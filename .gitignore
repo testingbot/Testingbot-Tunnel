@@ -28,3 +28,6 @@ target/
 dist/testingbot-tunnel-*/
 dist/*.tar.gz
 dist/*.zip
+
+# Serena MCP local state (cache + memories)
+.serena/
