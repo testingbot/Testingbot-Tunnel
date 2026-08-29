@@ -57,6 +57,69 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # Self-contained distributions: a trimmed JDK (jlink) plus the jar, so users need
+  # no Java installed. jlink emits a runtime for the platform it runs on, hence the
+  # matrix. Each build is verified before upload, because a missing module fails at
+  # runtime rather than at build time.
+  native:
+    permissions:
+      contents: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            asset: testingbot-tunnel-linux-x64
+          - os: ubuntu-24.04-arm
+            asset: testingbot-tunnel-linux-arm64
+          - os: macos-13
+            asset: testingbot-tunnel-macos-x64
+          - os: macos-latest
+            asset: testingbot-tunnel-macos-arm64
+          - os: windows-latest
+            asset: testingbot-tunnel-windows-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    - name: Set version from tag
+      shell: bash
+      run: |
+        TAG_VERSION=${GITHUB_REF#refs/tags/v}
+        mvn versions:set -DnewVersion=${TAG_VERSION} -DgenerateBackupPoms=false
+
+    - name: Build JAR
+      shell: bash
+      run: mvn -B -DskipTests package
+
+    - name: Build self-contained runtime
+      shell: bash
+      run: dist/build-runtime.sh
+
+    # Without credentials this still covers the module set that matters most:
+    # startup, TLS and DNS via --doctor. The live tunnel checks are skipped.
+    - name: Verify runtime
+      shell: bash
+      run: dist/verify-runtime.sh "dist/${{ matrix.asset }}"
+
+    - name: Upload distribution to GitHub Releases
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
+      with:
+        files: |
+          dist/${{ matrix.asset }}.tar.gz
+          dist/${{ matrix.asset }}.zip
+        fail_on_unmatched_files: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
   central:
     runs-on: ubuntu-latest
 

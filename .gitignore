@@ -23,3 +23,8 @@ target/
 *.iml
 *.iws
 .idea/
+
+# jlink build output (dist/*.sh are tracked)
+dist/testingbot-tunnel-*/
+dist/*.tar.gz
+dist/*.zip
