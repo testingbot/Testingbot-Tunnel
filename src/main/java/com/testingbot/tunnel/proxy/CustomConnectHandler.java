@@ -205,6 +205,23 @@ public class CustomConnectHandler extends ConnectHandler {
      * connection and answers 403 itself when it returns false, so the blacklist lives here
      * rather than being intercepted earlier in {@link #handle}.
      */
+    /**
+     * Classifies CONNECT failures the same way the HTTP path does.
+     *
+     * <p>Runs before the tunnel is established, so the response is still an ordinary HTTP
+     * message and can carry the reason header. Without this, every CONNECT failure -- DNS,
+     * refusal, a dead upstream proxy, rejected proxy credentials -- looked identical.
+     */
+    @Override
+    protected void onConnectFailure(Request request, Response response, Callback callback,
+                                    Throwable failure) {
+        ProxyErrors.Reason reason = ProxyErrors.classify(failure);
+        TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels(reason.reason().replace('-', '_')).inc();
+        LOG.warn("CONNECT failed ({}): {}", reason.reason(),
+                failure == null ? "unknown" : failure.getMessage());
+        ProxyErrors.write(request, response, callback, reason);
+    }
+
     @Override
     public boolean validateDestination(String host, int port) {
         if (hostBlocked(host, blackList)) {

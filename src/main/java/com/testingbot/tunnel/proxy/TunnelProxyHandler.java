@@ -240,8 +240,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                 LOG.log(Level.INFO, "Fast-fail: rejecting {0} (matched blacklist)", host);
                 TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
                 TunnelMetrics.ERRORS_TOTAL.labels("blacklisted").inc();
-                Response.writeError(request, response, callback, HttpStatus.FORBIDDEN_403,
-                        "Blocked by fast-fail policy");
+                ProxyErrors.write(request, response, callback, ProxyErrors.Reason.DENIED_BY_FAST_FAIL);
                 return true;
             }
         }
@@ -383,30 +382,18 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                                                   Callback proxyToClientCallback,
                                                   Throwable failure) {
         String uri = String.valueOf(clientToProxyRequest.getHttpURI());
+        ProxyErrors.Reason reason = ProxyErrors.classify(failure);
 
-        // A malformed target never reaches the network, so answering 502 (the base class
-        // default) blames the customer's site for our inability to build the request -- and
-        // sends them debugging a server that is perfectly healthy. The only URIs that get
-        // this far are ones Jetty's lenient server parser accepted but its client rejected,
-        // in practice a "%" that is not followed by two hex digits.
-        if (failure instanceof IllegalArgumentException) {
-            TunnelMetrics.ERRORS_TOTAL.labels("malformed_request_uri").inc();
-            LOG.log(Level.WARNING, "Malformed request URI, not forwarded: {0} {1} ({2})",
-                    new Object[]{clientToProxyRequest.getMethod(), uri, failure.getMessage()});
-            Response.writeError(clientToProxyRequest, proxyToClientResponse, proxyToClientCallback,
-                    HttpStatus.BAD_REQUEST_400, "Malformed request URI: " + failure.getMessage());
-            return;
-        }
+        TunnelMetrics.ERRORS_TOTAL.labels(reason == ProxyErrors.Reason.MALFORMED_REQUEST_URI
+                ? "malformed_request_uri" : "client_request_failure").inc();
 
-        TunnelMetrics.ERRORS_TOTAL.labels("client_request_failure").inc();
+        // squid-internal requests are the caching layer probing itself; a failure there is
+        // noise, not something the customer can act on.
         if (!uri.contains("squid-internal")) {
-            LOG.log(Level.WARNING, "{0} for request {1} - {2}",
-                    new Object[]{failure.getMessage(), clientToProxyRequest.getMethod(), uri});
-            LOG.log(Level.SEVERE,
-                    "Local proxy received a connection failure from upstream. Make sure the website"
-                    + " you want to test is accessible from this machine.");
+            LOG.log(Level.WARNING, "{0}: {1} {2} ({3})", new Object[]{
+                    reason.reason(), clientToProxyRequest.getMethod(), uri, failure.getMessage()});
         }
-        super.onServerToProxyResponseFailure(clientToProxyRequest, proxyToServerRequest,
-                serverToProxyResponse, proxyToClientResponse, proxyToClientCallback, failure);
+
+        ProxyErrors.write(clientToProxyRequest, proxyToClientResponse, proxyToClientCallback, reason);
     }
 }

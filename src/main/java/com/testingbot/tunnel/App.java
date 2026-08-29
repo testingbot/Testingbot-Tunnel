@@ -820,6 +820,10 @@ public class App {
     /**
      * @return the fastFail
      */
+    public void setFastFail(String[] fastFail) {
+        this.fastFail = fastFail;
+    }
+
     public String[] getFastFail() {
         return fastFail;
     }
