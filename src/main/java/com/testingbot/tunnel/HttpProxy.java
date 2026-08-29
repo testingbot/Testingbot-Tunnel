@@ -161,7 +161,7 @@ public final class HttpProxy {
             connector.setPort(0);                 // let OS pick a free port
             connector.setIdleTimeout(10_000);
             server.addConnector(connector);
-            server.setHandler(new TestHandler());
+            server.setHandler(new TestHandler(randomNumber));
             server.start();
 
             int port = connector.getLocalPort();  // actual bound port
@@ -206,7 +206,17 @@ public final class HttpProxy {
         }
     }
 
-    private class TestHandler extends Handler.Abstract {
+    /**
+     * Serves the body that {@link #testProxy()} asks TestingBot to fetch back through the
+     * tunnel. Static and package-private so it can be tested without standing up a tunnel.
+     */
+    static class TestHandler extends Handler.Abstract {
+        private final int randomNumber;
+
+        TestHandler(int randomNumber) {
+            this.randomNumber = randomNumber;
+        }
+
         @Override
         public boolean handle(Request request, Response response, Callback callback) {
             response.setStatus(HttpStatus.OK_200);
