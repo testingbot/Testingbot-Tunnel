@@ -139,6 +139,20 @@ class BytesTransferredLifecycleTest {
     }
 
     @Test
+    void stoppingTwice_doesNotBankTheSameBytesTwice() throws Exception {
+        moveSomeBytes();
+        settledTotal();
+
+        httpProxy.stop();
+        long afterFirstStop = Statistics.getBytesTransferred();
+        httpProxy.stop();
+
+        assertThat(Statistics.getBytesTransferred()).isEqualTo(afterFirstStop);
+        httpProxy.start();
+        waitForPort(proxyPort);
+    }
+
+    @Test
     void total_doesNotResetOrFreezeWhenTheProxyRestarts() throws Exception {
         moveSomeBytes();
         long afterFirst = settledTotal();

@@ -204,6 +204,9 @@ public final class HttpProxy {
         if (proxyConnectionStats != null) {
             Statistics.bankBytesTransferred(
                     proxyConnectionStats.getReceivedBytes() + proxyConnectionStats.getSentBytes());
+            // Reset so a second stop() before the next start() banks nothing. Jetty would clear
+            // these in doStart() anyway; doing it here makes stop() idempotent.
+            proxyConnectionStats.reset();
         }
     }
 
