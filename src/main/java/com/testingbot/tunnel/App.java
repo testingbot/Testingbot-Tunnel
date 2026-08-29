@@ -190,12 +190,19 @@ public class App {
         options.addOption("s", "shared", false, "Share this tunnel among team members.");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
         options.addOption("v", "version", false, "Displays the current version of this program");
+        Option configOption = new Option(null, "config", true,
+            "Read settings from a properties file. Keys are long option names without dashes"
+            + " (for example: se-port = 4445). Explicit command-line flags override the file.");
+        configOption.setArgName("FILE");
+        options.addOption(configOption);
 
         Statistics.setStartTime(System.currentTimeMillis());
 
         CommandLine commandLine;
         try {
-            commandLine = cmdLinePosixParser.parse(options, args);
+            // Config entries are expanded into the argument list, so everything below sees
+            // them exactly as if they had been typed on the command line.
+            commandLine = cmdLinePosixParser.parse(options, ConfigFile.expand(args, options));
             if (commandLine.hasOption("help")) {
                 HelpFormatter help = new HelpFormatter();
                 help.setWidth(180);
