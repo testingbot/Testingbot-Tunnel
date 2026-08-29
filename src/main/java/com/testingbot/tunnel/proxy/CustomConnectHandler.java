@@ -236,12 +236,13 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
+        Promise<SocketChannel> timed = TunnelMetrics.timedDial("connect", promise);
         if (proxyHost == null) {
-            super.connectToServer(request, host, port, promise);
+            super.connectToServer(request, host, port, timed);
         } else if (proxySpec.isSocks5()) {
-            connectViaSocks5(host, port, promise);
+            connectViaSocks5(host, port, timed);
         } else {
-            connectToProxy(request, host, port, promise);
+            connectToProxy(request, host, port, timed);
         }
     }
 
