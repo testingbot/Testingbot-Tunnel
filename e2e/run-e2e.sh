@@ -55,6 +55,53 @@ skip() { SKIP=$((SKIP+1)); RESULTS+=("SKIP|$1|$2"); printf '    \033[33m-\033[0m
 assert_eq()       { [ "$2" = "$3" ] && ok "$1" "got $2" || bad "$1" "expected $3, got $2"; }
 assert_contains() { case "$2" in *"$3"*) ok "$1" "contains '$3'";; *) bad "$1" "missing '$3' in: $(printf '%.120s' "$2")";; esac; }
 
+# Returns a port free on both the IPv4 loopback and the wildcard address.
+# Checking only the wildcard is not enough: a process bound to 127.0.0.1:PORT can
+# coexist with a Jetty bound to [::]:PORT on macOS, and the tunnel's reverse
+# forward dials 127.0.0.1 -- so traffic would silently reach the other process.
+free_port() {
+  python3 - <<'PY'
+import socket
+for _ in range(200):
+    probe = socket.socket()
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    ok = True
+    for host in ("127.0.0.1", "0.0.0.0"):
+        s = socket.socket()
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            s.bind((host, port))
+        except OSError:
+            ok = False
+        finally:
+            s.close()
+        if not ok:
+            break
+    if ok:
+        print(port)
+        break
+PY
+}
+
+# Fails loudly if anything other than our tunnel is listening on the proxy port.
+# Without this, a foreign listener on 127.0.0.1:PORT looks like a working proxy
+# to local curl while the tunnel's reverse forward is quietly hijacked.
+assert_proxy_port_ours() {
+  local owners
+  owners="$(lsof -nP -iTCP:"$PROXY_PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $2}' | sort -u | tr '\n' ' ')"
+  case " $owners " in
+    *" $TUNNEL_PID "*)
+      if [ "$(printf '%s' "$owners" | wc -w | tr -d ' ')" = "1" ]; then
+        ok "$1 proxy-port-exclusive" "pid $TUNNEL_PID owns $PROXY_PORT"
+      else
+        bad "$1 proxy-port-exclusive" "port $PROXY_PORT shared with pid(s): $owners"
+      fi;;
+    *) bad "$1 proxy-port-exclusive" "port $PROXY_PORT owned by pid(s) [$owners], not our tunnel ($TUNNEL_PID)";;
+  esac
+}
+
 # ------------------------------------------------------------------ fixtures
 start_origin() {
   python3 "$HERE/origin_server.py" "$ORIGIN_PORT" "$MARKER" > "$WORK/origin.log" 2>&1 &
@@ -144,7 +191,7 @@ stop_tunnel() {
   TUNNEL_PID=""
   # The process is gone, but its listening sockets may take a moment to be
   # released. Starting the next scenario too eagerly fails with BindException.
-  wait_ports_free 4445 8003 "${PROXY_PORT:-}"
+  wait_ports_free 4445 "${PROXY_PORT:-}"
   PROXY_PORT=""
 }
 
@@ -183,7 +230,12 @@ check_browser() {  # $1 label, $2 se-port, $3 optional tunnel identifier
   ok "$label browser-session" "${sid:0:24}…"
   assert_eq "$label browser-navigate" "$(wd_goto "$seport" "$sid" "http://localhost:$ORIGIN_PORT/")" "200"
   src="$(wd_source "$seport" "$sid")"
-  assert_contains "$label browser-sees-local-origin" "$src" "$MARKER"
+  case "$src" in
+    *"$MARKER"*) ok "$label browser-sees-local-origin" "marker present";;
+    *) printf '%s\n' "$src" > "$WORK/$label-page.html"
+       bad "$label browser-sees-local-origin" "marker missing; page saved to $WORK/$label-page.html"
+       printf '    page text: %.400s\n' "$(printf '%s' "$src" | tr -d '\n' | sed 's/<[^>]*>//g')";;
+  esac
   wd_delete "$seport" "$sid"
 }
 
@@ -194,11 +246,13 @@ check_browser() {  # $1 label, $2 se-port, $3 optional tunnel identifier
 # One tunnel, many features. This is the default because it gets the broadest
 # coverage for a single tunnel start.
 scenario_combined() {
+  local mport; mport="$(free_port)"
   start_tunnel \
       --extra-headers '{"X-E2E-Injected":"tunnel-e2e-value"}' \
       --fast-fail-regexps 'blocked\.example\.com' \
-      --metrics-port 8003 --metrics-auth 'e2euser:e2epass' || return 1
+      --metrics-port "$mport" --metrics-auth 'e2euser:e2epass' || return 1
 
+  assert_proxy_port_ours combined
   check_proxy_http combined
   check_proxy_connect combined
   check_se_status combined
@@ -213,9 +267,9 @@ scenario_combined() {
     "$(curl -s -o /dev/null -w '%{http_connect}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" https://blocked.example.com/)" "403"
 
   assert_eq "metrics rejects anonymous" \
-    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 http://127.0.0.1:8003/metrics)" "401"
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$mport/metrics")" "401"
   assert_eq "metrics accepts basic auth" \
-    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -u e2euser:e2epass http://127.0.0.1:8003/metrics)" "200"
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -u e2euser:e2epass "http://127.0.0.1:$mport/metrics")" "200"
 
   check_browser combined
 }
@@ -232,12 +286,27 @@ scenario_nocache() {
 }
 
 scenario_custom_ports() {
-  start_tunnel --se-port 4446 --localproxy 8899 --metrics-port 8004 || return 1
-  assert_eq "custom localproxy port" "$PROXY_PORT" "8899"
+  local seport lport mport
+  seport="$(free_port)"; lport="$(free_port)"; mport="$(free_port)"
+  start_tunnel --se-port "$seport" --localproxy "$lport" --metrics-port "$mport" || return 1
+  assert_eq "custom localproxy port" "$PROXY_PORT" "$lport"
+  assert_proxy_port_ours custom-ports
   check_proxy_http custom-ports
-  check_se_status custom-ports 4446
-  assert_contains "custom metrics port" "$(curl -s --max-time 15 http://127.0.0.1:8004/)" '"version"'
-  check_browser custom-ports 4446
+  check_se_status custom-ports "$seport"
+  assert_contains "custom metrics port" "$(curl -s --max-time 15 "http://127.0.0.1:$mport/")" '"version"'
+  check_browser custom-ports "$seport"
+}
+
+# Isolates --localproxy from the other port flags. A non-default local proxy port
+# has been seen to break the reverse leg (remote -> tunnel -> local proxy) while
+# the proxy still serves local requests fine.
+scenario_localproxy_only() {
+  local lport; lport="$(free_port)"
+  start_tunnel --localproxy "$lport" || return 1
+  assert_eq "localproxy port" "$PROXY_PORT" "$lport"
+  assert_proxy_port_ours localproxy-only
+  check_proxy_http localproxy-only
+  check_browser localproxy-only
 }
 
 scenario_tunnel_identifier() {
@@ -249,10 +318,11 @@ scenario_tunnel_identifier() {
 scenario_upstream_proxy() {
   # A real upstream proxy in front of the tunnel exercises CustomConnectHandler's
   # hand-rolled CONNECT path and TunnelProxyServlet's ProxyConfiguration wiring.
-  python3 "$HERE/upstream_proxy.py" 8891 > "$WORK/upstream.log" 2>&1 &
+  local uport; uport="$(free_port)"
+  python3 "$HERE/upstream_proxy.py" "$uport" > "$WORK/upstream.log" 2>&1 &
   local up=$!
   sleep 1
-  start_tunnel --proxy 127.0.0.1:8891 || { kill $up 2>/dev/null; return 1; }
+  start_tunnel --proxy "127.0.0.1:$uport" || { kill $up 2>/dev/null; return 1; }
   check_proxy_http upstream-proxy
   check_proxy_connect upstream-proxy
   assert_contains "upstream proxy saw traffic" "$(cat "$WORK/upstream.log")" "CONNECT"
@@ -267,7 +337,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor combined nobump nocache custom_ports tunnel_identifier upstream_proxy)
+ALL_SCENARIOS=(doctor combined nobump nocache custom_ports localproxy_only tunnel_identifier upstream_proxy)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor) echo 0;; *) echo 1;; esac; }

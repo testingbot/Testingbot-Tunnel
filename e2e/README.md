@@ -28,6 +28,25 @@ Credentials come from `TESTINGBOT_KEY`/`TESTINGBOT_SECRET` or `~/.testingbot`.
 | `E2E_KEEP_LOGS` | `0` | `1` keeps tunnel logs after the run |
 | `E2E_ORIGIN_PORT` | random free port | Pin the local origin server port |
 
+## Ports
+
+Every port the harness uses is allocated at run time by `free_port`, which checks
+both `127.0.0.1` and the wildcard address before accepting a candidate. That
+second check matters: on macOS a process bound to `127.0.0.1:PORT` coexists
+happily with a Jetty bound to `[::]:PORT`, so the tunnel starts without a
+`BindException` — but its reverse forward dials `127.0.0.1`, and traffic from the
+remote browser silently reaches the *other* process instead.
+
+That failure is deceptive, because local checks still pass if the squatter
+happens to be a working proxy. Each scenario therefore asserts
+`proxy-port-exclusive`: the tunnel process must be the only listener on its proxy
+port. If that assertion fails, look for the other listener rather than suspecting
+the tunnel:
+
+```bash
+lsof -nP -iTCP:<port> -sTCP:LISTEN
+```
+
 ## Account quotas
 
 TestingBot limits both concurrent tunnels and tunnel starts per hour, and asks
@@ -60,6 +79,7 @@ may hold tunnel slots on the same account.
 | `nobump` | 1 | `--nobump` + browser |
 | `nocache` | 1 | `--nocache` |
 | `custom_ports` | 1 | `--se-port`, `--localproxy`, `--metrics-port` + browser |
+| `localproxy_only` | 1 | `--localproxy` alone, to isolate it from the other port flags |
 | `tunnel_identifier` | 1 | `--tunnel-identifier` + browser using that identifier |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 
