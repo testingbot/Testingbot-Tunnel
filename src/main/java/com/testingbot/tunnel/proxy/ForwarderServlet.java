@@ -4,9 +4,9 @@ import com.testingbot.tunnel.App;
 import java.util.Arrays;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
-import org.eclipse.jetty.client.api.Response;
-import org.eclipse.jetty.proxy.AsyncProxyServlet;
-import org.eclipse.jetty.client.api.Request;
+import org.eclipse.jetty.client.Response;
+import org.eclipse.jetty.ee10.proxy.AsyncProxyServlet;
+import org.eclipse.jetty.client.Request;
 import java.util.Enumeration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -27,16 +27,18 @@ public class ForwarderServlet extends AsyncProxyServlet {
     protected void addProxyHeaders(HttpServletRequest clientRequest, Request proxyRequest) {
         super.addProxyHeaders(clientRequest, proxyRequest);
 
-        proxyRequest.header("TB-Tunnel", this.app.getServerIP());
-        proxyRequest.header("TB-Tunnel-Version", App.VERSION.toString());
-        proxyRequest.header("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
-        if (this.app.isBypassingSquid()) {
-            proxyRequest.header("TB-Tunnel-Port", "2010");
-        }
+        proxyRequest.headers(fields -> {
+            fields.put("TB-Tunnel", this.app.getServerIP());
+            fields.put("TB-Tunnel-Version", App.VERSION.toString());
+            fields.put("TB-Credentials", this.app.getClientKey() + "_" + this.app.getClientSecret());
+            if (this.app.isBypassingSquid()) {
+                fields.put("TB-Tunnel-Port", "2010");
+            }
 
-        if (this.app.getPac() != null) {
-            proxyRequest.header("TB-Tunnel-Pac", this.app.getPac());
-        }
+            if (this.app.getPac() != null) {
+                fields.put("TB-Tunnel-Pac", this.app.getPac());
+            }
+        });
 
         Logger.getLogger(ForwarderServlet.class.getName()).log(Level.INFO, "[{0}] {1}", new Object[]{clientRequest.getMethod(), clientRequest.getRequestURL()});
 

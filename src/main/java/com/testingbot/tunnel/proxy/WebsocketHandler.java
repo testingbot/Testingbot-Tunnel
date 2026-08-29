@@ -1,131 +1,75 @@
 package com.testingbot.tunnel.proxy;
 
-import jakarta.servlet.AsyncContext;
-import jakarta.servlet.AsyncEvent;
-import jakarta.servlet.AsyncListener;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.SelectableChannel;
-import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
-import java.util.Collections;
-import java.util.HashSet;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
-import java.util.concurrent.Executor;
-import org.eclipse.jetty.io.ByteBufferPool;
-import org.eclipse.jetty.io.Connection;
+import org.eclipse.jetty.http.HttpField;
+import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.EndPoint;
-import org.eclipse.jetty.io.ManagedSelector;
-import org.eclipse.jetty.io.MappedByteBufferPool;
-import org.eclipse.jetty.io.SelectorManager;
-import org.eclipse.jetty.io.SocketChannelEndPoint;
-import org.eclipse.jetty.proxy.ProxyConnection;
 import org.eclipse.jetty.server.Handler;
-import org.eclipse.jetty.server.HttpChannel;
-import org.eclipse.jetty.server.HttpTransport;
+import org.eclipse.jetty.server.HttpStream;
 import org.eclipse.jetty.server.Request;
-import org.eclipse.jetty.server.handler.HandlerWrapper;
+import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.handler.ConnectHandler;
 import org.eclipse.jetty.util.Callback;
-import org.eclipse.jetty.util.HostPort;
 import org.eclipse.jetty.util.Promise;
-import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler;
-import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class WebsocketHandler extends HandlerWrapper {
+/**
+ * Relays WebSocket connections through the tunnel.
+ *
+ * <p>A WebSocket upgrade is, once the handshake is done, just a bidirectional byte tunnel --
+ * exactly what {@link ConnectHandler} already provides for CONNECT. So rather than reimplementing
+ * the selector, buffer pool and tunnel connections, this handler reuses ConnectHandler's machinery
+ * and only customises the two things that genuinely differ from CONNECT:
+ *
+ * <ul>
+ *   <li>the upgrade handshake must be replayed against the target before relaying starts
+ *       ({@link #connectToServer}), and</li>
+ *   <li>the client is answered with {@code 101 Switching Protocols} plus the target's handshake
+ *       headers instead of {@code 200 OK} ({@link #onConnectSuccess}).</li>
+ * </ul>
+ */
+public class WebsocketHandler extends ConnectHandler {
     protected static final Logger LOG = LoggerFactory.getLogger(WebsocketHandler.class);
-    private final Set<String> whiteList;
-    private final Set<String> blackList;
-    private Executor executor;
-    private Scheduler scheduler;
-    private ByteBufferPool bufferPool;
-    private SelectorManager selector;
-    private long connectTimeout;
-    private long idleTimeout;
-    private int bufferSize;
+
+    // Carries the target's handshake response headers from connectToServer() to onConnectSuccess().
+    private static final String WS_RESPONSE_HEADERS_ATTRIBUTE =
+            WebsocketHandler.class.getName() + ".wsResponseHeaders";
 
     public WebsocketHandler() {
-        this((Handler)null);
+        super();
     }
 
     public WebsocketHandler(Handler handler) {
-        this.whiteList = new HashSet();
-        this.blackList = new HashSet();
-        this.connectTimeout = 15000L;
-        this.idleTimeout = 30000L;
-        this.bufferSize = 4096;
-        this.setHandler(handler);
+        super(handler);
     }
 
-    public Executor getExecutor() {
-        return this.executor;
-    }
-
-    public void setExecutor(Executor executor) {
-        this.executor = executor;
-    }
-
-    public Scheduler getScheduler() {
-        return this.scheduler;
-    }
-
-    public void setScheduler(Scheduler scheduler) {
-        this.updateBean(this.scheduler, scheduler);
-        this.scheduler = scheduler;
-    }
-
-    public ByteBufferPool getByteBufferPool() {
-        return this.bufferPool;
-    }
-
-    public void setByteBufferPool(ByteBufferPool bufferPool) {
-        this.updateBean(this.bufferPool, bufferPool);
-        this.bufferPool = bufferPool;
-    }
-
-    public long getConnectTimeout() {
-        return this.connectTimeout;
-    }
-
-    public void setConnectTimeout(long connectTimeout) {
-        this.connectTimeout = connectTimeout;
-    }
-
-    public long getIdleTimeout() {
-        return this.idleTimeout;
-    }
-
-    public void setIdleTimeout(long idleTimeout) {
-        this.idleTimeout = idleTimeout;
-    }
-
-    static String buildUpgradeRequest(HttpServletRequest clientRequest) {
+    static String buildUpgradeRequest(Request clientRequest) {
         StringBuilder requestHeaders = new StringBuilder();
-        requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getRequestURI());
-        if (clientRequest.getQueryString() != null) {
-            requestHeaders.append("?").append(clientRequest.getQueryString());
+        requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getHttpURI().getPath());
+        if (clientRequest.getHttpURI().getQuery() != null) {
+            requestHeaders.append("?").append(clientRequest.getHttpURI().getQuery());
         }
-        requestHeaders.append(" ").append(clientRequest.getProtocol()).append("\r\n");
-        for (String headerName : Collections.list(clientRequest.getHeaderNames())) {
-            requestHeaders.append(headerName).append(": ").append(clientRequest.getHeader(headerName)).append("\r\n");
+        requestHeaders.append(" ").append(clientRequest.getConnectionMetaData().getHttpVersion().asString()).append("\r\n");
+        for (HttpField field : clientRequest.getHeaders()) {
+            requestHeaders.append(field.getName()).append(": ").append(field.getValue()).append("\r\n");
         }
         requestHeaders.append("\r\n");
         return requestHeaders.toString();
     }
 
-    private Map<String, String> performWebSocketHandshake(HttpServletRequest clientRequest, SocketChannel channel) throws IOException {
+    private Map<String, String> performWebSocketHandshake(Request clientRequest, SocketChannel channel) throws IOException {
         // Send WebSocket upgrade request to target
-        ByteBuffer writeBuffer = ByteBuffer.wrap(buildUpgradeRequest(clientRequest).getBytes("UTF-8"));
+        ByteBuffer writeBuffer = ByteBuffer.wrap(buildUpgradeRequest(clientRequest).getBytes(StandardCharsets.UTF_8));
         while (writeBuffer.hasRemaining()) {
             channel.write(writeBuffer);
         }
@@ -133,14 +77,14 @@ public class WebsocketHandler extends HandlerWrapper {
         // Read target's WebSocket handshake response (blocking)
         ByteBuffer readBuffer = ByteBuffer.allocate(4096);
         StringBuilder responseSB = new StringBuilder();
-        while (!responseSB.toString().contains("\r\n\r\n")) {
+        while (responseSB.indexOf("\r\n\r\n") < 0) {
             readBuffer.clear();
             int n = channel.read(readBuffer);
             if (n < 0) throw new IOException("Connection closed before WebSocket handshake completed");
             readBuffer.flip();
             byte[] bytes = new byte[readBuffer.remaining()];
             readBuffer.get(bytes);
-            responseSB.append(new String(bytes, "UTF-8"));
+            responseSB.append(new String(bytes, StandardCharsets.UTF_8));
         }
 
         String fullResponse = responseSB.toString();
@@ -160,117 +104,100 @@ public class WebsocketHandler extends HandlerWrapper {
         return wsResponseHeaders;
     }
 
-    public int getBufferSize() {
-        return this.bufferSize;
-    }
-
-    public void setBufferSize(int bufferSize) {
-        this.bufferSize = bufferSize;
-    }
-
-    protected void doStart() throws Exception {
-        if (this.executor == null) {
-            this.executor = this.getServer().getThreadPool();
-        }
-
-        if (this.scheduler == null) {
-            this.scheduler = (Scheduler)this.getServer().getBean(Scheduler.class);
-            if (this.scheduler == null) {
-                this.scheduler = new ScheduledExecutorScheduler(String.format("Proxy-Scheduler-%x", this.hashCode()), false);
+    @Override
+    public boolean handle(Request request, Response response, Callback callback) throws Exception {
+        String upgrade = request.getHeaders().get(HttpHeader.UPGRADE);
+        if (upgrade != null && "websocket".equalsIgnoreCase(upgrade.trim())) {
+            if (request.getTunnelSupport() == null) {
+                LOG.info("WS tunnelling not supported for {}", request);
+                Response.writeError(request, response, callback, HttpStatus.FORBIDDEN_403);
+                return true;
             }
-
-            this.addBean(this.scheduler);
+            handleConnect(request, response, callback, request.getHttpURI().getAuthority());
+            return true;
         }
 
-        if (this.bufferPool == null) {
-            this.bufferPool = new MappedByteBufferPool();
-            this.addBean(this.bufferPool);
-        }
-
-        this.addBean(this.selector = this.newSelectorManager());
-        this.selector.setConnectTimeout(this.getConnectTimeout());
-        super.doStart();
+        // Delegate straight to the wrapped handler rather than to super.handle(): this class
+        // extends ConnectHandler purely to reuse its tunnelling machinery, and ConnectHandler's
+        // own handle() would swallow CONNECT requests here -- they belong to the
+        // CustomConnectHandler further down the chain, which adds fast-fail and upstream-proxy
+        // support. This mirrors Handler.Wrapper.handle().
+        Handler next = getHandler();
+        return next != null && next.handle(request, response, callback);
     }
 
-    protected SelectorManager newSelectorManager() {
-        return new ConnectManager(this.getExecutor(), this.getScheduler(), 1);
+    /**
+     * Connects to the target and completes the WebSocket handshake before handing the channel
+     * back to ConnectHandler for relaying. The connect and handshake are blocking, so they run
+     * on the executor rather than on the caller's thread.
+     */
+    @Override
+    protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
+        getExecutor().execute(() -> {
+            SocketChannel channel = null;
+            try {
+                // Connect to the target using blocking I/O for the handshake
+                channel = SocketChannel.open();
+                channel.socket().setTcpNoDelay(true);
+                channel.socket().setSoTimeout((int) getConnectTimeout());
+                channel.connect(new InetSocketAddress(host, port));
+
+                Map<String, String> wsResponseHeaders = performWebSocketHandshake(request, channel);
+
+                // Switch to non-blocking for the async relay
+                channel.configureBlocking(false);
+                request.setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
+
+                promise.succeeded(channel);
+            } catch (Throwable x) {
+                close(channel);
+                LOG.warn("WebSocket connect/handshake failed", x);
+                promise.failed(x);
+            }
+        });
     }
 
-    public void handle(String target, Request jettyRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        String serverAddress = jettyRequest.getHttpURI().getAuthority();
+    /**
+     * Mirrors {@link ConnectHandler}'s tunnel wiring, but answers the client with
+     * {@code 101 Switching Protocols} and the target's handshake headers.
+     */
+    @Override
+    protected void onConnectSuccess(ConnectContext connectContext, UpstreamConnection upstreamConnection) {
+        ConcurrentMap<String, Object> context = connectContext.getContext();
+        Request request = connectContext.getRequest();
+        prepareContext(request, context);
 
-        if (request.getHeader("Upgrade") != null && request.getHeader("Upgrade").equalsIgnoreCase("websocket")) {
-            this.handleConnect(jettyRequest, request, response, serverAddress);
-        } else {
-            super.handle(target, jettyRequest, request, response);
-        }
-    }
+        EndPoint downstreamEndPoint = connectContext.getEndPoint();
+        DownstreamConnection downstreamConnection = newDownstreamConnection(downstreamEndPoint, context);
+        downstreamConnection.setInputBufferSize(getBufferSize());
 
-    protected void handleConnect(Request baseRequest, final HttpServletRequest request, final HttpServletResponse response, String serverAddress) {
-        baseRequest.setHandled(true);
+        upstreamConnection.setConnection(downstreamConnection);
+        downstreamConnection.setConnection(upstreamConnection);
+        LOG.info("Connection setup completed: {}<->{}", downstreamConnection, upstreamConnection);
 
+        Response response = connectContext.getResponse();
+        Callback callback = connectContext.getCallback();
         try {
-            HostPort hostPort = new HostPort(serverAddress);
-            final String host = hostPort.getHost();
-            final int port = hostPort.getPort(80);
-
-            final HttpChannel httpChannel = baseRequest.getHttpChannel();
-            if (!httpChannel.isTunnellingSupported()) {
-                LOG.info("WS not supported for {}", httpChannel);
-                this.sendConnectResponse(request, response, 403);
-                return;
-            }
-
-            final AsyncContext asyncContext = request.startAsync();
-            asyncContext.setTimeout(0L);
-            LOG.info("Connecting to {}:{}", host, port);
-
-            this.getExecutor().execute(() -> {
-                SocketChannel channel = null;
-                try {
-                    // Connect to target using blocking I/O for the handshake
-                    channel = SocketChannel.open();
-                    channel.socket().setTcpNoDelay(true);
-                    channel.socket().setSoTimeout((int) getConnectTimeout());
-                    channel.connect(new InetSocketAddress(host, port));
-
-                    // Perform the WebSocket handshake with the target synchronously
-                    Map<String, String> wsResponseHeaders = performWebSocketHandshake(request, channel);
-
-                    // Switch to non-blocking for the async relay
-                    channel.configureBlocking(false);
-
-                    ConnectContext connectContext = new ConnectContext(request, response, asyncContext, httpChannel.getTunnellingEndPoint());
-                    connectContext.getContext().put("wsResponseHeaders", wsResponseHeaders);
-
-                    WebsocketHandler.this.selector.accept(channel, connectContext);
-                } catch (Exception e) {
-                    WebsocketHandler.this.close(channel);
-                    LOG.warn("WebSocket connect/handshake failed", e);
-                    WebsocketHandler.this.onConnectFailure(request, response, asyncContext, e);
+            @SuppressWarnings("unchecked")
+            Map<String, String> wsResponseHeaders =
+                    (Map<String, String>) request.getAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE);
+            if (wsResponseHeaders != null) {
+                for (Map.Entry<String, String> entry : wsResponseHeaders.entrySet()) {
+                    response.getHeaders().put(entry.getKey(), entry.getValue());
                 }
-            });
-        } catch (Exception x) {
-            this.onConnectFailure(request, response, (AsyncContext)null, x);
-        }
+            }
+            response.setStatus(HttpStatus.SWITCHING_PROTOCOLS_101);
 
-    }
+            // Hand the tunnel to Jetty so it swaps the connection once the 101 is flushed.
+            // Must be set before completing the callback.
+            request.setAttribute(HttpStream.UPGRADE_CONNECTION_ATTRIBUTE, downstreamConnection);
+            LOG.info("Upgraded connection to {}", downstreamConnection);
 
-    protected void connectToServer(HttpServletRequest request, String host, int port, Promise<SocketChannel> promise) {
-        SocketChannel channel = null;
-
-        try {
-            channel = SocketChannel.open();
-            channel.socket().setTcpNoDelay(true);
-            channel.configureBlocking(false);
-            InetSocketAddress address = this.newConnectAddress(host, port);
-            channel.connect(address);
-            promise.succeeded(channel);
+            callback.succeeded();
         } catch (Throwable x) {
-            this.close(channel);
-            promise.failed(x);
+            LOG.warn("Could not send WebSocket upgrade response", x);
+            callback.failed(x);
         }
-
     }
 
     private void close(Closeable closeable) {
@@ -280,263 +207,6 @@ public class WebsocketHandler extends HandlerWrapper {
             }
         } catch (Throwable x) {
             LOG.trace("IGNORED", x);
-        }
-
-    }
-
-    protected InetSocketAddress newConnectAddress(String host, int port) {
-        return new InetSocketAddress(host, port);
-    }
-
-    @SuppressWarnings("unchecked")
-    protected void onConnectSuccess(ConnectContext connectContext,WebsocketHandler.UpstreamConnection upstreamConnection) {
-        ConcurrentMap<String, Object> context = connectContext.getContext();
-        HttpServletRequest request = connectContext.getRequest();
-        this.prepareContext(request, context);
-        EndPoint downstreamEndPoint = connectContext.getEndPoint();
-        DownstreamConnection downstreamConnection = this.newDownstreamConnection(downstreamEndPoint, context);
-        downstreamConnection.setInputBufferSize(this.getBufferSize());
-        upstreamConnection.setConnection(downstreamConnection);
-        downstreamConnection.setConnection(upstreamConnection);
-        LOG.info("Connection setup completed: {}<->{}", downstreamConnection, upstreamConnection);
-
-        HttpServletResponse response = connectContext.getResponse();
-
-        // Set the WebSocket response headers from the target's handshake response
-        Map<String, String> wsResponseHeaders = (Map<String, String>) context.get("wsResponseHeaders");
-        if (wsResponseHeaders != null) {
-            for (Map.Entry<String, String> entry : wsResponseHeaders.entrySet()) {
-                response.setHeader(entry.getKey(), entry.getValue());
-            }
-        }
-
-        this.sendConnectResponse(request, response, 101);
-        this.upgradeConnection(request, response, downstreamConnection);
-        connectContext.getAsyncContext().complete();
-    }
-
-    protected void onConnectFailure(HttpServletRequest request, HttpServletResponse response, AsyncContext asyncContext, Throwable failure) {
-            LOG.info("CONNECT failed", failure);
-
-        this.sendConnectResponse(request, response, 500);
-        if (asyncContext != null) {
-            asyncContext.complete();
-        }
-
-    }
-
-    private void sendConnectResponse(HttpServletRequest request, HttpServletResponse response, int statusCode) {
-        try {
-            response.setStatus(statusCode);
-                LOG.info("CONNECT response sent {} {}", request.getProtocol(), statusCode);
-        } catch (Throwable x) {
-                LOG.info("Could not send CONNECT response", x);
-        }
-
-    }
-
-    protected boolean handleAuthentication(HttpServletRequest request, HttpServletResponse response, String address) {
-        return true;
-    }
-
-    protected DownstreamConnection newDownstreamConnection(EndPoint endPoint, ConcurrentMap<String, Object> context) {
-        return new DownstreamConnection(endPoint, this.getExecutor(), this.getByteBufferPool(), context);
-    }
-
-    protected UpstreamConnection newUpstreamConnection(EndPoint endPoint, ConnectContext connectContext) {
-        return new UpstreamConnection(endPoint, this.getExecutor(), this.getByteBufferPool(), connectContext);
-    }
-
-    protected void prepareContext(HttpServletRequest request, ConcurrentMap<String, Object> context) {
-    }
-
-    private void upgradeConnection(HttpServletRequest request, HttpServletResponse response, Connection connection) {
-        request.setAttribute(HttpTransport.UPGRADE_CONNECTION_ATTRIBUTE, connection);
-            LOG.info("Upgraded connection to {}", connection);
-
-    }
-
-    protected int read(EndPoint endPoint, ByteBuffer buffer, ConcurrentMap<String, Object> context) throws IOException {
-        int read = endPoint.fill(buffer);
-            LOG.info("{} read {} bytes", this, read);
-
-        return read;
-    }
-
-    protected void write(EndPoint endPoint, ByteBuffer buffer, Callback callback, ConcurrentMap<String, Object> context) {
-            LOG.info("{} writing {} bytes", this, buffer.remaining());
-
-        endPoint.write(callback, new ByteBuffer[]{buffer});
-    }
-
-    public Set<String> getWhiteListHosts() {
-        return this.whiteList;
-    }
-
-    public Set<String> getBlackListHosts() {
-        return this.blackList;
-    }
-
-    public boolean validateDestination(String host, int port) {
-        String hostPort = host + ":" + port;
-        if (!this.whiteList.isEmpty() && !this.whiteList.contains(hostPort)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Host {}:{} not whitelisted", host, port);
-            }
-
-            return false;
-        } else if (!this.blackList.isEmpty() && this.blackList.contains(hostPort)) {
-            if (LOG.isDebugEnabled()) {
-                LOG.debug("Host {}:{} blacklisted", host, port);
-            }
-
-            return false;
-        } else {
-            return true;
-        }
-    }
-
-    protected class ConnectManager extends SelectorManager {
-        protected ConnectManager(Executor executor, Scheduler scheduler, int selectors) {
-            super(executor, scheduler, selectors);
-        }
-
-        protected EndPoint newEndPoint(SelectableChannel channel, ManagedSelector selector, SelectionKey key) {
-            SocketChannelEndPoint endPoint = new SocketChannelEndPoint((SocketChannel)channel, selector, key, this.getScheduler());
-            endPoint.setIdleTimeout(WebsocketHandler.this.getIdleTimeout());
-            return endPoint;
-        }
-
-        public Connection newConnection(SelectableChannel channel, EndPoint endpoint, Object attachment) throws IOException {
-                WebsocketHandler.LOG.info("Connected to {}", ((SocketChannel)channel).getRemoteAddress());
-
-            WebsocketHandler.ConnectContext connectContext = (WebsocketHandler.ConnectContext)attachment;
-            WebsocketHandler.UpstreamConnection connection = WebsocketHandler.this.newUpstreamConnection(endpoint, connectContext);
-            connection.setInputBufferSize(WebsocketHandler.this.getBufferSize());
-            return connection;
-        }
-
-        protected void connectionFailed(SelectableChannel channel, Throwable ex, Object attachment) {
-            WebsocketHandler.this.close(channel);
-            WebsocketHandler.ConnectContext connectContext = (WebsocketHandler.ConnectContext)attachment;
-            WebsocketHandler.this.onConnectFailure(connectContext.request, connectContext.response, connectContext.asyncContext, ex);
-        }
-    }
-
-    protected static class ConnectContext {
-        private final ConcurrentMap<String, Object> context = new ConcurrentHashMap();
-        private final HttpServletRequest request;
-        private final HttpServletResponse response;
-        private final AsyncContext asyncContext;
-        private final EndPoint endPoint;
-
-        public ConnectContext(HttpServletRequest request, HttpServletResponse response, AsyncContext asyncContext, EndPoint endPoint) {
-            this.request = request;
-            this.response = response;
-            this.asyncContext = asyncContext;
-            this.endPoint = endPoint;
-        }
-
-        public ConcurrentMap<String, Object> getContext() {
-            return this.context;
-        }
-
-        public HttpServletRequest getRequest() {
-            return this.request;
-        }
-
-        public HttpServletResponse getResponse() {
-            return this.response;
-        }
-
-        public AsyncContext getAsyncContext() {
-            return this.asyncContext;
-        }
-
-        public EndPoint getEndPoint() {
-            return this.endPoint;
-        }
-    }
-
-    public class UpstreamConnection extends ProxyConnection implements AsyncListener {
-        private final WebsocketHandler.ConnectContext connectContext;
-
-        public UpstreamConnection(EndPoint endPoint, Executor executor, ByteBufferPool bufferPool, WebsocketHandler.ConnectContext connectContext) {
-            super(endPoint, executor, bufferPool, connectContext.getContext());
-            this.connectContext = connectContext;
-        }
-
-        public void onOpen() {
-            super.onOpen();
-            this.connectContext.asyncContext.addListener(this);
-            WebsocketHandler.this.onConnectSuccess(this.connectContext, this);
-        }
-
-        protected int read(EndPoint endPoint, ByteBuffer buffer) throws IOException {
-            return WebsocketHandler.this.read(endPoint, buffer, this.getContext());
-        }
-
-        protected void write(EndPoint endPoint, ByteBuffer buffer, Callback callback) {
-            WebsocketHandler.this.write(endPoint, buffer, callback, this.getContext());
-        }
-
-        public void onComplete(AsyncEvent event) {
-            this.fillInterested();
-        }
-
-        public void onTimeout(AsyncEvent event) {
-        }
-
-        public void onError(AsyncEvent event) {
-            this.close(event.getThrowable());
-        }
-
-        public void onStartAsync(AsyncEvent event) {
-        }
-    }
-
-    public class DownstreamConnection extends ProxyConnection implements Connection.UpgradeTo {
-        private ByteBuffer buffer;
-
-        public DownstreamConnection(EndPoint endPoint, Executor executor, ByteBufferPool bufferPool, ConcurrentMap<String, Object> context) {
-            super(endPoint, executor, bufferPool, context);
-        }
-
-        public void onUpgradeTo(ByteBuffer buffer) {
-            this.buffer = buffer;
-        }
-
-        public void onOpen() {
-            super.onOpen();
-            if (this.buffer == null) {
-                this.fillInterested();
-            } else {
-                final int remaining = this.buffer.remaining();
-                this.write(this.getConnection().getEndPoint(), this.buffer, new Callback() {
-                    public void succeeded() {
-                        WebsocketHandler.DownstreamConnection.this.buffer = null;
-                            ProxyConnection.LOG.info("{} wrote initial {} bytes to server", WebsocketHandler.DownstreamConnection.this, remaining);
-
-                        WebsocketHandler.DownstreamConnection.this.fillInterested();
-                    }
-
-                    public void failed(Throwable x) {
-                        WebsocketHandler.DownstreamConnection.this.buffer = null;
-                            ProxyConnection.LOG.info("{} failed to write initial {} bytes to server", new Object[]{this, remaining, x});
-
-                        WebsocketHandler.DownstreamConnection.this.close();
-                        WebsocketHandler.DownstreamConnection.this.getConnection().close();
-                    }
-                });
-            }
-        }
-
-        protected int read(EndPoint endPoint, ByteBuffer buffer) throws IOException {
-            return WebsocketHandler.this.read(endPoint, buffer, this.getContext());
-        }
-
-        protected void write(EndPoint endPoint, ByteBuffer buffer, Callback callback) {
-            WebsocketHandler.this.write(endPoint, buffer, callback, this.getContext());
         }
     }
 }

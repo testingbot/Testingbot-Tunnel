@@ -1,7 +1,10 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
-import jakarta.servlet.http.HttpServletRequest;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.server.ConnectionMetaData;
+import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.util.Promise;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,7 +18,6 @@ import java.lang.reflect.Method;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.channels.SocketChannel;
-import java.util.Collections;
 import java.util.Enumeration;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -119,18 +121,22 @@ class ConnectFramingTest {
         return new CustomConnectHandler(app);
     }
 
-    private HttpServletRequest mockConnectRequest() {
-        HttpServletRequest req = mock(HttpServletRequest.class);
-        when(req.getMethod()).thenReturn("CONNECT");
-        when(req.getProtocol()).thenReturn("HTTP/1.1");
+    private Request mockConnectRequest() {
         // Include a hop-by-hop header to confirm it gets stripped, and a regular one to confirm it's forwarded.
-        when(req.getHeaderNames()).thenReturn(Collections.enumeration(java.util.Arrays.asList(
-            "Connection", "Proxy-Connection", "User-Agent", "X-Custom"
-        )));
-        when(req.getHeader("Connection")).thenReturn("keep-alive");
-        when(req.getHeader("Proxy-Connection")).thenReturn("keep-alive");
-        when(req.getHeader("User-Agent")).thenReturn("test-agent/1.0");
-        when(req.getHeader("X-Custom")).thenReturn("value-1");
+        HttpFields headers = HttpFields.build()
+            .put("Connection", "keep-alive")
+            .put("Proxy-Connection", "keep-alive")
+            .put("User-Agent", "test-agent/1.0")
+            .put("X-Custom", "value-1")
+            .asImmutable();
+
+        ConnectionMetaData connectionMetaData = mock(ConnectionMetaData.class);
+        when(connectionMetaData.getHttpVersion()).thenReturn(HttpVersion.HTTP_1_1);
+
+        Request req = mock(Request.class);
+        when(req.getMethod()).thenReturn("CONNECT");
+        when(req.getConnectionMetaData()).thenReturn(connectionMetaData);
+        when(req.getHeaders()).thenReturn(headers);
         return req;
     }
 
@@ -152,10 +158,10 @@ class ConnectFramingTest {
         }
     }
 
-    private CapturingPromise invokeConnectToProxy(CustomConnectHandler handler, HttpServletRequest req,
+    private CapturingPromise invokeConnectToProxy(CustomConnectHandler handler, Request req,
                                                   String host, int port) throws Exception {
         Method m = CustomConnectHandler.class.getDeclaredMethod(
-            "connectToProxy", HttpServletRequest.class, String.class, int.class, Promise.class);
+            "connectToProxy", Request.class, String.class, int.class, Promise.class);
         m.setAccessible(true);
         CapturingPromise promise = new CapturingPromise();
         m.invoke(handler, req, host, port, promise);
@@ -166,7 +172,7 @@ class ConnectFramingTest {
     void successfulConnect_writesCRLFFraming_andStripsHopByHopHeaders() throws Exception {
         runFakeProxy("HTTP/1.1 200 Connection Established");
         CustomConnectHandler handler = buildHandler();
-        HttpServletRequest req = mockConnectRequest();
+        Request req = mockConnectRequest();
 
         CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
 
@@ -209,7 +215,7 @@ class ConnectFramingTest {
         // reason. But the more interesting case: status line that *contains* "200" elsewhere.
         runFakeProxy("HTTP/1.1 407 Proxy Authentication Required");
         CustomConnectHandler handler = buildHandler();
-        HttpServletRequest req = mockConnectRequest();
+        Request req = mockConnectRequest();
 
         CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
 
@@ -224,7 +230,7 @@ class ConnectFramingTest {
         // Old check `responseStr.contains("200")` would falsely accept this. New parser must reject.
         runFakeProxy("HTTP/1.1 502 Bad Gateway 200-style header bug");
         CustomConnectHandler handler = buildHandler();
-        HttpServletRequest req = mockConnectRequest();
+        Request req = mockConnectRequest();
 
         CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
 
@@ -241,7 +247,7 @@ class ConnectFramingTest {
         // Here we simply verify that within 20s the promise completes with a timeout failure.
         runSilentFakeProxy();
         CustomConnectHandler handler = buildHandler();
-        HttpServletRequest req = mockConnectRequest();
+        Request req = mockConnectRequest();
 
         long start = System.currentTimeMillis();
         CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);

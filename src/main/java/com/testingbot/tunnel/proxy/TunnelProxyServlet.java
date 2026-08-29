@@ -14,15 +14,15 @@ import java.util.Set;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
 import org.eclipse.jetty.client.ProxyConfiguration;
-import org.eclipse.jetty.client.api.Authentication;
-import org.eclipse.jetty.client.api.AuthenticationStore;
-import org.eclipse.jetty.client.api.Request;
-import org.eclipse.jetty.client.api.Response;
-import org.eclipse.jetty.client.api.Result;
-import org.eclipse.jetty.client.util.BasicAuthentication;
+import org.eclipse.jetty.client.Authentication;
+import org.eclipse.jetty.client.AuthenticationStore;
+import org.eclipse.jetty.client.Request;
+import org.eclipse.jetty.client.Response;
+import org.eclipse.jetty.client.Result;
+import org.eclipse.jetty.client.BasicAuthentication;
 import org.eclipse.jetty.client.ProxyAuthenticationProtocolHandler;
 import org.eclipse.jetty.http.HttpHeader;
-import org.eclipse.jetty.proxy.AsyncProxyServlet;
+import org.eclipse.jetty.ee10.proxy.AsyncProxyServlet;
 import org.eclipse.jetty.util.Callback;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -224,20 +224,20 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
     protected void addProxyHeaders(HttpServletRequest clientRequest, Request proxyRequest) {
         super.addProxyHeaders(clientRequest, proxyRequest);
 
-        if (proxyAuthHeaderValue != null) {
-            proxyRequest.header(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
-        }
-
-        Object extraHeadersAttr = getServletContext().getAttribute("extra_headers");
-        if (extraHeadersAttr instanceof Map) {
-            @SuppressWarnings("unchecked")
-            Map<String, String> headers = (Map<String, String>) extraHeadersAttr;
-            for (Map.Entry<String, String> entry : headers.entrySet()) {
-                String key = entry.getKey();
-                String value = entry.getValue();
-                proxyRequest.header(key, value);
+        proxyRequest.headers(fields -> {
+            if (proxyAuthHeaderValue != null) {
+                fields.put(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
             }
-        }
+
+            Object extraHeadersAttr = getServletContext().getAttribute("extra_headers");
+            if (extraHeadersAttr instanceof Map) {
+                @SuppressWarnings("unchecked")
+                Map<String, String> headers = (Map<String, String>) extraHeadersAttr;
+                for (Map.Entry<String, String> entry : headers.entrySet()) {
+                    fields.put(entry.getKey(), entry.getValue());
+                }
+            }
+        });
     }
 
     @Override
@@ -253,7 +253,8 @@ public class TunnelProxyServlet extends AsyncProxyServlet {
             } else {
                 ProxyConfiguration proxyConfig = client.getProxyConfiguration();
                 HttpProxy httpProxy = new HttpProxy(splitted[0], Integer.parseInt(splitted[1]));
-                proxyConfig.getProxies().add(httpProxy);
+                // Jetty 12.1 returns an immutable list from getProxies(); addProxy() is the mutator.
+                proxyConfig.addProxy(httpProxy);
 
                 String proxyAuth = getServletConfig().getInitParameter("proxyAuth");
                 if (proxyAuth != null && !proxyAuth.isEmpty()) {

@@ -7,7 +7,8 @@
   <packaging>jar</packaging>
 
   <properties>
-    <maven.compiler.release>11</maven.compiler.release>
+    <maven.compiler.release>17</maven.compiler.release>
+    <jetty.version>12.1.12</jetty.version>
   </properties>
 
   <licenses>
@@ -320,8 +321,8 @@
             <configuration>
               <rules>
                 <requireJavaVersion>
-                  <version>[11,)</version>
-                  <message>TestingBot Tunnel requires Java 11 or higher to build.</message>
+                  <version>[17,)</version>
+                  <message>TestingBot Tunnel requires Java 17 or higher to build.</message>
                 </requireJavaVersion>
                 <requireMavenVersion>
                   <version>[3.6.0,)</version>
@@ -352,6 +353,20 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+      <dependency>
+        <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-bom</artifactId>
+        <version>${jetty.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
+      <dependency>
+        <groupId>org.eclipse.jetty.ee10</groupId>
+        <artifactId>jetty-ee10-bom</artifactId>
+        <version>${jetty.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
     </dependencies>
   </dependencyManagement>
   <dependencies>
@@ -379,32 +394,29 @@
       <version>3.27.7</version>
       <scope>test</scope>
     </dependency>
+    <!-- The default "wiremock" artifact embeds Jetty 11 and fails to start once the Jetty BOM
+         above aligns every Jetty artifact on 12.x. wiremock-jetty12 is the Jetty 12 variant. -->
     <dependency>
       <groupId>org.wiremock</groupId>
-      <artifactId>wiremock</artifactId>
+      <artifactId>wiremock-jetty12</artifactId>
       <version>3.13.2</version>
       <scope>test</scope>
     </dependency>
+    <!-- Jetty 12 core. ConnectHandler (used for CONNECT tunnelling and the WebSocket
+         relay) lives here in jetty-server; the core jetty-proxy artifact only carries
+         the Handler-based ProxyHandler, which we do not use. -->
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
-      <version>11.0.26</version>
+    </dependency>
+    <!-- Servlet support is environment-scoped in Jetty 12; ee10 == jakarta.servlet 6.0. -->
+    <dependency>
+      <groupId>org.eclipse.jetty.ee10</groupId>
+      <artifactId>jetty-ee10-servlet</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-servlet</artifactId>
-      <version>11.0.26</version>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-proxy</artifactId>
-      <version>11.0.26</version>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-servlets</artifactId>
-      <version>11.0.26</version>
-      <type>jar</type>
+      <groupId>org.eclipse.jetty.ee10</groupId>
+      <artifactId>jetty-ee10-proxy</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.httpcomponents.client5</groupId>

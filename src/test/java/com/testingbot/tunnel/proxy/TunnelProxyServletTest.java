@@ -3,12 +3,17 @@ package com.testingbot.tunnel.proxy;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import jakarta.servlet.ServletConfig;
+import jakarta.servlet.ServletContext;
 import java.util.Collections;
+import java.util.concurrent.Executors;
 import java.util.List;
 import java.util.regex.Pattern;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class TunnelProxyServletTest {
 
@@ -22,7 +27,7 @@ class TunnelProxyServletTest {
     @Test
     void constructor_shouldCreateServlet() {
         assertThat(servlet).isNotNull();
-        assertThat(servlet).isInstanceOf(org.eclipse.jetty.proxy.AsyncProxyServlet.class);
+        assertThat(servlet).isInstanceOf(org.eclipse.jetty.ee10.proxy.AsyncProxyServlet.class);
     }
 
     @Test
@@ -32,11 +37,25 @@ class TunnelProxyServletTest {
 
         // Then
         assertThat(newServlet).isNotNull();
-        assertThat(newServlet).isInstanceOf(org.eclipse.jetty.proxy.AsyncProxyServlet.class);
+        assertThat(newServlet).isInstanceOf(org.eclipse.jetty.ee10.proxy.AsyncProxyServlet.class);
     }
 
     @Test
-    void destroy_shouldCleanupResources() {
+    void destroy_shouldCleanupResources() throws Exception {
+        // destroy() must follow init(): Jetty's AbstractProxyServlet only sets up the logger and
+        // HttpClient it tears down in init(), so destroying an uninitialised servlet is not a
+        // lifecycle the container ever produces.
+        ServletContext ctx = mock(ServletContext.class);
+        // AbstractProxyServlet.createHttpClient() takes its executor from this context attribute
+        // unless a "maxThreads" init parameter is set.
+        when(ctx.getAttribute("org.eclipse.jetty.server.Executor"))
+            .thenReturn(Executors.newSingleThreadExecutor());
+
+        ServletConfig cfg = mock(ServletConfig.class);
+        when(cfg.getServletName()).thenReturn("tunnelProxy");
+        when(cfg.getServletContext()).thenReturn(ctx);
+        servlet.init(cfg);
+
         assertThatCode(() -> servlet.destroy())
             .doesNotThrowAnyException();
     }

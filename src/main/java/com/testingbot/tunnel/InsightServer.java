@@ -2,9 +2,9 @@ package com.testingbot.tunnel;
 
 import io.prometheus.client.servlet.jakarta.exporter.MetricsServlet;
 import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.servlet.FilterHolder;
-import org.eclipse.jetty.servlet.ServletContextHandler;
-import org.eclipse.jetty.servlet.ServletHolder;
+import org.eclipse.jetty.ee10.servlet.FilterHolder;
+import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
 
 import jakarta.servlet.Filter;
 import jakarta.servlet.FilterChain;
@@ -30,7 +30,6 @@ public class InsightServer {
 
         Server server = new Server(app.getMetricsPort());
 
-        // Using ServletContextHandler for Jetty 11
         ServletContextHandler handler = new ServletContextHandler(ServletContextHandler.SESSIONS);
         server.setHandler(handler);
 

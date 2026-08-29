@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
 # -------- Build stage --------
-FROM maven:3.9-eclipse-temurin-11 AS build
+FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /build
 
 # Cache dependencies first
@@ -18,7 +18,7 @@ RUN mvn -B -ntp -DskipTests \
     && mv target/TestingBotTunnel-*-shaded.jar target/testingbot-tunnel.jar
 
 # -------- Runtime stage --------
-FROM eclipse-temurin:11-jre-jammy
+FROM eclipse-temurin:17-jre-jammy
 LABEL author="TestingBot <info@testingbot.com>"
 
 # tini for proper PID-1 signal handling

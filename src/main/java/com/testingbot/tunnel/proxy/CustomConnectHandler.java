@@ -4,12 +4,14 @@ import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.Statistics;
 import com.testingbot.tunnel.TunnelMetrics;
 import io.prometheus.client.Histogram;
-import jakarta.servlet.ServletException;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
+import org.eclipse.jetty.http.HttpField;
+import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpMethod;
-import org.eclipse.jetty.proxy.ConnectHandler;
+import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.server.Request;
+import org.eclipse.jetty.server.Response;
+import org.eclipse.jetty.server.handler.ConnectHandler;
+import org.eclipse.jetty.util.Callback;
 import org.eclipse.jetty.util.Promise;
 
 import java.io.IOException;
@@ -22,7 +24,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Collections;
-import java.util.Enumeration;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -34,9 +35,12 @@ import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
 
 /**
- * Custom ConnectHandler for Jetty 11 that handles proxy connections.
+ * Custom ConnectHandler that handles proxy connections.
  */
 public class CustomConnectHandler extends ConnectHandler {
+    // Jetty 12's ConnectHandler no longer exposes a protected LOG to subclasses.
+    private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(CustomConnectHandler.class);
+
     // Hop-by-hop headers that must not be forwarded per RFC 7230 §6.1
     private static final Set<String> HOP_BY_HOP_HEADERS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -122,68 +126,67 @@ public class CustomConnectHandler extends ConnectHandler {
     }
 
     @Override
-    public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws ServletException, IOException {
-        String method = request.getMethod();
+    public boolean handle(Request request, Response response, Callback callback) throws Exception {
         Statistics.addRequest();
 
         boolean isConnect = HttpMethod.CONNECT.is(request.getMethod());
-        Histogram.Timer connectTimer = isConnect ? TunnelMetrics.HTTPS_CONNECT_DURATION_SECONDS.startTimer() : null;
-        try {
-            if (isConnect) {
-                // For CONNECT, the authority ("host:port") lives on the parsed HttpURI;
-                // HttpServletRequest.getRequestURI() only returns the path component.
-                String authority = baseRequest.getHttpURI().getAuthority();
-                if (authority == null || authority.isEmpty()) {
-                    authority = request.getHeader("Host");
-                }
-                if (hostBlocked(authority, blackList)) {
-                    Logger.getLogger(CustomConnectHandler.class.getName())
-                        .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
-                    TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("blacklisted").inc();
-                    TunnelMetrics.HTTPS_CONNECT_TOTAL.labels("403").inc();
-                    response.sendError(HttpServletResponse.SC_FORBIDDEN, "Blocked by fast-fail policy");
-                    baseRequest.setHandled(true);
-                    return;
-                }
-                Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO,
-                        "[CONNECT] {0} -> {1}",
-                        new Object[]{request.getRemoteAddr(), authority != null ? authority : "<unknown>"});
+        if (isConnect) {
+            // For CONNECT, the authority ("host:port") lives on the parsed HttpURI;
+            // the path component alone would not carry it.
+            String authority = request.getHttpURI().getAuthority();
+            if (authority == null || authority.isEmpty()) {
+                authority = request.getHeaders().get(HttpHeader.HOST);
             }
-
-            if (debugMode) {
-                Enumeration<String> headerNames = request.getHeaderNames();
-                if (headerNames != null) {
-                    StringBuilder sb = new StringBuilder();
-                    String header;
-
-                    while (headerNames.hasMoreElements()) {
-                        header = headerNames.nextElement();
-                        sb.append(header).append(": ")
-                                .append(SensitiveHeaders.redactValue(header, request.getHeader(header)))
-                                .append(System.lineSeparator());
-                    }
-                    Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
-                }
+            if (hostBlocked(authority, blackList)) {
+                Logger.getLogger(CustomConnectHandler.class.getName())
+                    .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0} (matched blacklist)", authority);
+                TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("blacklisted").inc();
+                TunnelMetrics.HTTPS_CONNECT_TOTAL.labels("403").inc();
+                Response.writeError(request, response, callback, HttpStatus.FORBIDDEN_403,
+                        "Blocked by fast-fail policy");
+                return true;
             }
-
-            super.handle(target, baseRequest, request, response);
-
-            if (isConnect) {
-                int status = response.getStatus();
-                TunnelMetrics.HTTPS_CONNECT_TOTAL.labels(Integer.toString(status)).inc();
-                if (status >= 400) {
-                    TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("status_" + status).inc();
-                }
-            }
-        } finally {
-            if (connectTimer != null) {
-                connectTimer.observeDuration();
-            }
+            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO,
+                    "[CONNECT] {0} -> {1}",
+                    new Object[]{Request.getRemoteAddr(request), authority != null ? authority : "<unknown>"});
         }
+
+        if (debugMode) {
+            StringBuilder sb = new StringBuilder();
+            for (HttpField field : request.getHeaders()) {
+                sb.append(field.getName()).append(": ")
+                        .append(SensitiveHeaders.redactValue(field.getName(), field.getValue()))
+                        .append(System.lineSeparator());
+            }
+            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
+        }
+
+        if (!isConnect) {
+            return super.handle(request, response, callback);
+        }
+
+        // CONNECT is handled asynchronously in Jetty 12: super.handle() can return before the
+        // tunnel is established, so record timing and status when the callback completes rather
+        // than immediately after the call.
+        Histogram.Timer connectTimer = TunnelMetrics.HTTPS_CONNECT_DURATION_SECONDS.startTimer();
+        Callback observed = Callback.from(callback, () -> {
+            connectTimer.observeDuration();
+            int status = response.getStatus();
+            TunnelMetrics.HTTPS_CONNECT_TOTAL.labels(Integer.toString(status)).inc();
+            if (status >= 400) {
+                TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("status_" + status).inc();
+            }
+        });
+
+        boolean handled = super.handle(request, response, observed);
+        if (!handled) {
+            connectTimer.observeDuration();
+        }
+        return handled;
     }
 
     @Override
-    protected void connectToServer(HttpServletRequest request, String host, int port, Promise<SocketChannel> promise) {
+    protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         if (proxyHost == null) {
             super.connectToServer(request, host, port, promise);
         } else {
@@ -191,7 +194,7 @@ public class CustomConnectHandler extends ConnectHandler {
         }
     }
 
-    private void connectToProxy(HttpServletRequest request, String host, int port, Promise<SocketChannel> promise) {
+    private void connectToProxy(Request request, String host, int port, Promise<SocketChannel> promise) {
         SocketChannel channel = null;
         Selector selector = null;
         try {
@@ -231,16 +234,15 @@ public class CustomConnectHandler extends ConnectHandler {
 
                         final StringBuilder connect = new StringBuilder();
                         connect.append("CONNECT ").append(host).append(':').append(port)
-                                .append(' ').append(request.getProtocol()).append("\r\n");
+                                .append(' ').append(request.getConnectionMetaData().getHttpVersion().asString()).append("\r\n");
                         connect.append("Host: ").append(host).append(':').append(port).append("\r\n");
 
-                        final Enumeration<String> headerNames = request.getHeaderNames();
-                        while (headerNames.hasMoreElements()) {
-                            final String headerName = headerNames.nextElement();
+                        for (HttpField field : request.getHeaders()) {
+                            final String headerName = field.getName();
                             if (HOP_BY_HOP_HEADERS.contains(headerName.toLowerCase(Locale.ROOT))) {
                                 continue;
                             }
-                            final String headerValue = request.getHeader(headerName);
+                            final String headerValue = field.getValue();
                             if (headerValue == null) continue;
                             // Drop any value containing CR/LF defensively (header smuggling)
                             if (headerValue.indexOf('\r') >= 0 || headerValue.indexOf('\n') >= 0) {

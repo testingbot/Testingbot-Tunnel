@@ -4,9 +4,9 @@ import jakarta.servlet.ServletConfig;
 import jakarta.servlet.ServletContext;
 
 import org.eclipse.jetty.client.HttpClient;
-import org.eclipse.jetty.client.api.Authentication;
-import org.eclipse.jetty.client.api.AuthenticationStore;
-import org.eclipse.jetty.client.util.BasicAuthentication;
+import org.eclipse.jetty.client.Authentication;
+import org.eclipse.jetty.client.AuthenticationStore;
+import org.eclipse.jetty.client.BasicAuthentication;
 import org.junit.jupiter.api.Test;
 
 import java.lang.reflect.Field;

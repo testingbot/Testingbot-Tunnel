@@ -1,7 +1,10 @@
 package com.testingbot.tunnel.proxy;
 
-import jakarta.servlet.http.HttpServletRequest;
-import java.util.Collections;
+import org.eclipse.jetty.http.HttpFields;
+import org.eclipse.jetty.http.HttpURI;
+import org.eclipse.jetty.http.HttpVersion;
+import org.eclipse.jetty.server.ConnectionMetaData;
+import org.eclipse.jetty.server.Request;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -10,19 +13,30 @@ import static org.mockito.Mockito.when;
 
 class WebsocketHandlerTest {
 
-    private HttpServletRequest mockRequest(String method, String uri, String queryString, String protocol) {
-        HttpServletRequest request = mock(HttpServletRequest.class);
+    private Request mockRequest(String method, String uri, String queryString, HttpFields headers) {
+        HttpURI.Mutable httpURI = HttpURI.build().path(uri);
+        if (queryString != null) {
+            httpURI.query(queryString);
+        }
+
+        ConnectionMetaData connectionMetaData = mock(ConnectionMetaData.class);
+        when(connectionMetaData.getHttpVersion()).thenReturn(HttpVersion.HTTP_1_1);
+
+        Request request = mock(Request.class);
         when(request.getMethod()).thenReturn(method);
-        when(request.getRequestURI()).thenReturn(uri);
-        when(request.getQueryString()).thenReturn(queryString);
-        when(request.getProtocol()).thenReturn(protocol);
-        when(request.getHeaderNames()).thenReturn(Collections.emptyEnumeration());
+        when(request.getHttpURI()).thenReturn(httpURI.asImmutable());
+        when(request.getConnectionMetaData()).thenReturn(connectionMetaData);
+        when(request.getHeaders()).thenReturn(headers);
         return request;
+    }
+
+    private Request mockRequest(String method, String uri, String queryString) {
+        return mockRequest(method, uri, queryString, HttpFields.EMPTY);
     }
 
     @Test
     void buildUpgradeRequest_appendsQueryStringWhenPresent() {
-        HttpServletRequest request = mockRequest("GET", "/api/check", "token=abc&foo=bar", "HTTP/1.1");
+        Request request = mockRequest("GET", "/api/check", "token=abc&foo=bar");
 
         String upgradeRequest = WebsocketHandler.buildUpgradeRequest(request);
 
@@ -31,7 +45,7 @@ class WebsocketHandlerTest {
 
     @Test
     void buildUpgradeRequest_omitsQueryStringWhenNull() {
-        HttpServletRequest request = mockRequest("GET", "/ws", null, "HTTP/1.1");
+        Request request = mockRequest("GET", "/ws", null);
 
         String upgradeRequest = WebsocketHandler.buildUpgradeRequest(request);
 
@@ -41,9 +55,9 @@ class WebsocketHandlerTest {
 
     @Test
     void buildUpgradeRequest_doesNotAppendQuestionMarkForEmptyQueryString() {
-        // Servlet spec: getQueryString() returns null when there is no query, not "".
+        // HttpURI.getQuery() returns null when there is no query, not "".
         // But if a caller ever returns "", we should still not produce "/ws? HTTP/1.1".
-        HttpServletRequest request = mockRequest("GET", "/ws", "", "HTTP/1.1");
+        Request request = mockRequest("GET", "/ws", "");
 
         String upgradeRequest = WebsocketHandler.buildUpgradeRequest(request);
 
@@ -54,16 +68,12 @@ class WebsocketHandlerTest {
 
     @Test
     void buildUpgradeRequest_forwardsHeaders() {
-        HttpServletRequest request = mock(HttpServletRequest.class);
-        when(request.getMethod()).thenReturn("GET");
-        when(request.getRequestURI()).thenReturn("/ws");
-        when(request.getQueryString()).thenReturn(null);
-        when(request.getProtocol()).thenReturn("HTTP/1.1");
-        when(request.getHeaderNames()).thenReturn(
-                Collections.enumeration(java.util.Arrays.asList("Host", "Upgrade", "Connection")));
-        when(request.getHeader("Host")).thenReturn("example.com");
-        when(request.getHeader("Upgrade")).thenReturn("websocket");
-        when(request.getHeader("Connection")).thenReturn("Upgrade");
+        HttpFields headers = HttpFields.build()
+                .put("Host", "example.com")
+                .put("Upgrade", "websocket")
+                .put("Connection", "Upgrade")
+                .asImmutable();
+        Request request = mockRequest("GET", "/ws", null, headers);
 
         String upgradeRequest = WebsocketHandler.buildUpgradeRequest(request);
 
@@ -76,7 +86,7 @@ class WebsocketHandlerTest {
 
     @Test
     void buildUpgradeRequest_endsWithBlankLine() {
-        HttpServletRequest request = mockRequest("GET", "/ws", null, "HTTP/1.1");
+        Request request = mockRequest("GET", "/ws", null);
 
         String upgradeRequest = WebsocketHandler.buildUpgradeRequest(request);
 

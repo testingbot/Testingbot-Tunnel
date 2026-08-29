@@ -2,7 +2,6 @@ package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
 import com.testingbot.tunnel.proxy.TunnelProxyServlet;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
@@ -11,8 +10,6 @@ import java.util.logging.Level;
 import java.util.logging.Logger;
 
 import com.testingbot.tunnel.proxy.WebsocketHandler;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
 
 import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -24,17 +21,21 @@ import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.message.BasicNameValuePair;
 import org.apache.hc.core5.util.Timeout;
 
+import org.eclipse.jetty.http.HttpHeader;
+import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.Connection;
-import org.eclipse.jetty.proxy.ConnectHandler;
+import org.eclipse.jetty.io.Content;
+import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.HttpConnectionFactory;
 import org.eclipse.jetty.server.Request;
+import org.eclipse.jetty.server.Response;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.handler.AbstractHandler;
-import org.eclipse.jetty.server.handler.HandlerList;
-import org.eclipse.jetty.servlet.ServletHolder;
-import org.eclipse.jetty.servlet.ServletContextHandler;
+import org.eclipse.jetty.server.handler.ConnectHandler;
+import org.eclipse.jetty.util.Callback;
+import org.eclipse.jetty.ee10.servlet.ServletHolder;
+import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
 
 /**
  *
@@ -109,12 +110,13 @@ public final class HttpProxy {
 
         contextHandler.addServlet(proxyServlet, "/*");  // Proxy all HTTP requests
 
-        // Add the context handler to the server
-        HandlerList handlers = new HandlerList();
-        handlers.addHandler(websocketHandler);  // For handling WS requests
-        handlers.addHandler(connectHandler);  // For handling HTTPS requests (if needed)
-        handlers.addHandler(contextHandler);  // For handling HTTP requests through proxy servlet
-        httpProxy.setHandler(handlers);
+        // In Jetty 12 both WebsocketHandler and ConnectHandler are Handler.Wrappers: each
+        // inspects the request, takes it over if it owns it (WS upgrade / CONNECT), and
+        // otherwise delegates to the handler it wraps. So the chain is nested rather than
+        // a flat sequence, preserving the Jetty 11 order: WS -> CONNECT -> proxy servlet.
+        connectHandler.setHandler(contextHandler);
+        websocketHandler.setHandler(connectHandler);
+        httpProxy.setHandler(websocketHandler);
 
         start();
 
@@ -204,16 +206,13 @@ public final class HttpProxy {
         }
     }
 
-    private class TestHandler extends AbstractHandler {
+    private class TestHandler extends Handler.Abstract {
         @Override
-        public void handle(String target,
-                           Request baseRequest,
-                           HttpServletRequest request,
-                           HttpServletResponse response) throws IOException {
-            response.setStatus(HttpServletResponse.SC_OK);
-            response.setContentType("text/plain;charset=UTF-8");
-            baseRequest.setHandled(true);
-            response.getWriter().append("test=").append(String.valueOf(randomNumber));
+        public boolean handle(Request request, Response response, Callback callback) {
+            response.setStatus(HttpStatus.OK_200);
+            response.getHeaders().put(HttpHeader.CONTENT_TYPE, "text/plain;charset=UTF-8");
+            Content.Sink.write(response, true, "test=" + randomNumber, callback);
+            return true;
         }
     }
 
