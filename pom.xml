@@ -397,6 +397,11 @@
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-server</artifactId>
     </dependency>
+    <!-- Core, Handler-based proxy: ProxyHandler.Forward / .Reverse. -->
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-proxy</artifactId>
+    </dependency>
     <!-- Servlet support is environment-scoped in Jetty 12; ee10 == jakarta.servlet 6.0. -->
     <dependency>
       <groupId>org.eclipse.jetty.ee10</groupId>

@@ -12,10 +12,8 @@ import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.util.Timeout;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.ee10.servlet.ServletHolder;
 
-import com.testingbot.tunnel.proxy.ForwarderServlet;
-import org.eclipse.jetty.ee10.servlet.ServletContextHandler;
+import com.testingbot.tunnel.proxy.ForwarderHandler;
 
 /**
  *
@@ -36,22 +34,11 @@ public class HttpForwarder {
 
         httpProxy.addConnector(connector);
 
-        ServletHolder servletHolder = new ServletHolder(new ForwarderServlet(app));
-        servletHolder.setInitParameter("idleTimeout", "440000");
-        servletHolder.setInitParameter("timeout", "440000");
-        if (app.getProxy() != null) {
-            servletHolder.setInitParameter("proxy", app.getProxy());
-        }
-
-        if (app.getProxyAuth()!= null) {
-            servletHolder.setInitParameter("proxyAuth", app.getProxyAuth());
-        }
-
-        ServletContextHandler ctxHandler = new ServletContextHandler(ServletContextHandler.SESSIONS);
-        ctxHandler.setContextPath("/");
-        ctxHandler.addServlet(servletHolder, "/*");
-
-        httpProxy.setHandler(ctxHandler);
+        // Selenium traffic goes to the hub through the SSH tunnel, never through the
+        // upstream --proxy: the target is 127.0.0.1. The old servlet was handed "proxy"
+        // and "proxyAuth" init parameters that AbstractProxyServlet never read, so they
+        // had no effect; they are dropped rather than reimplemented.
+        httpProxy.setHandler(new ForwarderHandler(app));
 
         try {
             httpProxy.start();
