@@ -20,7 +20,21 @@ LAUNCHER="$DIST/bin/testingbot-tunnel"
 [ -x "$LAUNCHER" ] || { echo "launcher not found: $LAUNCHER"; exit 1; }
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/tb-runtime.XXXXXX")"
-trap 'rm -rf "$WORK"; [ -n "${PID:-}" ] && kill "$PID" 2>/dev/null' EXIT
+PID=""
+
+# A tunnel left running holds a slot against the account's concurrent-tunnel limit
+# and will block the next run, so tear it down on every exit path -- including the
+# early `exit 1`s above and Ctrl-C -- and escalate to SIGKILL if it ignores SIGTERM.
+stop_tunnel() {
+  [ -z "${PID:-}" ] && return 0
+  kill -TERM "$PID" 2>/dev/null
+  for _ in $(seq 1 45); do kill -0 "$PID" 2>/dev/null || break; sleep 1; done
+  kill -0 "$PID" 2>/dev/null && kill -9 "$PID" 2>/dev/null
+  wait "$PID" 2>/dev/null
+  PID=""
+}
+cleanup() { stop_tunnel; rm -rf "$WORK"; }
+trap cleanup EXIT INT TERM
 
 PASS=0; FAIL=0
 ok()  { PASS=$((PASS+1)); printf '  \033[32m✓\033[0m %s\n' "$1"; }
@@ -45,7 +59,11 @@ if [ -z "${TESTINGBOT_KEY:-}" ] && [ ! -f "$HOME/.testingbot" ]; then
   echo "  - live tunnel checks skipped (no credentials)"
 else
   MPORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
-  run_isolated "$LAUNCHER" --readyfile "$WORK/ready" --metrics-port "$MPORT" > "$WORK/tunnel.log" 2>&1 &
+  # Launch directly rather than through run_isolated: backgrounding a shell function
+  # makes $! the wrapping subshell, and killing that orphans the JVM underneath it --
+  # which then keeps holding a tunnel slot on the account.
+  env -i HOME="$HOME" PATH=/usr/bin:/bin \
+      "$LAUNCHER" --readyfile "$WORK/ready" --metrics-port "$MPORT" > "$WORK/tunnel.log" 2>&1 &
   PID=$!
   for _ in $(seq 1 120); do [ -f "$WORK/ready" ] && break; kill -0 $PID 2>/dev/null || break; sleep 1; done
 
@@ -75,10 +93,7 @@ else
       *) ok "logback config parsed";;
     esac
 
-    kill -TERM $PID 2>/dev/null
-    for _ in $(seq 1 45); do kill -0 $PID 2>/dev/null || break; sleep 1; done
-    kill -0 $PID 2>/dev/null && kill -9 $PID 2>/dev/null
-    PID=""
+    stop_tunnel
     ok "clean shutdown"
   fi
 fi
