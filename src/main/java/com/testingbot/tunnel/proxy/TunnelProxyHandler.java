@@ -369,7 +369,13 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         public void onContent(org.eclipse.jetty.client.Response serverToProxyResponse,
                               Content.Chunk serverToProxyChunk,
                               Runnable serverToProxyDemander) {
-            responseBytes(clientToProxyRequest).addAndGet(serverToProxyChunk.remaining());
+            int chunk = serverToProxyChunk.remaining();
+            responseBytes(clientToProxyRequest).addAndGet(chunk);
+            // Counts plain-HTTP response bytes only, which is what the metric name and the
+            // "HTTP Response Throughput" dashboard panel mean. Tunnelled traffic is counted
+            // at the connector instead (testingbot_connection_bytes_*), because CONNECT and
+            // WebSocket bodies are opaque here.
+            TunnelMetrics.PROXY_BYTES_TRANSFERRED_TOTAL.inc(chunk);
             super.onContent(serverToProxyResponse, serverToProxyChunk, serverToProxyDemander);
         }
     }

@@ -10,6 +10,7 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.HttpStatus;
 import org.apache.hc.core5.util.Timeout;
+import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 
@@ -29,6 +30,12 @@ public class HttpForwarder {
         ServerConnector connector = new ServerConnector(httpProxy);
         connector.setPort(app.getSeleniumPort());
         connector.setIdleTimeout(440000);
+
+        // Own statistics for this listener: a wedged Selenium relay and ordinary proxy load
+        // look identical without separating them.
+        ConnectionStatistics seleniumStats = new ConnectionStatistics();
+        connector.addBean(seleniumStats);
+        TunnelMetrics.connectionMetrics().add(ConnectionMetrics.SELENIUM, seleniumStats);
 
         httpProxy.setStopAtShutdown(true);
 

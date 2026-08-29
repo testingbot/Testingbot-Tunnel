@@ -13,15 +13,43 @@ public final class TunnelMetrics {
     private static ConnectionMetrics connectionMetrics;
 
     /**
-     * Registers connector-level connection statistics. Idempotent: the local proxy can be
-     * restarted within one process, and Prometheus rejects duplicate registrations.
+     * The process-wide connection metrics collector, created and registered on first use.
+     *
+     * <p>Shared rather than per-listener because Prometheus rejects duplicate registrations
+     * of the same metric family, and the listeners come up at different times: the proxy and
+     * Selenium forwarder when the tunnel starts, the metrics endpoint independently.
      */
-    public static synchronized void registerConnectionMetrics(ConnectionMetrics metrics) {
-        if (connectionMetrics != null) {
-            io.prometheus.client.CollectorRegistry.defaultRegistry.unregister(connectionMetrics);
+    /**
+     * Wraps a dial promise so the attempt is timed and counted whichever way it resolves.
+     *
+     * @param path which dial path this is: "proxy", "connect" or "websocket"
+     */
+    public static <T> org.eclipse.jetty.util.Promise<T> timedDial(
+            String path, org.eclipse.jetty.util.Promise<T> delegate) {
+        Histogram.Timer timer = DIAL_DURATION_SECONDS.labels(path).startTimer();
+        return new org.eclipse.jetty.util.Promise<T>() {
+            @Override
+            public void succeeded(T result) {
+                timer.observeDuration();
+                DIAL_TOTAL.labels(path, "success").inc();
+                delegate.succeeded(result);
+            }
+
+            @Override
+            public void failed(Throwable x) {
+                timer.observeDuration();
+                DIAL_TOTAL.labels(path, "failure").inc();
+                delegate.failed(x);
+            }
+        };
+    }
+
+    public static synchronized ConnectionMetrics connectionMetrics() {
+        if (connectionMetrics == null) {
+            connectionMetrics = new ConnectionMetrics();
+            connectionMetrics.register();
         }
-        connectionMetrics = metrics;
-        metrics.register();
+        return connectionMetrics;
     }
 
     public static final Counter HTTP_REQUESTS_TOTAL = Counter.build()
@@ -124,6 +152,26 @@ public final class TunnelMetrics {
             .name("testingbot_proxy_errors_total")
             .help("Proxy failures by classified reason, matching the X-TestingBot-Error header.")
             .labelNames("reason")
+            .register();
+
+    /**
+     * Outbound connection attempts, by the path that made them ("proxy", "connect",
+     * "websocket") and outcome ("success"/"failure").
+     *
+     * <p>We counted what arrived and nothing about what we dialled, so connection exhaustion
+     * and a target that has started refusing were both invisible from the metrics alone.
+     */
+    public static final Counter DIAL_TOTAL = Counter.build()
+            .name("testingbot_dial_total")
+            .help("Outbound connection attempts by path and outcome.")
+            .labelNames("path", "outcome")
+            .register();
+
+    /** How long establishing an outbound connection took, by path. */
+    public static final Histogram DIAL_DURATION_SECONDS = Histogram.build()
+            .name("testingbot_dial_duration_seconds")
+            .help("Time to establish an outbound connection, by path.")
+            .labelNames("path")
             .register();
 
     public static final Counter ERRORS_TOTAL = Counter.build()

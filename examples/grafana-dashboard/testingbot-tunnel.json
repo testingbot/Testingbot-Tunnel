@@ -3,7 +3,10 @@
     "list": [
       {
         "builtIn": 1,
-        "datasource": {"type": "grafana", "uid": "-- Grafana --"},
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
         "enable": true,
         "hide": true,
         "iconColor": "rgba(0, 211, 255, 1)",
@@ -21,37 +24,85 @@
   "panels": [
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 0},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
       "id": 100,
       "panels": [],
       "title": "Overview",
       "type": "row"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
           "mappings": [
-            {"options": {"0": {"text": "DOWN", "color": "red"}, "1": {"text": "UP", "color": "green"}}, "type": "value"}
+            {
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              },
+              "type": "value"
+            }
           ],
-          "thresholds": {"mode": "absolute", "steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]},
-          "color": {"mode": "thresholds"}
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          },
+          "color": {
+            "mode": "thresholds"
+          }
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 0,
+        "y": 1
+      },
       "id": 1,
       "options": {
         "colorMode": "background",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value"
       },
       "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "$datasource"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
           "expr": "max(testingbot_tunnel_up{job=~\"$job\", instance=~\"$instance\"})",
           "refId": "A"
         }
@@ -60,27 +111,54 @@
       "type": "stat"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]}
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
         }
       },
-      "gridPos": {"h": 4, "w": 8, "x": 4, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 4,
+        "y": 1
+      },
       "id": 2,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "auto",
         "orientation": "auto",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "value_and_name"
       },
       "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "$datasource"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
           "expr": "testingbot_tunnel_info{job=~\"$job\", instance=~\"$instance\"}",
           "legendFormat": "v{{version}} id={{tunnel_id}} name={{identifier}}",
           "refId": "A"
@@ -90,28 +168,55 @@
       "type": "stat"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]},
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
       "id": 3,
       "options": {
         "colorMode": "value",
         "graphMode": "area",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "$datasource"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
           "expr": "sum(testingbot_active_connections{job=~\"$job\", instance=~\"$instance\"})",
           "refId": "A"
         }
@@ -120,28 +225,55 @@
       "type": "stat"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "blue", "value": null}]},
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          },
           "unit": "s"
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 16, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
       "id": 4,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "$datasource"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
           "expr": "max(testingbot_tunnel_uptime_seconds{job=~\"$job\", instance=~\"$instance\"})",
           "refId": "A"
         }
@@ -150,28 +282,63 @@
       "type": "stat"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "thresholds"},
-          "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}, {"color": "red", "value": 5}]},
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 1
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 4, "w": 4, "x": 20, "y": 1},
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 20,
+        "y": 1
+      },
       "id": 5,
       "options": {
         "colorMode": "value",
         "graphMode": "none",
         "justifyMode": "center",
         "orientation": "auto",
-        "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false},
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
         "textMode": "auto"
       },
       "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {"type": "prometheus", "uid": "$datasource"},
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
           "expr": "sum(testingbot_tunnel_reconnects_total{job=~\"$job\", instance=~\"$instance\"})",
           "refId": "A"
         }
@@ -181,261 +348,1289 @@
     },
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 5},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
       "id": 101,
       "panels": [],
       "title": "HTTP",
       "type": "row"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"axisCenteredZero": false, "axisColorMode": "text", "axisLabel": "", "axisPlacement": "auto", "barAlignment": 0, "drawStyle": "line", "fillOpacity": 10, "gradientMode": "none", "hideFrom": {"legend": false, "tooltip": false, "viz": false}, "lineInterpolation": "linear", "lineWidth": 1, "pointSize": 5, "scaleDistribution": {"type": "linear"}, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}, "thresholdsStyle": {"mode": "off"}},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
           "unit": "reqps"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 6},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 6
+      },
       "id": 10,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"2..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "2xx", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"3..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "3xx", "refId": "B"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"4..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "4xx", "refId": "C"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"5..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "5xx", "refId": "D"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"2..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "2xx",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"3..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "3xx",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"4..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "4xx",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_http_requests_total{method!=\"CONNECT\", code=~\"5..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "5xx",
+          "refId": "D"
+        }
       ],
       "title": "HTTP Request Rate (non-CONNECT)",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
           "unit": "reqps"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 6},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 6
+      },
       "id": 11,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_https_connect_total{code=~\"2..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "2xx", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_https_connect_total{code=~\"4..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "4xx", "refId": "B"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_https_connect_total{code=~\"5..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "5xx", "refId": "C"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_https_connect_total{code=~\"2..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "2xx",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_https_connect_total{code=~\"4..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "4xx",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_https_connect_total{code=~\"5..\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "5xx",
+          "refId": "C"
+        }
       ],
       "title": "HTTPS CONNECT Rate",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 0, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never", "spanNulls": false},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
           "unit": "s"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 14},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
       "id": 12,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.5, sum by (le) (rate(testingbot_http_request_duration_seconds_bucket{method!=\"CONNECT\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p50", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(testingbot_http_request_duration_seconds_bucket{method!=\"CONNECT\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p95", "refId": "B"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(testingbot_http_request_duration_seconds_bucket{method!=\"CONNECT\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p99", "refId": "C"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(testingbot_http_request_duration_seconds_bucket{method!=\"CONNECT\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(testingbot_http_request_duration_seconds_bucket{method!=\"CONNECT\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(testingbot_http_request_duration_seconds_bucket{method!=\"CONNECT\", job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
       ],
       "title": "HTTP Latency (non-CONNECT)",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 0, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never", "spanNulls": false},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
           "unit": "s"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 14},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
       "id": 14,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.5, sum by (le) (rate(testingbot_https_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p50", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(testingbot_https_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p95", "refId": "B"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(testingbot_https_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p99", "refId": "C"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(testingbot_https_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(testingbot_https_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(testingbot_https_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
       ],
       "title": "HTTPS CONNECT Latency",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 0, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never", "spanNulls": false},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false
+          },
           "unit": "binBps"
         },
         "description": "HTTP response bytes only. HTTPS CONNECT traffic flows through a raw socket relay and is not counted here."
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 14},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
       "id": 13,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(rate(testingbot_proxy_bytes_transferred_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))", "legendFormat": "response bytes/s", "refId": "A"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(rate(testingbot_proxy_bytes_transferred_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "response bytes/s",
+          "refId": "A"
+        }
       ],
       "title": "HTTP Response Throughput",
       "type": "timeseries"
     },
     {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 22},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 22
+      },
       "id": 102,
       "panels": [],
       "title": "Tunnel",
       "type": "row"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 20, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never"},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 23},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 23
+      },
       "id": 20,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum(testingbot_active_connections{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "active", "refId": "A"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum(testingbot_active_connections{job=~\"$job\", instance=~\"$instance\"})",
+          "legendFormat": "active",
+          "refId": "A"
+        }
       ],
       "title": "Active Connections",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 0, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never"},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 0,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "unit": "s"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 23},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 23
+      },
       "id": 21,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.5, sum by (le) (rate(testingbot_tunnel_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p50", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.95, sum by (le) (rate(testingbot_tunnel_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p95", "refId": "B"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "histogram_quantile(0.99, sum by (le) (rate(testingbot_tunnel_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))", "legendFormat": "p99", "refId": "C"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(testingbot_tunnel_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(testingbot_tunnel_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(testingbot_tunnel_connect_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "p99",
+          "refId": "C"
+        }
       ],
       "title": "SSH Connect Latency",
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 31
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "testingbot_connections_current{job=~\"$job\", instance=~\"$instance\"}",
+          "legendFormat": "{{listener}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Connections by listener",
+      "type": "timeseries",
+      "description": "Open connections per listener. Separating the Selenium relay from the proxy is what makes \"is the relay wedged?\" answerable."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 31
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (path, outcome) (rate(testingbot_dial_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{path}} {{outcome}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbound dial rate by path",
+      "type": "timeseries",
+      "description": "Outbound connection attempts. Connection exhaustion and a target that has started refusing are both invisible without this."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "s"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 39
+      },
+      "id": 24,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, path) (rate(testingbot_dial_duration_seconds_bucket{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])))",
+          "legendFormat": "{{path}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Outbound dial latency (p95)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "Bps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 39
+      },
+      "id": 25,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (listener) (rate(testingbot_connection_bytes_received_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "rx {{listener}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (listener) (rate(testingbot_connection_bytes_sent_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "tx {{listener}}",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Tunnel throughput by listener",
+      "type": "timeseries",
+      "description": "Counted at the connector, so unlike HTTP Response Throughput this includes tunnelled CONNECT and WebSocket bytes."
+    },
+    {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 31},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 47
+      },
       "id": 103,
       "panels": [],
       "title": "Errors",
       "type": "row"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 30, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 32},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 48
+      },
       "id": 30,
-      "options": {"legend": {"calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum by (name) (rate(testingbot_errors_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "{{name}}", "refId": "A"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum by (name) (rate(testingbot_errors_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "{{name}}",
+          "refId": "A"
+        }
       ],
       "title": "Errors Rate by name",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 30, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never", "spanNulls": false, "stacking": {"group": "A", "mode": "normal"}},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 30,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            }
+          },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 32},
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 48
+      },
       "id": 31,
-      "options": {"legend": {"calcs": ["sum"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "sum"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum by (reason) (rate(testingbot_https_connect_errors_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)", "legendFormat": "{{reason}}", "refId": "A"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum by (reason) (rate(testingbot_https_connect_errors_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])) or on() vector(0)",
+          "legendFormat": "{{reason}}",
+          "refId": "A"
+        }
       ],
       "title": "HTTPS CONNECT Errors by reason",
       "type": "timeseries"
     },
     {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "normal"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "unit": "reqps"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 56
+      },
+      "id": 32,
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "editorMode": "code",
+          "expr": "sum by (reason) (rate(testingbot_proxy_errors_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval]))",
+          "legendFormat": "{{reason}}",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Proxy Errors by reason",
+      "type": "timeseries",
+      "description": "Classified proxy failures. The reason label matches the X-TestingBot-Error header on the response, so a spike here and a header in a support ticket name the same thing."
+    },
+    {
       "collapsed": false,
-      "gridPos": {"h": 1, "w": 24, "x": 0, "y": 40},
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 64
+      },
       "id": 104,
       "panels": [],
       "title": "Resources (JVM)",
       "type": "row"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never"},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "unit": "bytes"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 41},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 65
+      },
       "id": 40,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "sum by (area) (jvm_memory_bytes_used{job=~\"$job\", instance=~\"$instance\"})", "legendFormat": "{{area}}", "refId": "A"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "sum by (area) (jvm_memory_bytes_used{job=~\"$job\", instance=~\"$instance\"})",
+          "legendFormat": "{{area}}",
+          "refId": "A"
+        }
       ],
       "title": "JVM Memory Used",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never"},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "unit": "percentunit"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 41},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 65
+      },
       "id": 41,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "single"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "rate(process_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])", "legendFormat": "cpu", "refId": "A"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "rate(process_cpu_seconds_total{job=~\"$job\", instance=~\"$instance\"}[$__rate_interval])",
+          "legendFormat": "cpu",
+          "refId": "A"
+        }
       ],
       "title": "Process CPU",
       "type": "timeseries"
     },
     {
-      "datasource": {"type": "prometheus", "uid": "$datasource"},
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$datasource"
+      },
       "fieldConfig": {
         "defaults": {
-          "color": {"mode": "palette-classic"},
-          "custom": {"drawStyle": "line", "fillOpacity": 10, "lineInterpolation": "linear", "lineWidth": 1, "showPoints": "never"},
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "showPoints": "never"
+          },
           "unit": "short"
         }
       },
-      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 41},
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 65
+      },
       "id": 42,
-      "options": {"legend": {"calcs": ["mean", "max"], "displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "options": {
+        "legend": {
+          "calcs": [
+            "mean",
+            "max"
+          ],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      },
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "jvm_threads_current{job=~\"$job\", instance=~\"$instance\"}", "legendFormat": "current", "refId": "A"},
-        {"datasource": {"type": "prometheus", "uid": "$datasource"}, "expr": "jvm_threads_daemon{job=~\"$job\", instance=~\"$instance\"}", "legendFormat": "daemon", "refId": "B"}
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "jvm_threads_current{job=~\"$job\", instance=~\"$instance\"}",
+          "legendFormat": "current",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$datasource"
+          },
+          "expr": "jvm_threads_daemon{job=~\"$job\", instance=~\"$instance\"}",
+          "legendFormat": "daemon",
+          "refId": "B"
+        }
       ],
       "title": "JVM Threads",
       "type": "timeseries"
@@ -443,11 +1638,18 @@
   ],
   "refresh": "10s",
   "schemaVersion": 39,
-  "tags": ["testingbot", "tunnel"],
+  "tags": [
+    "testingbot",
+    "tunnel"
+  ],
   "templating": {
     "list": [
       {
-        "current": {"selected": false, "text": "Prometheus", "value": "Prometheus"},
+        "current": {
+          "selected": false,
+          "text": "Prometheus",
+          "value": "Prometheus"
+        },
         "hide": 0,
         "includeAll": false,
         "label": "Datasource",
@@ -462,8 +1664,15 @@
         "type": "datasource"
       },
       {
-        "current": {"selected": false, "text": "All", "value": "$__all"},
-        "datasource": {"type": "prometheus", "uid": "$datasource"},
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
         "definition": "label_values(testingbot_tunnel_uptime_seconds, job)",
         "hide": 0,
         "includeAll": true,
@@ -471,7 +1680,10 @@
         "multi": false,
         "name": "job",
         "options": [],
-        "query": {"query": "label_values(testingbot_tunnel_uptime_seconds, job)", "refId": "PrometheusVariableQueryEditor-VariableQuery"},
+        "query": {
+          "query": "label_values(testingbot_tunnel_uptime_seconds, job)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
@@ -479,8 +1691,15 @@
         "type": "query"
       },
       {
-        "current": {"selected": false, "text": "All", "value": "$__all"},
-        "datasource": {"type": "prometheus", "uid": "$datasource"},
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "$datasource"
+        },
         "definition": "label_values(testingbot_tunnel_uptime_seconds{job=~\"$job\"}, instance)",
         "hide": 0,
         "includeAll": true,
@@ -488,7 +1707,10 @@
         "multi": true,
         "name": "instance",
         "options": [],
-        "query": {"query": "label_values(testingbot_tunnel_uptime_seconds{job=~\"$job\"}, instance)", "refId": "PrometheusVariableQueryEditor-VariableQuery"},
+        "query": {
+          "query": "label_values(testingbot_tunnel_uptime_seconds{job=~\"$job\"}, instance)",
+          "refId": "PrometheusVariableQueryEditor-VariableQuery"
+        },
         "refresh": 2,
         "regex": "",
         "skipUrlSync": false,
@@ -497,7 +1719,10 @@
       }
     ]
   },
-  "time": {"from": "now-30m", "to": "now"},
+  "time": {
+    "from": "now-30m",
+    "to": "now"
+  },
   "timepicker": {},
   "timezone": "",
   "title": "TestingBot Tunnel",

@@ -152,6 +152,8 @@ public class WebsocketHandler extends ConnectHandler {
      */
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
+        Promise<SocketChannel> timed =
+                com.testingbot.tunnel.TunnelMetrics.timedDial("websocket", promise);
         getExecutor().execute(() -> {
             SocketChannel channel = null;
             try {
@@ -167,11 +169,11 @@ public class WebsocketHandler extends ConnectHandler {
                 channel.configureBlocking(false);
                 request.setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
 
-                promise.succeeded(channel);
+                timed.succeeded(channel);
             } catch (Throwable x) {
                 close(channel);
                 LOG.warn("WebSocket connect/handshake failed", x);
-                promise.failed(x);
+                timed.failed(x);
             }
         });
     }

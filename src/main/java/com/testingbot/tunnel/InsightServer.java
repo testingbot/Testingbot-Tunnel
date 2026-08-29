@@ -11,6 +11,7 @@ import java.util.logging.Logger;
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpStatus;
 import org.eclipse.jetty.io.Content;
+import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.Request;
 import org.eclipse.jetty.server.Response;
@@ -33,6 +34,11 @@ public class InsightServer {
         TunnelMetrics.init();
 
         Server server = new Server(app.getMetricsPort());
+
+        // Cheap, and makes a runaway scraper visible rather than mysterious.
+        ConnectionStatistics metricsStats = new ConnectionStatistics();
+        server.addBean(metricsStats);
+        TunnelMetrics.connectionMetrics().add(ConnectionMetrics.METRICS, metricsStats);
 
         PathMappingsHandler routes = new PathMappingsHandler();
         routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/"), new JsonStatusHandler());

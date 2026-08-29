@@ -110,8 +110,8 @@ public final class HttpProxy {
                 TunnelMetrics.ACTIVE_CONNECTIONS.dec();
             }
         });
-        ConnectionMetrics connectionMetrics = new ConnectionMetrics(connectionStats);
-        TunnelMetrics.registerConnectionMetrics(connectionMetrics);
+        ConnectionMetrics connectionMetrics = TunnelMetrics.connectionMetrics();
+        connectionMetrics.add(ConnectionMetrics.PROXY, connectionStats);
         Statistics.setBytesTransferredSupplier(connectionMetrics::totalBytes);
 
         httpProxy.addConnector(proxyConnector);
