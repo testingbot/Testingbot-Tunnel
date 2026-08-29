@@ -244,6 +244,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                 LOG.log(Level.INFO, "Fast-fail: rejecting {0} (matched blacklist)", host);
                 TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
                 TunnelMetrics.ERRORS_TOTAL.labels("blacklisted").inc();
+                // Counted here because the request returns before `observed` below is built.
+                // Leaving it out made the JSON numberOfRequests disagree with
+                // HTTP_REQUESTS_TOTAL by exactly the fast-failed requests.
+                Statistics.addRequest();
                 ProxyErrors.write(request, response, callback, ProxyErrors.Reason.DENIED_BY_FAST_FAIL);
                 return true;
             }
@@ -355,8 +359,11 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     static String absoluteForm(String scheme, String host, int port, String pathQuery) {
         boolean defaultPort = HttpScheme.HTTPS.is(scheme) ? port == 443 : port == 80;
         StringBuilder sb = new StringBuilder(scheme).append("://");
-        // Bracket IPv6 literals, which the authority form requires.
-        sb.append(host != null && host.indexOf(':') >= 0 ? "[" + host + "]" : host);
+        // Bracket IPv6 literals, which the authority form requires -- unless HttpURI already
+        // did. Jetty's HttpURI.getHost() keeps the brackets, so bracketing unconditionally
+        // produced "[[::1]]" and an unparseable request target.
+        boolean ipv6 = host != null && host.indexOf(':') >= 0 && !host.startsWith("[");
+        sb.append(ipv6 ? "[" + host + "]" : host);
         if (!defaultPort) {
             sb.append(':').append(port);
         }
@@ -387,7 +394,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             if (hostHeader != null) {
                 fields.add("X-Forwarded-Host", hostHeader);
             }
-            String local = Request.getServerName(clientToProxyRequest);
+            // The proxy's own address. Request.getServerName() returns the *target* host
+            // parsed from the request line, which would make this header a copy of
+            // X-Forwarded-Host rather than the hop identity Jetty 11 sent.
+            String local = Request.getLocalAddr(clientToProxyRequest);
             if (local != null) {
                 fields.add("X-Forwarded-Server", local);
             }

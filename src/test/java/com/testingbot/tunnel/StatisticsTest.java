@@ -156,21 +156,20 @@ class StatisticsTest {
     }
 
     @Test
-    void bytesTransferred_survivesTheConnectorBeingReplaced() {
-        // Jetty's ConnectionStatistics belongs to the connector and resets with it, so on an
-        // SSH reconnect the reported total used to fall back to zero.
+    void bytesTransferred_accumulatesAcrossSuppliers() {
         Statistics.reset();
         long[] live = {500L};
         Statistics.setBytesTransferredSupplier(() -> live[0]);
         assertThat(Statistics.getBytesTransferred()).isEqualTo(500L);
 
-        Statistics.carryBytesTransferred();          // proxy stops
-        live[0] = 0L;                                // connector statistics go away
+        Statistics.carryBytesTransferred();
+        live[0] = 0L;
         assertThat(Statistics.getBytesTransferred()).isEqualTo(500L);
 
-        long[] fresh = {70L};                        // proxy restarts
+        long[] fresh = {70L};
         Statistics.setBytesTransferredSupplier(() -> fresh[0]);
         assertThat(Statistics.getBytesTransferred()).isEqualTo(570L);
         Statistics.reset();
     }
+
 }

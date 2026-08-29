@@ -12,6 +12,7 @@ import java.util.Properties;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
+import org.apache.commons.cli.PosixParser;
 
 /**
  * Loads tunnel settings from a {@code key = value} properties file.
@@ -85,13 +86,36 @@ public final class ConfigFile {
             }
         }
 
-        // Positional credentials go BEFORE the expanded flags. Appended last they are swallowed
-        // by any preceding option declared with UNLIMITED_VALUES (--auth), which makes a config
-        // combining auth with credentials fail to start -- and can echo the API key in the error.
-        List<String> out = new ArrayList<>(List.of(args));
-        out.addAll(trailing);
+        // Positional credentials go at the very FRONT.
+        //
+        // Appending them last lets any preceding option declared with UNLIMITED_VALUES (--auth)
+        // swallow them, whether that option came from the config file or the command line, and
+        // the tunnel then starts with no key -- reporting it in a message that echoes the API
+        // key. A "--" terminator does not help: PosixParser, which App uses, hands "--" itself
+        // to a multi-valued option when it directly follows one. Leading positional arguments
+        // are the one arrangement every commons-cli parser reads the same way.
+        List<String> out = new ArrayList<>();
+        if (!commandLineSuppliesCredentials(args, options)) {
+            out.addAll(trailing);
+        }
+        out.addAll(List.of(args));
         out.addAll(merged.subList(args.length, merged.size()));
         return out.toArray(new String[0]);
+    }
+
+    /**
+     * True when the command line already carries the key and secret positionally.
+     *
+     * <p>The command line beats the config file everywhere else, so it must here too --
+     * otherwise both pairs end up positional and the parser reads the key as the secret.
+     */
+    private static boolean commandLineSuppliesCredentials(String[] args, Options options) {
+        try {
+            return new PosixParser().parse(options, args).getArgs().length >= 2;
+        } catch (ParseException malformed) {
+            // Not our error to report: the real parse in App will raise it with full context.
+            return false;
+        }
     }
 
     /** Preserves client-key before client-secret, since they are positional. */

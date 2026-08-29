@@ -3,6 +3,7 @@ package com.testingbot.tunnel;
 import org.apache.commons.cli.Option;
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
+import org.apache.commons.cli.PosixParser;
 import org.apache.commons.cli.Options;
 import org.apache.commons.cli.ParseException;
 import org.junit.jupiter.api.BeforeEach;
@@ -96,10 +97,38 @@ class ConfigFileTest {
         Path file = write("auth = host:80:user:pass\nclient-key = KEY123\nclient-secret = SECRET456\n");
 
         String[] expanded = ConfigFile.expand(new String[]{"--config", file.toString()}, options);
-        CommandLine parsed = new DefaultParser().parse(options, expanded);
+        CommandLine parsed = new PosixParser().parse(options, expanded);
 
         assertThat(parsed.getArgs()).containsExactly("KEY123", "SECRET456");
         assertThat(parsed.getOptionValues("auth")).containsExactly("host:80:user:pass");
+    }
+
+    @Test
+    void credentials_surviveUnlimitedValuesOptionGivenOnTheCommandLine() throws Exception {
+        // The variant that matters most: --auth typed on the command line, credentials in the
+        // file. Ordering credentials after the expanded flags fixed the config-file --auth case
+        // and broke this one, which had worked.
+        Path file = write("client-key = KEY123\nclient-secret = SECRET456\nse-port = 4446\n");
+
+        String[] expanded = ConfigFile.expand(
+                new String[]{"--config", file.toString(), "--auth", "host:80:user:pass"}, options);
+        CommandLine parsed = new PosixParser().parse(options, expanded);
+
+        assertThat(parsed.getArgs()).containsExactly("KEY123", "SECRET456");
+        assertThat(parsed.getOptionValues("auth")).containsExactly("host:80:user:pass");
+        assertThat(parsed.getOptionValue("se-port")).isEqualTo("4446");
+    }
+
+    @Test
+    void commandLineCredentials_beatTheConfigFile() throws Exception {
+        // Otherwise both pairs land positionally and the parser reads the CLI key as the secret.
+        Path file = write("client-key = CFGKEY\nclient-secret = CFGSECRET\n");
+
+        String[] expanded = ConfigFile.expand(
+                new String[]{"CLIKEY", "CLISECRET", "--config", file.toString()}, options);
+        CommandLine parsed = new PosixParser().parse(options, expanded);
+
+        assertThat(parsed.getArgs()).containsExactly("CLIKEY", "CLISECRET");
     }
 
     @Test

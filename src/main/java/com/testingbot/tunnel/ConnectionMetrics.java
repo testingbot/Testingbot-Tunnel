@@ -78,13 +78,20 @@ public final class ConnectionMetrics extends Collector {
     }
 
     /**
-     * Total bytes moved in either direction across every listener; what the JSON status
-     * endpoint reports.
+     * Total bytes of tunnelled traffic moved in either direction; what the JSON status endpoint
+     * reports.
+     *
+     * <p>Excludes the metrics listener. Scraping /metrics is our own overhead, not customer
+     * traffic, and counting it would make a frequently-scraped tunnel look busier than it is.
+     * The per-listener Prometheus series still report it.
      */
     public synchronized long totalBytes() {
         long sum = 0;
-        for (ConnectionStatistics stats : listeners.values()) {
-            sum += stats.getReceivedBytes() + stats.getSentBytes();
+        for (Map.Entry<String, ConnectionStatistics> entry : listeners.entrySet()) {
+            if (METRICS.equals(entry.getKey())) {
+                continue;
+            }
+            sum += entry.getValue().getReceivedBytes() + entry.getValue().getSentBytes();
         }
         return sum;
     }

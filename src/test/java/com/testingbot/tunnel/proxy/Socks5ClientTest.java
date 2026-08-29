@@ -196,4 +196,34 @@ class Socks5ClientTest {
         assertThat(Socks5Client.replyMessage((byte) 0x04)).isEqualTo("host unreachable");
         assertThat(Socks5Client.replyMessage((byte) 0x7F)).contains("reply code");
     }
+
+    @Test
+    void silentProxy_failsWithinTheSocketTimeoutInsteadOfHanging() throws Exception {
+        // A SOCKS proxy that accepts the TCP connection and then says nothing. The handshake
+        // reads must honour SO_TIMEOUT -- SocketChannel.read() ignores it, so this used to
+        // block a pool thread forever and the CONNECT never completed either way.
+        server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
+        serverThread = new Thread(() -> {
+            try (Socket accepted = server.accept()) {
+                Thread.sleep(30_000);      // accept, then stay silent
+            } catch (Exception ignored) {
+                // test finished
+            }
+        });
+        serverThread.setDaemon(true);
+        serverThread.start();
+
+        try (SocketChannel channel = connectToServer()) {
+            channel.socket().setSoTimeout(750);
+
+            long startedAt = System.nanoTime();
+            assertThatThrownBy(() -> Socks5Client.connect(channel, "target.example.com", 443, null, null))
+                    .isInstanceOf(IOException.class);
+            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
+
+            assertThat(elapsedMs)
+                    .as("must give up on the socket timeout, not block indefinitely")
+                    .isLessThan(10_000L);
+        }
+    }
 }

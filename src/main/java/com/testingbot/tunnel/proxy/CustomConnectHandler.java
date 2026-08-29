@@ -231,6 +231,7 @@ public class CustomConnectHandler extends ConnectHandler {
                                     Throwable failure) {
         if (proxyHost == null) {
             TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
+            observeDial(request);
         }
         ProxyErrors.Reason reason = ProxyErrors.classify(failure);
         TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels(reason.reason().replace('-', '_')).inc();
@@ -239,10 +240,24 @@ public class CustomConnectHandler extends ConnectHandler {
         ProxyErrors.write(request, response, callback, reason);
     }
 
+    private static final String ATTR_DIAL_TIMER = CustomConnectHandler.class.getName() + ".dialTimer";
+
+    /** Stops the direct-path dial timer once, whichever way the dial resolved. */
+    private static void observeDial(Request request) {
+        if (request == null) {
+            return;
+        }
+        Object timer = request.removeAttribute(ATTR_DIAL_TIMER);
+        if (timer instanceof io.prometheus.client.Histogram.Timer t) {
+            t.observeDuration();
+        }
+    }
+
     @Override
     protected void onConnectSuccess(ConnectContext connectContext, UpstreamConnection upstreamConnection) {
         if (proxyHost == null) {
             TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
+            observeDial(connectContext.getRequest());
         }
         super.onConnectSuccess(connectContext, upstreamConnection);
     }
@@ -262,10 +277,12 @@ public class CustomConnectHandler extends ConnectHandler {
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         if (proxyHost == null) {
-            // Not timed here: Jetty's default connectToServer succeeds the promise as soon as
-            // the non-blocking connect is *initiated*, so wrapping it recorded every dial as an
-            // instant success and never saw a refusal. The direct path is measured in
-            // onConnectSuccess/onConnectFailure instead, where the outcome is actually known.
+            // Not wrapped in timedDial: Jetty's default connectToServer succeeds the promise as
+            // soon as the non-blocking connect is *initiated*, so wrapping it recorded every
+            // dial as an instant success and never saw a refusal. Start the clock here and stop
+            // it in onConnectSuccess/onConnectFailure, where the outcome is actually known.
+            request.setAttribute(ATTR_DIAL_TIMER,
+                    TunnelMetrics.DIAL_DURATION_SECONDS.labels("connect").startTimer());
             super.connectToServer(request, host, port, promise);
             return;
         }

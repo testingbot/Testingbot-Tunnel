@@ -97,4 +97,20 @@ class TunnelProxyHandlerTest {
         assertThat(TunnelProxyHandler.methodLabel("PROPFIND")).isEqualTo("OTHER");
         assertThat(TunnelProxyHandler.methodLabel(null)).isEqualTo("OTHER");
     }
+
+    @Test
+    void absoluteForm_bracketsIpv6OnceAndElidesDefaultPorts() {
+        // HttpURI.getHost() keeps the brackets on an IPv6 literal, so bracketing again
+        // produced "[[::1]]" and an unparseable request target.
+        assertThat(TunnelProxyHandler.absoluteForm("http", "[::1]", 8080, "/x?a={json}"))
+                .isEqualTo("http://[::1]:8080/x?a={json}");
+        assertThat(TunnelProxyHandler.absoluteForm("http", "::1", 8080, "/x"))
+                .isEqualTo("http://[::1]:8080/x");
+        assertThat(TunnelProxyHandler.absoluteForm("http", "example.com", 80, "/"))
+                .isEqualTo("http://example.com/");
+        assertThat(TunnelProxyHandler.absoluteForm("https", "example.com", 443, "/"))
+                .isEqualTo("https://example.com/");
+        assertThat(TunnelProxyHandler.absoluteForm("http", "example.com", 8080, "/"))
+                .isEqualTo("http://example.com:8080/");
+    }
 }
