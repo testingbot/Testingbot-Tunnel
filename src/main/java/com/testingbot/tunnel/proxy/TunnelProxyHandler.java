@@ -43,6 +43,11 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     private static final Logger LOG = Logger.getLogger(TunnelProxyHandler.class.getName());
 
+    /** Jetty's default is 64; a proxy serving a whole browser session fans out wider. */
+    private static final int MAX_CONNECTIONS_PER_DESTINATION = 256;
+    /** Relay buffers: bigger reads mean fewer syscalls per megabyte proxied. */
+    private static final int CLIENT_BUFFER_SIZE = 32 * 1024;
+
     // Keep label cardinality bounded by collapsing non-standard verbs.
     private static final Set<String> KNOWN_METHODS = new HashSet<>(Arrays.asList(
             "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "TRACE", "CONNECT"));
@@ -129,6 +134,12 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     protected void configureHttpClient(HttpClient client) {
         super.configureHttpClient(client);
         client.setIdleTimeout(idleTimeoutMs);
+        // A forward proxy fans out to many origins at once and relays bodies rather than
+        // parsing them, so Jetty's request/response defaults (sized for an application
+        // client talking to one server) are low on both counts.
+        client.setMaxConnectionsPerDestination(MAX_CONNECTIONS_PER_DESTINATION);
+        client.setRequestBufferSize(CLIENT_BUFFER_SIZE);
+        client.setResponseBufferSize(CLIENT_BUFFER_SIZE);
 
         if (upstreamProxy != null && !upstreamProxy.isEmpty()) {
             String[] split = upstreamProxy.split(":", 2);

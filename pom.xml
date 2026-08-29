@@ -446,6 +446,19 @@
       <groupId>io.prometheus</groupId>
       <artifactId>simpleclient</artifactId>
       <version>0.16.0</version>
+      <!-- Exemplar support hooks into an OpenTelemetry agent if one is present. Nothing
+           here uses exemplars and no agent is shipped, so these only add classes to the
+           uber jar. -->
+      <exclusions>
+        <exclusion>
+          <groupId>io.prometheus</groupId>
+          <artifactId>simpleclient_tracer_otel</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>io.prometheus</groupId>
+          <artifactId>simpleclient_tracer_otel_agent</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <dependency>
       <groupId>io.prometheus</groupId>

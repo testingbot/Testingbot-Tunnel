@@ -115,16 +115,43 @@ class StatisticsTest {
      * Reset static fields using reflection
      */
     private void resetStatistics() throws Exception {
-        Field requestsField = Statistics.class.getDeclaredField("numberOfRequests");
-        requestsField.setAccessible(true);
-        requestsField.setLong(null, 0);
+        Statistics.reset();
+    }
 
-        Field bytesField = Statistics.class.getDeclaredField("bytesTransferred");
-        bytesField.setAccessible(true);
-        bytesField.setLong(null, 0);
+    @Test
+    void counters_areSafeUnderConcurrentUpdates() throws Exception {
+        // Every proxied request updates these from a different thread. With plain
+        // `long +=` the read-modify-write races and updates are silently lost, which is
+        // exactly what the status endpoint then under-reports.
+        int threads = 16;
+        int perThread = 5_000;
 
-        Field startTimeField = Statistics.class.getDeclaredField("startTime");
-        startTimeField.setAccessible(true);
-        startTimeField.setLong(null, 0);
+        java.util.concurrent.ExecutorService pool =
+            java.util.concurrent.Executors.newFixedThreadPool(threads);
+        java.util.concurrent.CountDownLatch start = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch done = new java.util.concurrent.CountDownLatch(threads);
+
+        for (int t = 0; t < threads; t++) {
+            pool.submit(() -> {
+                try {
+                    start.await();
+                    for (int i = 0; i < perThread; i++) {
+                        Statistics.addRequest();
+                        Statistics.addBytesTransferred(10);
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                } finally {
+                    done.countDown();
+                }
+            });
+        }
+
+        start.countDown();
+        assertThat(done.await(30, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+        pool.shutdown();
+
+        assertThat(Statistics.getNumberOfRequests()).isEqualTo((long) threads * perThread);
+        assertThat(Statistics.getBytesTransferred()).isEqualTo((long) threads * perThread * 10);
     }
 }

@@ -218,17 +218,7 @@ class InsightServerTest {
      * Reset static fields using reflection
      */
     private void resetStatistics() throws Exception {
-        Field requestsField = Statistics.class.getDeclaredField("numberOfRequests");
-        requestsField.setAccessible(true);
-        requestsField.setLong(null, 0);
-
-        Field bytesField = Statistics.class.getDeclaredField("bytesTransferred");
-        bytesField.setAccessible(true);
-        bytesField.setLong(null, 0);
-
-        Field startTimeField = Statistics.class.getDeclaredField("startTime");
-        startTimeField.setAccessible(true);
-        startTimeField.setLong(null, 0);
+        Statistics.reset();
     }
 
     private static int freePort() throws Exception {
