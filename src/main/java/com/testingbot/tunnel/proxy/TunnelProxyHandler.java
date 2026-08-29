@@ -323,14 +323,44 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         if (pathQuery == null || pathQuery.isEmpty()) {
             pathQuery = "/";
         }
-        return getHttpClient().newRequest(newHttpURI.getHost(), port)
-                .scheme(newHttpURI.getScheme())
-                .path(pathQuery)
-                // Jetty 11's ProxyServlet applied a total exchange timeout from its "timeout"
-                // init parameter; Jetty 12's ProxyHandler never calls Request.timeout(), so a
-                // response that trickles forever was no longer bounded by anything.
-                .timeout(idleTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
-                .method(clientToProxyRequest.getMethod());
+        org.eclipse.jetty.client.Request proxyRequest =
+                getHttpClient().newRequest(newHttpURI.getHost(), port)
+                        .scheme(newHttpURI.getScheme())
+                        .path(pathQuery)
+                        // Jetty 11's ProxyServlet applied a total exchange timeout from its
+                        // "timeout" init parameter; Jetty 12's ProxyHandler never calls
+                        // Request.timeout(), so a response that trickles forever was no longer
+                        // bounded by anything.
+                        .timeout(idleTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        .method(clientToProxyRequest.getMethod());
+
+        // RFC 9112 3.2.2: requests to a forward proxy must use absolute-form. jetty-client
+        // normally rewrites the target itself, but only when getURI() is non-null -- and path()
+        // leaves getURI() null for exactly the query strings the lenient fallback above exists
+        // to pass through ("?a={json}", "?next=a|b", "?tpl={{name}}"), because java.net.URI
+        // rejects them. Those requests would reach the upstream proxy in origin-form, which
+        // Squid answers with 400. Absolutize them here, the same way jetty-client would.
+        if (usesHttpUpstreamProxy() && proxyRequest.getURI() == null) {
+            proxyRequest.path(absoluteForm(newHttpURI.getScheme(), newHttpURI.getHost(), port, pathQuery));
+        }
+        return proxyRequest;
+    }
+
+    /** True when traffic leaves through an HTTP forward proxy. SOCKS5 is transparent at TCP level. */
+    private boolean usesHttpUpstreamProxy() {
+        ProxySpec spec = ProxySpec.parse(upstreamProxy);
+        return spec != null && !spec.isSocks5();
+    }
+
+    static String absoluteForm(String scheme, String host, int port, String pathQuery) {
+        boolean defaultPort = HttpScheme.HTTPS.is(scheme) ? port == 443 : port == 80;
+        StringBuilder sb = new StringBuilder(scheme).append("://");
+        // Bracket IPv6 literals, which the authority form requires.
+        sb.append(host != null && host.indexOf(':') >= 0 ? "[" + host + "]" : host);
+        if (!defaultPort) {
+            sb.append(':').append(port);
+        }
+        return sb.append(pathQuery).toString();
     }
 
     @Override
