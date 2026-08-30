@@ -38,6 +38,8 @@ public class App {
     private String[] fastFail;
     private String[] connectTo;
     private String localhostPolicy;
+    private String logHttp;
+    private String requestIdHeader;
     private String[] headerRules;
     private String[] responseHeaderRules;
     private SSHTunnel tunnel;
@@ -111,7 +113,7 @@ public class App {
 
     static void validateHeader(String name, String value) throws ParseException {
         if (name == null || name.isEmpty() || !HEADER_NAME.matcher(name).matches()) {
-            throw new ParseException("Invalid header name in --extra-headers: '" + name + "' (must be an RFC 7230 token)");
+            throw new ParseException("Invalid header name: '" + name + "' (must be an RFC 7230 token)");
         }
         if (value == null) {
             throw new ParseException("Header value for '" + name + "' is null");
@@ -143,6 +145,20 @@ public class App {
         Option seleniumPort = new Option("P", "se-port", true, "The local port your Selenium test should connect to.");
         seleniumPort.setArgName("PORT");
         options.addOption(seleniumPort);
+
+        Option logHttp = new Option(null, "log-http", true,
+            "How much HTTP traffic detail to log: none, url, headers, or errors (default). "
+            + "'errors' logs the request line and headers only for failed or 5xx responses: "
+            + "quiet in normal use, self-diagnosing when tests fail. Header values that carry "
+            + "credentials are redacted.");
+        logHttp.setArgName("MODE");
+        options.addOption(logHttp);
+
+        Option requestIdHeader = new Option(null, "request-id-header", true,
+            "Header carrying the correlation id used in HTTP logs and passed to the target. "
+            + "Reused when the incoming request already has one. Default X-Request-Id.");
+        requestIdHeader.setArgName("NAME");
+        options.addOption(requestIdHeader);
 
         // Single-arg and repeatable rather than UNLIMITED_VALUES: a removal rule starts with
         // "-", and a greedy option would be at risk of reading the next flag as a rule.
@@ -424,6 +440,22 @@ public class App {
 
             // Parsed here purely to validate: a typo should be a startup error with the usual
             // CLI wording, not an IllegalArgumentException from inside proxy construction.
+            if (commandLine.hasOption("log-http")) {
+                String value = commandLine.getOptionValue("log-http").trim();
+                try {
+                    com.testingbot.tunnel.proxy.HttpLogHandler.Mode.parse(value);
+                } catch (IllegalArgumentException unknown) {
+                    throw new ParseException("Invalid --log-http value: " + value
+                            + ". Expected none, url, headers or errors.");
+                }
+                app.setLogHttp(value);
+            }
+            if (commandLine.hasOption("request-id-header")) {
+                String value = commandLine.getOptionValue("request-id-header").trim();
+                validateHeader(value, "");
+                app.setRequestIdHeader(value);
+            }
+
             if (commandLine.hasOption("header")) {
                 String[] rules = commandLine.getOptionValues("header");
                 validateHeaderRules("--header", rules);
@@ -909,6 +941,22 @@ public class App {
     /**
      * @return the fastFail
      */
+    public String getLogHttp() {
+        return logHttp;
+    }
+
+    public void setLogHttp(String logHttp) {
+        this.logHttp = logHttp;
+    }
+
+    public String getRequestIdHeader() {
+        return requestIdHeader;
+    }
+
+    public void setRequestIdHeader(String requestIdHeader) {
+        this.requestIdHeader = requestIdHeader;
+    }
+
     public String[] getHeaderRules() {
         return headerRules;
     }

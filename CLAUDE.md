@@ -85,6 +85,8 @@ java -jar testingbot-tunnel.jar --doctor
   it an exception, so `.*,!ok\.com` blocks everything except `ok.com`
 - `--auth`: Basic authentication for specific hosts
 - `--proxy`: Upstream proxy configuration
+- `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default)
+- `--request-id-header`: Correlation header name (default `X-Request-Id`)
 - `--extra-headers`: Custom HTTP request headers to add (JSON map)
 - `--header` / `--response-header`: Edit request/response headers. Repeatable. Grammar:
   `name: value` sets, `name;` sets empty, `-name` removes, `-name*` removes by prefix
@@ -97,6 +99,28 @@ java -jar testingbot-tunnel.jar --doctor
   loopback interface
 - `--metrics-port`: Port for the insight endpoints (default 8003)
 - `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)
+
+### HTTP logging
+
+`--log-http` controls per-request logging, emitted by `HttpLogHandler`, which sits outermost in
+the proxy chain so plain HTTP, CONNECT and WebSocket upgrades share one switch:
+
+| Mode | Logs |
+|---|---|
+| `none` | nothing |
+| `url` | one line per request: method, target, status, duration |
+| `headers` | as `url`, plus request headers |
+| `errors` (default) | as `headers`, but only for failed or 5xx responses |
+
+**This changed the default behaviour**: before TB-319 every request produced an INFO line.
+With `errors`, successful requests log nothing. Use `--log-http url` to get the old volume back.
+
+Every request carries a correlation id, logged in `[brackets]` and passed to the target in
+`--request-id-header`. An incoming value is reused so a trace starting in the test framework
+stays joined up. The id is forwarded even when `--log-http none` is set.
+
+Header values are redacted via `SensitiveHeaders.redactValue`, so `Authorization` and
+TestingBot credentials do not reach whatever collects these logs.
 
 ### Header rules
 

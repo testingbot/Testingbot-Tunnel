@@ -252,6 +252,7 @@ scenario_combined() {
       --extra-headers '{"X-E2E-Injected":"tunnel-e2e-value"}' \
       --header 'X-E2E-Rule: rule-value' --header '-X-E2E-Strip' \
       --response-header 'X-E2E-Response: from-tunnel' \
+      --log-http headers \
       --fast-fail-regexps 'blocked\.example\.com,!allowed\.blocked\.example\.com' \
       --connect-to "remapped.example.invalid:80:127.0.0.1:$ORIGIN_PORT" \
       --metrics-port "$mport" --metrics-auth 'e2euser:e2epass' || return 1
@@ -300,6 +301,15 @@ scenario_combined() {
   assert_contains "response-header rule reaches the client" \
     "$(curl -s -D - -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/")" \
     "X-E2E-Response: from-tunnel"
+
+  # Correlation id reaches the origin, reusing the caller's value.
+  assert_contains "request id is passed to the origin" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" -H 'X-Request-Id: e2e-trace-id' "http://127.0.0.1:$ORIGIN_PORT/headers")" \
+    "e2e-trace-id"
+  # --log-http headers must not leak credentials into the tunnel log.
+  curl -s -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" \
+    -H 'Authorization: Bearer e2e-should-be-redacted' "http://127.0.0.1:$ORIGIN_PORT/" || true
+  assert_neq "log-http redacts credentials" "$(grep -c 'e2e-should-be-redacted' "$TUNNEL_LOG" || true)" "1"
 
   assert_eq "metrics rejects anonymous" \
     "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$mport/metrics")" "401"

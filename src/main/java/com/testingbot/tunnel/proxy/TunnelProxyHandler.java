@@ -60,6 +60,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     private FastFailPolicy fastFail = FastFailPolicy.none();
     private Map<String, String> extraHeaders = Collections.emptyMap();
+    private String requestIdHeader = "X-Request-Id";
     private HeaderRules requestHeaderRules = HeaderRules.none();
     private HeaderRules responseHeaderRules = HeaderRules.none();
     private String proxyAuthHeaderValue;
@@ -74,6 +75,11 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     public void setBlackList(String[] patterns) {
         this.fastFail = FastFailPolicy.compile(patterns);
+    }
+
+    public void setRequestIdHeader(String requestIdHeader) {
+        this.requestIdHeader = requestIdHeader == null || requestIdHeader.isEmpty()
+                ? "X-Request-Id" : requestIdHeader;
     }
 
     public void setRequestHeaderRules(HeaderRules rules) {
@@ -315,8 +321,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             TunnelMetrics.HTTP_REQUEST_DURATION_SECONDS.labels(method).observe(elapsed / 1000.0);
             TunnelMetrics.HTTP_RESPONSE_SIZE_BYTES.labels(method)
                     .observe(responseBytes(request).doubleValue());
-            LOG.log(Level.INFO, "[{0}] {1} ({2}) - {3} ms",
-                    new Object[]{request.getMethod(), request.getHttpURI(), response.getStatus(), elapsed});
+            // The per-request line now comes from HttpLogHandler, which sees CONNECT and
+            // WebSocket traffic too and can be turned up or down with --log-http.
         });
 
         return super.handle(request, response, observed);
@@ -440,6 +446,12 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
                 fields.add(entry.getKey(), entry.getValue());
             }
+            // Pass the correlation id on, so the origin's own logs can be lined up with ours.
+            Object requestId = clientToProxyRequest.getAttribute(HttpLogHandler.ATTR_REQUEST_ID);
+            if (requestId != null) {
+                fields.put(requestIdHeader, requestId.toString());
+            }
+
             // Last, so --header can remove or override anything above -- including a header
             // --extra-headers added, or one of the X-Forwarded-* we generate.
             requestHeaderRules.applyTo(fields);

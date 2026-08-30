@@ -2,6 +2,7 @@ package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.ConnectToMap;
 import com.testingbot.tunnel.proxy.HeaderRules;
+import com.testingbot.tunnel.proxy.HttpLogHandler;
 import com.testingbot.tunnel.proxy.LocalhostPolicy;
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
 import com.testingbot.tunnel.proxy.CustomDnsResolver;
@@ -166,10 +167,17 @@ public final class HttpProxy {
         connectHandler.setHandler(proxyHandler);
         websocketHandler.setHandler(connectHandler);
 
+        // Outermost of the proxy handlers so plain HTTP, CONNECT and WebSocket upgrades all
+        // get the same correlation id and the same --log-http switch.
+        HttpLogHandler logHandler = new HttpLogHandler(
+                HttpLogHandler.Mode.parse(app.getLogHttp()), app.getRequestIdHeader());
+        logHandler.setHandler(websocketHandler);
+        proxyHandler.setRequestIdHeader(logHandler.getRequestIdHeader());
+
         // GracefulHandler tracks in-flight requests so stop() can drain them; it must sit
         // outermost to see every request.
         GracefulHandler gracefulHandler = new GracefulHandler();
-        gracefulHandler.setHandler(websocketHandler);
+        gracefulHandler.setHandler(logHandler);
 
         if (app.isDebugMode()) {
             // Jetty 12 handlers own a Callback that must be completed exactly once. This
