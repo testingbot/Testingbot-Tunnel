@@ -38,6 +38,8 @@ public class App {
     private String[] fastFail;
     private String[] connectTo;
     private String localhostPolicy;
+    private String[] headerRules;
+    private String[] responseHeaderRules;
     private SSHTunnel tunnel;
     private String tunnelIdentifier;
     private String serverIP;
@@ -99,6 +101,14 @@ public class App {
     // RFC 7230 token: 1*tchar
     private static final java.util.regex.Pattern HEADER_NAME = java.util.regex.Pattern.compile("[!#$%&'*+\\-.^_`|~0-9A-Za-z]+");
 
+    private static void validateHeaderRules(String flag, String[] rules) throws ParseException {
+        try {
+            com.testingbot.tunnel.proxy.HeaderRules.parse(rules);
+        } catch (IllegalArgumentException invalid) {
+            throw new ParseException(flag + ": " + invalid.getMessage());
+        }
+    }
+
     static void validateHeader(String name, String value) throws ParseException {
         if (name == null || name.isEmpty() || !HEADER_NAME.matcher(name).matches()) {
             throw new ParseException("Invalid header name in --extra-headers: '" + name + "' (must be an RFC 7230 token)");
@@ -133,6 +143,21 @@ public class App {
         Option seleniumPort = new Option("P", "se-port", true, "The local port your Selenium test should connect to.");
         seleniumPort.setArgName("PORT");
         options.addOption(seleniumPort);
+
+        // Single-arg and repeatable rather than UNLIMITED_VALUES: a removal rule starts with
+        // "-", and a greedy option would be at risk of reading the next flag as a rule.
+        Option header = new Option(null, "header", true,
+            "Edit a request header sent to the target. Repeatable. "
+            + "'name: value' sets, 'name;' sets empty, '-name' removes, '-name*' removes by prefix. "
+            + "Plain HTTP only; HTTPS is tunnelled via CONNECT and opaque here.");
+        header.setArgName("RULE");
+        options.addOption(header);
+
+        Option responseHeader = new Option(null, "response-header", true,
+            "Edit a response header returned to the browser, same grammar as --header. "
+            + "Useful for dropping a Content-Security-Policy or HSTS that blocks a test page.");
+        responseHeader.setArgName("RULE");
+        options.addOption(responseHeader);
 
         Option localhostPolicy = new Option(null, "localhost-policy", true,
             "Whether requests coming through the tunnel may reach this machine's loopback "
@@ -395,6 +420,19 @@ public class App {
             } else {
                 app.clientKey = commandLine.getArgs()[0].trim();
                 app.clientSecret = commandLine.getArgs()[1].trim();
+            }
+
+            // Parsed here purely to validate: a typo should be a startup error with the usual
+            // CLI wording, not an IllegalArgumentException from inside proxy construction.
+            if (commandLine.hasOption("header")) {
+                String[] rules = commandLine.getOptionValues("header");
+                validateHeaderRules("--header", rules);
+                app.setHeaderRules(rules);
+            }
+            if (commandLine.hasOption("response-header")) {
+                String[] rules = commandLine.getOptionValues("response-header");
+                validateHeaderRules("--response-header", rules);
+                app.setResponseHeaderRules(rules);
             }
 
             if (commandLine.hasOption("localhost-policy")) {
@@ -871,6 +909,22 @@ public class App {
     /**
      * @return the fastFail
      */
+    public String[] getHeaderRules() {
+        return headerRules;
+    }
+
+    public void setHeaderRules(String[] headerRules) {
+        this.headerRules = headerRules;
+    }
+
+    public String[] getResponseHeaderRules() {
+        return responseHeaderRules;
+    }
+
+    public void setResponseHeaderRules(String[] responseHeaderRules) {
+        this.responseHeaderRules = responseHeaderRules;
+    }
+
     public String getLocalhostPolicy() {
         return localhostPolicy;
     }

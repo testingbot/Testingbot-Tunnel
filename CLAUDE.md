@@ -85,7 +85,9 @@ java -jar testingbot-tunnel.jar --doctor
   it an exception, so `.*,!ok\.com` blocks everything except `ok.com`
 - `--auth`: Basic authentication for specific hosts
 - `--proxy`: Upstream proxy configuration
-- `--extra-headers`: Custom HTTP headers injection
+- `--extra-headers`: Custom HTTP request headers to add (JSON map)
+- `--header` / `--response-header`: Edit request/response headers. Repeatable. Grammar:
+  `name: value` sets, `name;` sets empty, `-name` removes, `-name*` removes by prefix
 - `--tunnel-identifier`: Multiple tunnel support
 - `--nobump`: Disable SSL certificate rewriting
 - `--nocache`: Bypass TestingBot caching layer
@@ -95,6 +97,16 @@ java -jar testingbot-tunnel.jar --doctor
   loopback interface
 - `--metrics-port`: Port for the insight endpoints (default 8003)
 - `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)
+
+### Header rules
+
+`--header` and `--response-header` apply to **plain HTTP only**. HTTPS arrives as a CONNECT and
+is relayed as opaque bytes, so there is nothing local to edit; changing headers on HTTPS
+requires the remote SSL-bump path (i.e. not `--nobump`).
+
+Removals are applied before sets, so `-X` and `X: 1` together always mean "replace",
+independent of argument order. Rules run after `--extra-headers` and after the `X-Forwarded-*`
+headers are generated, so they can override either.
 
 ### Configuration sources
 

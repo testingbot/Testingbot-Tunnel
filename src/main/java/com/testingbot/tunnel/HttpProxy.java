@@ -1,6 +1,7 @@
 package com.testingbot.tunnel;
 
 import com.testingbot.tunnel.proxy.ConnectToMap;
+import com.testingbot.tunnel.proxy.HeaderRules;
 import com.testingbot.tunnel.proxy.LocalhostPolicy;
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
 import com.testingbot.tunnel.proxy.CustomDnsResolver;
@@ -153,6 +154,8 @@ public final class HttpProxy {
         proxyHandler.setIdleTimeoutMs(PROXY_IDLE_TIMEOUT_MS);
         proxyHandler.setBlackList(app.getFastFail());
         proxyHandler.setExtraHeaders(app.getCustomHeaders());
+        proxyHandler.setRequestHeaderRules(HeaderRules.parse(app.getHeaderRules()));
+        proxyHandler.setResponseHeaderRules(HeaderRules.parse(app.getResponseHeaderRules()));
         proxyHandler.setDebugMode(app.isDebugMode());
         proxyHandler.setUpstreamProxy(app.getProxy(), app.getProxyAuth());
         proxyHandler.setBasicAuth(app.getBasicAuth());

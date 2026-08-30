@@ -250,6 +250,8 @@ scenario_combined() {
   local mport; mport="$(free_port)"
   start_tunnel \
       --extra-headers '{"X-E2E-Injected":"tunnel-e2e-value"}' \
+      --header 'X-E2E-Rule: rule-value' --header '-X-E2E-Strip' \
+      --response-header 'X-E2E-Response: from-tunnel' \
       --fast-fail-regexps 'blocked\.example\.com,!allowed\.blocked\.example\.com' \
       --connect-to "remapped.example.invalid:80:127.0.0.1:$ORIGIN_PORT" \
       --metrics-port "$mport" --metrics-auth 'e2euser:e2epass' || return 1
@@ -286,6 +288,18 @@ scenario_combined() {
   TESTINGBOT_METRICS_PORT="$mport" java -jar "$JAR" --ready >/dev/null 2>&1 \
     && ok "env alias sets the metrics port" "TESTINGBOT_METRICS_PORT honoured" \
     || bad "env alias sets the metrics port" "--ready could not reach $mport"
+
+  # Request rules: one added, one stripped from what the client sent.
+  assert_contains "header rule adds a request header" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/headers")" \
+    "rule-value"
+  assert_neq "header rule strips a request header" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" -H 'X-E2E-Strip: leaked' "http://127.0.0.1:$ORIGIN_PORT/headers" | grep -c 'leaked')" "1"
+
+  # Response rule: visible in the headers the client receives.
+  assert_contains "response-header rule reaches the client" \
+    "$(curl -s -D - -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/")" \
+    "X-E2E-Response: from-tunnel"
 
   assert_eq "metrics rejects anonymous" \
     "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$mport/metrics")" "401"

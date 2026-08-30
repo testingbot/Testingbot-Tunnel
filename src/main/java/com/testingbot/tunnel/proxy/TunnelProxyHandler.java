@@ -60,6 +60,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     private FastFailPolicy fastFail = FastFailPolicy.none();
     private Map<String, String> extraHeaders = Collections.emptyMap();
+    private HeaderRules requestHeaderRules = HeaderRules.none();
+    private HeaderRules responseHeaderRules = HeaderRules.none();
     private String proxyAuthHeaderValue;
     private String upstreamProxy;
     private String upstreamProxyAuth;
@@ -72,6 +74,14 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     public void setBlackList(String[] patterns) {
         this.fastFail = FastFailPolicy.compile(patterns);
+    }
+
+    public void setRequestHeaderRules(HeaderRules rules) {
+        this.requestHeaderRules = rules == null ? HeaderRules.none() : rules;
+    }
+
+    public void setResponseHeaderRules(HeaderRules rules) {
+        this.responseHeaderRules = rules == null ? HeaderRules.none() : rules;
     }
 
     public void setExtraHeaders(Map<String, String> extraHeaders) {
@@ -287,6 +297,11 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             LOG.log(Level.INFO, sb.toString());
         }
 
+        // Seeded before the exchange: ProxyHandler puts the first occurrence of each response
+        // header, so a value written afterwards would be overwritten by the origin's. Its copy
+        // is dropped in filterServerToProxyResponseField, leaving ours.
+        responseHeaderRules.applySets(response.getHeaders());
+
         TunnelMetrics.HTTP_REQUESTS_IN_FLIGHT.labels(method).inc();
         long startTime = System.currentTimeMillis();
 
@@ -425,7 +440,25 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             for (Map.Entry<String, String> entry : extraHeaders.entrySet()) {
                 fields.add(entry.getKey(), entry.getValue());
             }
+            // Last, so --header can remove or override anything above -- including a header
+            // --extra-headers added, or one of the X-Forwarded-* we generate.
+            requestHeaderRules.applyTo(fields);
         });
+    }
+
+    /**
+     * Response headers, in the one hook Jetty offers per field.
+     *
+     * <p>Removals and overrides drop the origin's field here; the replacement values are seeded
+     * onto the response in {@link #handle} before the copy runs, because ProxyHandler has no
+     * after-the-copy hook and {@code put}s the first occurrence of each name.
+     */
+    @Override
+    protected HttpField filterServerToProxyResponseField(HttpField field) {
+        if (responseHeaderRules.drops(field.getName())) {
+            return null;
+        }
+        return super.filterServerToProxyResponseField(field);
     }
 
     @Override
