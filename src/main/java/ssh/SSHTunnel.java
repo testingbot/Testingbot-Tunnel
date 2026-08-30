@@ -1,6 +1,9 @@
 package ssh;
 
 import com.jcraft.jsch.JSch;
+import com.jcraft.jsch.ProxySOCKS5;
+import com.testingbot.tunnel.proxy.ProxySpec;
+import com.testingbot.tunnel.proxy.SshHttpProxy;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
 import com.testingbot.tunnel.App;
@@ -43,6 +46,47 @@ public class SSHTunnel {
         this.connect();
     }
 
+    /**
+     * Routes the SSH connection through {@code --proxy} when one is configured.
+     *
+     * <p>Until TB-321 the SSH connection ignored --proxy entirely, so on a network whose only
+     * egress is a proxy the tunnel could not connect at all -- the browser traffic settings were
+     * irrelevant because the control connection never came up.
+     */
+    private void applyUpstreamProxy(Session session) {
+        ProxySpec spec = ProxySpec.parse(app.getProxy());
+        if (spec == null) {
+            return;
+        }
+        if (spec.isSocks5()) {
+            ProxySOCKS5 socks = new ProxySOCKS5(spec.getHost(), spec.getPort());
+            String[] credentials = splitCredentials(app.getProxyAuth());
+            if (credentials != null) {
+                socks.setUserPasswd(credentials[0], credentials[1]);
+            }
+            session.setProxy(socks);
+        } else {
+            // Our own CONNECT rather than JSch's ProxyHTTP, which only speaks Basic.
+            session.setProxy(new SshHttpProxy(spec.getHost(), spec.getPort(),
+                    app.proxyAuthenticator()));
+        }
+        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
+            String.format("[%s] SSH connection will traverse the upstream proxy %s:%d",
+                connectionId, spec.getHost(), spec.getPort()));
+    }
+
+    /** Splits "user:password", tolerating a colon inside the password. */
+    static String[] splitCredentials(String userPassword) {
+        if (userPassword == null || userPassword.isEmpty()) {
+            return null;
+        }
+        int colon = userPassword.indexOf(':');
+        if (colon < 0) {
+            return null;
+        }
+        return new String[]{userPassword.substring(0, colon), userPassword.substring(colon + 1)};
+    }
+
     public final void connect() throws Exception {
         Histogram.Timer histogramTimer = TunnelMetrics.TUNNEL_CONNECT_DURATION_SECONDS.startTimer();
         try {
@@ -51,6 +95,7 @@ public class SSHTunnel {
             session = jsch.getSession(app.getClientKey(), server, 443);
             session.setPassword(app.getClientSecret());
             session.setConfig("StrictHostKeyChecking", "no");
+            applyUpstreamProxy(session);
             session.connect();
             long connectTime = System.currentTimeMillis() - startTime;
 

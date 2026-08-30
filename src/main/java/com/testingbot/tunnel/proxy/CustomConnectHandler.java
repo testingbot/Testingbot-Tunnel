@@ -59,7 +59,7 @@ public class CustomConnectHandler extends ConnectHandler {
     private final int proxyPort;
     private final ProxySpec proxySpec;
     private final String proxyUserPassword;
-    private String proxyAuth = null;
+    private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
     private FastFailPolicy fastFail = FastFailPolicy.none();
     private ConnectToMap connectTo = ConnectToMap.none();
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
@@ -82,9 +82,13 @@ public class CustomConnectHandler extends ConnectHandler {
         }
 
         // Proxy-Authorization only applies to an HTTP upstream proxy; SOCKS authenticates
-        // inside its own handshake.
-        if (proxyUserPassword != null && (proxySpec == null || !proxySpec.isSocks5())) {
-            proxyAuth = Base64.getEncoder().encodeToString(proxyUserPassword.getBytes(StandardCharsets.UTF_8));
+        // inside its own handshake. Negotiate needs no user/password -- credentials come from
+        // the ticket cache or keytab -- so it is configured even when --proxy-userpwd is absent.
+        ProxyAuthenticator configured = app.proxyAuthenticator();
+        if (proxySpec == null || !proxySpec.isSocks5()) {
+            this.proxyAuthenticator = configured;
+        } else {
+            this.proxyAuthenticator = ProxyAuthenticator.none();
         }
     }
 
@@ -372,8 +376,12 @@ public class CustomConnectHandler extends ConnectHandler {
                             connect.append(headerName).append(": ").append(headerValue).append("\r\n");
                         }
 
-                        if (proxyAuth != null) {
-                            connect.append("Proxy-Authorization: Basic ").append(proxyAuth).append("\r\n");
+                        // Sent pre-emptively rather than after a 407. A proxy that does not
+                        // want it ignores it, and waiting for the challenge would mean
+                        // replaying the CONNECT over this hand-rolled NIO exchange.
+                        String authorization = proxyAuthenticator.authorizationValue(proxyHost);
+                        if (authorization != null) {
+                            connect.append("Proxy-Authorization: ").append(authorization).append("\r\n");
                         }
 
                         connect.append("\r\n");

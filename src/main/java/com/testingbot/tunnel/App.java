@@ -38,6 +38,10 @@ public class App {
     private String[] fastFail;
     private String[] connectTo;
     private String localhostPolicy;
+    private String proxyAuthScheme;
+    private String proxySpn;
+    private String krb5KeyTab;
+    private String krb5Principal;
     private String logHttp;
     private String requestIdHeader;
     private String[] headerRules;
@@ -145,6 +149,30 @@ public class App {
         Option seleniumPort = new Option("P", "se-port", true, "The local port your Selenium test should connect to.");
         seleniumPort.setArgName("PORT");
         options.addOption(seleniumPort);
+
+        Option proxyAuthScheme = new Option(null, "proxy-auth-scheme", true,
+            "Authentication scheme for the upstream --proxy: basic (default) or negotiate "
+            + "(SPNEGO/Kerberos, for enterprise proxies). Applies to the upstream proxy only, "
+            + "not to --auth. Use --doctor to check a Negotiate setup.");
+        proxyAuthScheme.setArgName("basic|negotiate");
+        options.addOption(proxyAuthScheme);
+
+        Option proxySpn = new Option(null, "proxy-spn", true,
+            "Service principal for --proxy-auth-scheme negotiate. Defaults to HTTP/<proxy-host>. "
+            + "Accepts HTTP/host or HTTP@host.");
+        proxySpn.setArgName("SPN");
+        options.addOption(proxySpn);
+
+        Option krbKeytab = new Option(null, "krb5-keytab", true,
+            "Keytab to obtain Kerberos credentials from, for unattended use where nobody has run "
+            + "kinit. Requires --krb5-principal. Without it the ambient ticket cache is used.");
+        krbKeytab.setArgName("FILE");
+        options.addOption(krbKeytab);
+
+        Option krbPrincipal = new Option(null, "krb5-principal", true,
+            "Principal to log in as with --krb5-keytab, e.g. user@REALM.");
+        krbPrincipal.setArgName("PRINCIPAL");
+        options.addOption(krbPrincipal);
 
         Option logHttp = new Option(null, "log-http", true,
             "How much HTTP traffic detail to log: none, url, headers, or errors (default). "
@@ -405,6 +433,7 @@ public class App {
             }
 
             if (commandLine.hasOption("doctor")) {
+                applyUpstreamProxyOptions(app, commandLine);
                 app.doctor();
                 return;
             }
@@ -486,10 +515,7 @@ public class App {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Fast-fail mode set for {0}", line);
             }
 
-            if (commandLine.hasOption("proxy")) {
-                String line = commandLine.getOptionValue("proxy");
-                app.setProxy(line);
-            }
+            applyUpstreamProxyOptions(app, commandLine);
 
             if (commandLine.hasOption("extra-headers")) {
                 String extraHeadersValue = commandLine.getOptionValue("extra-headers");
@@ -826,6 +852,42 @@ public class App {
     }
 
     /** The metrics port --ready should query: the flag if given, otherwise the default. */
+    /**
+     * Applies the upstream-proxy options.
+     *
+     * <p>Called from the --doctor branch as well as the normal path: the Kerberos diagnostics
+     * are useless if doctor runs before --proxy and --proxy-auth-scheme have been read, which is
+     * where they sit in the argument handling below.
+     */
+    private static void applyUpstreamProxyOptions(App app, CommandLine commandLine) throws ParseException {
+        if (commandLine.hasOption("proxy")) {
+            app.setProxy(commandLine.getOptionValue("proxy"));
+        }
+            if (commandLine.hasOption("proxy-auth-scheme")) {
+                String value = commandLine.getOptionValue("proxy-auth-scheme").trim();
+                try {
+                    com.testingbot.tunnel.proxy.ProxyAuthenticator.Scheme.parse(value);
+                } catch (IllegalArgumentException unknown) {
+                    throw new ParseException("Invalid --proxy-auth-scheme value: " + value
+                            + ". Expected basic or negotiate.");
+                }
+                app.setProxyAuthScheme(value);
+            }
+            if (commandLine.hasOption("proxy-spn")) {
+                app.setProxySpn(commandLine.getOptionValue("proxy-spn").trim());
+            }
+            if (commandLine.hasOption("krb5-keytab")) {
+                app.setKrb5KeyTab(commandLine.getOptionValue("krb5-keytab").trim());
+            }
+            if (commandLine.hasOption("krb5-principal")) {
+                app.setKrb5Principal(commandLine.getOptionValue("krb5-principal").trim());
+            }
+            if (app.getKrb5KeyTab() != null && app.getKrb5Principal() == null) {
+                throw new ParseException("--krb5-keytab also needs --krb5-principal.");
+            }
+
+    }
+
     private static int readinessPort(CommandLine commandLine) throws ParseException {
         String value = commandLine.getOptionValue("metrics-port");
         if (value == null) {
@@ -941,6 +1003,47 @@ public class App {
     /**
      * @return the fastFail
      */
+    public String getProxyAuthScheme() {
+        return proxyAuthScheme;
+    }
+
+    public void setProxyAuthScheme(String proxyAuthScheme) {
+        this.proxyAuthScheme = proxyAuthScheme;
+    }
+
+    public String getProxySpn() {
+        return proxySpn;
+    }
+
+    public void setProxySpn(String proxySpn) {
+        this.proxySpn = proxySpn;
+    }
+
+    public String getKrb5KeyTab() {
+        return krb5KeyTab;
+    }
+
+    public void setKrb5KeyTab(String krb5KeyTab) {
+        this.krb5KeyTab = krb5KeyTab;
+    }
+
+    public String getKrb5Principal() {
+        return krb5Principal;
+    }
+
+    public void setKrb5Principal(String krb5Principal) {
+        this.krb5Principal = krb5Principal;
+    }
+
+    /** The authenticator every egress path uses for the upstream proxy. */
+    public com.testingbot.tunnel.proxy.ProxyAuthenticator proxyAuthenticator() {
+        return com.testingbot.tunnel.proxy.ProxyAuthenticator.create(
+                com.testingbot.tunnel.proxy.ProxyAuthenticator.Scheme.parse(proxyAuthScheme),
+                getProxyAuth(), proxySpn,
+                krb5KeyTab == null ? null : java.nio.file.Path.of(krb5KeyTab),
+                krb5Principal);
+    }
+
     public String getLogHttp() {
         return logHttp;
     }

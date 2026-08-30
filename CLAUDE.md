@@ -47,7 +47,7 @@ java -jar testingbot-tunnel.jar --doctor
 - Provides health checking via Doctor class
 
 **SSH Tunnel Layer**: 
-- Uses `ch.ethz.ssh2` library (embedded/modified version) for SSH connectivity
+- Uses the `com.github.mwiede:jsch` fork for SSH connectivity
 - `SSHTunnel` class establishes secure connection to TestingBot infrastructure on port 443
 - Creates port forwarding: local proxy port → TestingBot's port 2010, and TestingBot hub → local SSH port
 - Includes keep-alive mechanism and connection monitoring
@@ -84,7 +84,9 @@ java -jar testingbot-tunnel.jar --doctor
 - `--fast-fail-regexps`: Domains to refuse, comma separated. Prefix an entry with `!` to make
   it an exception, so `.*,!ok\.com` blocks everything except `ok.com`
 - `--auth`: Basic authentication for specific hosts
-- `--proxy`: Upstream proxy configuration
+- `--proxy`: Upstream proxy configuration (used by browser traffic *and* the SSH connection)
+- `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy
+- `--proxy-spn`, `--krb5-keytab`, `--krb5-principal`: Kerberos settings for `negotiate`
 - `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default)
 - `--request-id-header`: Correlation header name (default `X-Request-Id`)
 - `--extra-headers`: Custom HTTP request headers to add (JSON map)
@@ -99,6 +101,24 @@ java -jar testingbot-tunnel.jar --doctor
   loopback interface
 - `--metrics-port`: Port for the insight endpoints (default 8003)
 - `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)
+
+### Upstream proxy authentication
+
+`--proxy-auth-scheme negotiate` authenticates to the upstream proxy with SPNEGO/Kerberos, for
+enterprise networks that require it. Scope is the **upstream proxy only** -- per-site `--auth`
+stays Basic.
+
+Credentials come from the ambient ticket cache, or from `--krb5-keytab` with
+`--krb5-principal` for unattended use where nobody has run `kinit`. The service principal
+defaults to `HTTP/<proxy-host>` and can be overridden with `--proxy-spn`.
+
+All three egress paths use it: the CONNECT tunnel, the plain-HTTP client, and the SSH
+connection. The CONNECT and SSH paths send the header pre-emptively; the plain-HTTP path uses
+jetty-client's 407-challenge handling.
+
+`--doctor` reports the whole chain -- JGSS availability, krb5 config, ticket cache or keytab,
+the SPN that will be requested, and whether a service ticket can actually be obtained. Every one
+of these otherwise fails as an indistinguishable 407.
 
 ### HTTP logging
 
@@ -161,5 +181,7 @@ ready and has since lost its connection.
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
 - 209 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
-- Custom SSH2 implementation embedded (not standard JSch)
+- SSH via the maintained JSch fork `com.github.mwiede:jsch`
+- The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
+  networks whose only egress is a proxy
 - Jetty 12.1.x core Handler API for HTTP/proxy functionality; no Servlet/Jakarta EE dependency

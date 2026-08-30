@@ -69,6 +69,28 @@ public final class Doctor {
         }
 
         checkOpenPorts();
+        checkKerberos();
+    }
+
+    /**
+     * Negotiate diagnostics, shipped with the feature rather than after the first support case:
+     * every one of these failures otherwise surfaces as an unexplained 407 from the proxy.
+     */
+    public void checkKerberos() {
+        KerberosDoctor kerberos = new KerberosDoctor(app);
+        if (!kerberos.isApplicable()) {
+            return;
+        }
+        Logger.getLogger(Doctor.class.getName()).log(Level.INFO,
+                "Checking upstream proxy Kerberos/Negotiate configuration");
+        for (KerberosDoctor.Finding finding : kerberos.check()) {
+            if (finding.ok()) {
+                Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "OK - {0}", finding.message());
+            } else {
+                Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, finding.message());
+                hasFailures = true;
+            }
+        }
     }
 
     public void checkOpenPorts() {

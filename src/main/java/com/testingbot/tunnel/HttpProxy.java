@@ -159,6 +159,10 @@ public final class HttpProxy {
         proxyHandler.setResponseHeaderRules(HeaderRules.parse(app.getResponseHeaderRules()));
         proxyHandler.setDebugMode(app.isDebugMode());
         proxyHandler.setUpstreamProxy(app.getProxy(), app.getProxyAuth());
+        proxyHandler.setProxyAuthenticator(app.proxyAuthenticator());
+        proxyHandler.setKerberos(app.getProxySpn(),
+                app.getKrb5KeyTab() == null ? null : java.nio.file.Path.of(app.getKrb5KeyTab()),
+                app.getKrb5Principal());
         proxyHandler.setBasicAuth(app.getBasicAuth());
         proxyHandler.setDnsResolver(dnsResolver);
         proxyHandler.setConnectTo(connectTo);

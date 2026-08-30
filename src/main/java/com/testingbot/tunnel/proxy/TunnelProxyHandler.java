@@ -60,6 +60,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     private FastFailPolicy fastFail = FastFailPolicy.none();
     private Map<String, String> extraHeaders = Collections.emptyMap();
+    private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
+    private String negotiateServiceName;
+    private java.nio.file.Path krb5KeyTab;
+    private String krb5Principal;
     private String requestIdHeader = "X-Request-Id";
     private HeaderRules requestHeaderRules = HeaderRules.none();
     private HeaderRules responseHeaderRules = HeaderRules.none();
@@ -148,6 +152,43 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     }
 
 
+    /** Wires jetty-client's SPNEGO support to the same settings the other paths use. */
+    private void configureNegotiate(HttpClient client, ProxySpec spec) {
+        try {
+            URI proxyUri = new URI("http://" + spec.getHost() + ":" + spec.getPort());
+            org.eclipse.jetty.client.SPNEGOAuthentication spnego =
+                    new org.eclipse.jetty.client.SPNEGOAuthentication(proxyUri);
+            // Host-based service name; jetty appends the host itself.
+            String service = negotiateServiceName;
+            if (service != null) {
+                spnego.setServiceName(service);
+            }
+            if (krb5KeyTab != null) {
+                spnego.setUserKeyTabPath(krb5KeyTab);
+                spnego.setUserName(krb5Principal);
+                spnego.setUseTicketCache(false);
+            } else {
+                spnego.setUseTicketCache(true);
+            }
+            client.getAuthenticationStore().addAuthentication(spnego);
+            LOG.log(Level.INFO, "Upstream proxy authentication: Negotiate (SPN {0})",
+                    proxyAuthenticator.servicePrincipalFor(spec.getHost()));
+        } catch (URISyntaxException ex) {
+            LOG.log(Level.WARNING, "Could not configure Negotiate for the upstream proxy", ex);
+        }
+    }
+
+    public void setProxyAuthenticator(ProxyAuthenticator authenticator) {
+        this.proxyAuthenticator = authenticator == null ? ProxyAuthenticator.none() : authenticator;
+    }
+
+    /** Kerberos settings jetty-client needs directly; the authenticator covers the other paths. */
+    public void setKerberos(String serviceName, java.nio.file.Path keyTab, String principal) {
+        this.negotiateServiceName = serviceName;
+        this.krb5KeyTab = keyTab;
+        this.krb5Principal = principal;
+    }
+
     static String methodLabel(String method) {
         if (method == null) {
             return "OTHER";
@@ -233,13 +274,19 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             } else {
                 proxyConfig.addProxy(new HttpProxy(spec.getHost(), spec.getPort()));
             }
-            if (upstreamProxyAuth != null && !upstreamProxyAuth.isEmpty()) {
+            if (proxyAuthenticator.isNegotiate() && !spec.isSocks5()) {
+                // Jetty's client already knows the 407 -> Negotiate -> retry dance, so the
+                // plain-HTTP path uses that rather than the pre-emptive header the CONNECT
+                // path has to send. Same credentials either way.
+                configureNegotiate(client, spec);
+            } else if (upstreamProxyAuth != null && !upstreamProxyAuth.isEmpty()) {
                 LOG.log(Level.INFO, "Proxy authentication configured");
             }
         }
 
         if (basicAuth != null) {
             AuthenticationStore auth = client.getAuthenticationStore();
+
             for (String entry : basicAuth) {
                 String[] credentials = entry.split(":", 4);
                 if (credentials.length < 4) {

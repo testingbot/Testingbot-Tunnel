@@ -46,7 +46,8 @@ MODULES=(
   java.naming           # DNS/JNDI lookups
   java.management       # Prometheus hotspot collectors (JVM metrics)
   jdk.management
-  java.security.jgss    # SPNEGO/Kerberos auth in the Jetty client
+  java.security.jgss    # SPNEGO/Kerberos auth against an upstream proxy
+  jdk.security.auth     # Krb5LoginModule, for --krb5-keytab login
   java.security.sasl
   java.sql              # logback references it
   jdk.crypto.ec         # TLS elliptic-curve ciphers -- HTTPS fails without it

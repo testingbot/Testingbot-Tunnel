@@ -385,6 +385,10 @@ scenario_upstream_proxy() {
   check_proxy_http upstream-proxy
   check_proxy_connect upstream-proxy
   assert_contains "upstream proxy saw traffic" "$(cat "$WORK/upstream.log")" "CONNECT"
+  # TB-321: the SSH control connection goes through the proxy too, not just browser traffic.
+  # Before this the tunnel connected directly and could not work on proxy-only networks.
+  assert_contains "ssh connection traverses the proxy" "$(cat "$TUNNEL_LOG")" \
+    "SSH connection will traverse the upstream proxy"
   kill $up 2>/dev/null
 }
 
