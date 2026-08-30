@@ -150,6 +150,42 @@ classify_tunnel_failure() {
 }
 
 TUNNEL_STARTS=0
+# Credentials for the tunnel-list API, read the same way the tunnel itself does.
+api_credentials() {
+  if [ -n "${TESTINGBOT_KEY:-}" ] && [ -n "${TESTINGBOT_SECRET:-}" ]; then
+    printf '%s:%s' "$TESTINGBOT_KEY" "$TESTINGBOT_SECRET"
+  elif [ -f "$HOME/.testingbot" ]; then
+    tr -d ' \n' < "$HOME/.testingbot"
+  fi
+}
+
+# Number of tunnels the account currently has, or empty if the API cannot be reached.
+active_tunnel_count() {
+  local creds; creds="$(api_credentials)"
+  [ -z "$creds" ] && return 0
+  curl -s --max-time 15 -u "$creds" https://api.testingbot.com/v1/tunnel/list 2>/dev/null \
+    | python3 -c 'import json,sys
+try:
+    print(len(json.load(sys.stdin)))
+except Exception:
+    pass' 2>/dev/null
+}
+
+# A tunnel keeps its server-side record for a while after the local process exits, and the
+# account allows only a couple at once. Waiting on the local port being free is not enough:
+# the next scenario then fails to create a tunnel at all, which looks like a product bug and
+# is not one. Wait for the account to actually have room.
+wait_for_tunnel_slot() {
+  local limit="${E2E_TUNNEL_SLOT_LIMIT:-1}" count
+  for _ in $(seq 1 40); do
+    count="$(active_tunnel_count)"
+    [ -z "$count" ] && return 0          # API unreachable; let start_tunnel report the failure
+    [ "$count" -le "$limit" ] && return 0
+    sleep 5
+  done
+  printf '    (still %s tunnels active after waiting; starting anyway)\n' "$count"
+}
+
 start_tunnel() {  # "$@" = tunnel args
   local n=$RANDOM
   # Pace starts: the account is rate-limited per hour on tunnel creation.
@@ -157,6 +193,7 @@ start_tunnel() {  # "$@" = tunnel args
     printf '    (pacing %ss before next tunnel)\n' "${E2E_PACE_SECONDS:-15}"
     sleep "${E2E_PACE_SECONDS:-15}"
   fi
+  wait_for_tunnel_slot
   TUNNEL_STARTS=$((TUNNEL_STARTS+1))
   TUNNEL_LOG="$WORK/tunnel-$n.log"
   READY_FILE="$WORK/ready-$n"
@@ -194,6 +231,8 @@ stop_tunnel() {
   # released. Starting the next scenario too eagerly fails with BindException.
   wait_ports_free 4445 "${PROXY_PORT:-}"
   PROXY_PORT=""
+  # Give the server-side record a moment to clear too, so the next scenario is not refused.
+  wait_for_tunnel_slot
 }
 
 wait_ports_free() {
@@ -389,6 +428,50 @@ scenario_upstream_proxy() {
   # Before this the tunnel connected directly and could not work on proxy-only networks.
   assert_contains "ssh connection traverses the proxy" "$(cat "$TUNNEL_LOG")" \
     "SSH connection will traverse the upstream proxy"
+  # Proof from the proxy's own side, not just our log line: the SSH control connection is a
+  # CONNECT to port 443 that is neither the API nor the origin server.
+  assert_neq "proxy saw the ssh CONNECT on :443" \
+    "$(grep -cE 'CONNECT [0-9.]+:443' "$WORK/upstream.log" || true)" "0"
+  # The whole point: a real cloud browser loading a page only this machine serves, with every
+  # hop -- SSH control connection and browser traffic alike -- going through the proxy.
+  check_browser upstream-proxy
+  # Stop the tunnel BEFORE the proxy it depends on: its deregistration call to the API goes
+  # out through --proxy, so killing the proxy first leaves the tunnel registered server-side
+  # and the account short a slot.
+  stop_tunnel
+  kill $up 2>/dev/null
+}
+
+# A proxy that actually demands credentials. Nothing works until the tunnel authenticates to
+# it, including the SSH control connection, so this exercises ProxyAuthenticator on every
+# egress path at once rather than just asserting a header was formatted correctly.
+scenario_upstream_proxy_auth() {
+  local uport; uport="$(free_port)"
+  python3 "$HERE/upstream_proxy.py" "$uport" 'e2euser:e2epass' > "$WORK/upstream-auth.log" 2>&1 &
+  local up=$!
+  sleep 1
+
+  # Reaching ready state at all proves the SSH CONNECT was authenticated: before TB-321 the
+  # SSH connection bypassed --proxy entirely, and this proxy refuses unauthenticated CONNECTs.
+  start_tunnel --proxy "127.0.0.1:$uport" --proxy-userpwd 'e2euser:e2epass' \
+    || { kill $up 2>/dev/null; return 1; }
+  ok "tunnel came up through an authenticating proxy" "ready"
+
+  # Coming up is not on its own proof that SSH used the proxy -- this machine has direct
+  # internet, so a build that ignored --proxy for SSH would also succeed here. The proof is an
+  # IP-form CONNECT to :443 in the proxy log: that is the tunnel server, and browser traffic
+  # and the API both use hostnames. An unauthenticated one would have been answered 407 and
+  # never tunnelled, so its presence means it authenticated.
+  assert_neq "ssh CONNECT went through the authenticating proxy" \
+    "$(grep -cE 'CONNECT [0-9.]+:443' "$WORK/upstream-auth.log" || true)" "0"
+  assert_contains "proxy accepted our credentials" "$(cat "$WORK/upstream-auth.log")" "AUTH-OK"
+  assert_neq "no request was left unauthenticated" \
+    "$(grep -c 'AUTH-REJECTED' "$WORK/upstream-auth.log" || true)" "1"
+
+  check_proxy_http upstream-proxy-auth
+  check_proxy_connect upstream-proxy-auth
+  check_browser upstream-proxy-auth
+  stop_tunnel
   kill $up 2>/dev/null
 }
 
@@ -400,7 +483,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor combined nobump nocache custom_ports localproxy_only tunnel_identifier upstream_proxy)
+ALL_SCENARIOS=(doctor combined nobump nocache custom_ports localproxy_only tunnel_identifier upstream_proxy upstream_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor) echo 0;; *) echo 1;; esac; }
