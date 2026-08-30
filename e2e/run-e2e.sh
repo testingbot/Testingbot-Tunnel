@@ -53,6 +53,7 @@ bad()  { FAIL=$((FAIL+1)); RESULTS+=("FAIL|$1|$2"); printf '    \033[31m✗\033[
 skip() { SKIP=$((SKIP+1)); RESULTS+=("SKIP|$1|$2"); printf '    \033[33m-\033[0m %s — %s\n' "$1" "$2"; }
 
 assert_eq()       { [ "$2" = "$3" ] && ok "$1" "got $2" || bad "$1" "expected $3, got $2"; }
+assert_neq()      { [ "$2" != "$3" ] && ok "$1" "got $2, not $3" || bad "$1" "expected anything but $3"; }
 assert_contains() { case "$2" in *"$3"*) ok "$1" "contains '$3'";; *) bad "$1" "missing '$3' in: $(printf '%.120s' "$2")";; esac; }
 
 # Returns a port free on both the IPv4 loopback and the wildcard address.
@@ -249,7 +250,8 @@ scenario_combined() {
   local mport; mport="$(free_port)"
   start_tunnel \
       --extra-headers '{"X-E2E-Injected":"tunnel-e2e-value"}' \
-      --fast-fail-regexps 'blocked\.example\.com' \
+      --fast-fail-regexps 'blocked\.example\.com,!allowed\.blocked\.example\.com' \
+      --connect-to "remapped.example.invalid:80:127.0.0.1:$ORIGIN_PORT" \
       --metrics-port "$mport" --metrics-auth 'e2euser:e2epass' || return 1
 
   assert_proxy_port_ours combined
@@ -265,6 +267,25 @@ scenario_combined() {
   # here because a refused CONNECT means no TLS tunnel and no HTTP response.
   assert_eq "fast-fail blocks CONNECT" \
     "$(curl -s -o /dev/null -w '%{http_connect}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" https://blocked.example.com/)" "403"
+
+  # The exception must survive the same pattern list that blocks its parent domain.
+  assert_neq "fast-fail exception is not blocked" \
+    "$(curl -s -o /dev/null -w '%{http_connect}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" https://allowed.blocked.example.com/)" "403"
+
+  # remapped.example.invalid does not resolve, so reaching the origin at all proves the dial
+  # was redirected -- and the origin must still see the original Host.
+  assert_contains "connect-to reaches the substitute origin" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://remapped.example.invalid/headers")" \
+    "remapped.example.invalid"
+
+  # Default --localhost-policy allow: the proxy fetches a service on this machine's loopback.
+  assert_eq "localhost reachable by default" \
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/")" "200"
+
+  # Environment aliases: --ready takes its port from TESTINGBOT_METRICS_PORT.
+  TESTINGBOT_METRICS_PORT="$mport" java -jar "$JAR" --ready >/dev/null 2>&1 \
+    && ok "env alias sets the metrics port" "TESTINGBOT_METRICS_PORT honoured" \
+    || bad "env alias sets the metrics port" "--ready could not reach $mport"
 
   assert_eq "metrics rejects anonymous" \
     "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$mport/metrics")" "401"

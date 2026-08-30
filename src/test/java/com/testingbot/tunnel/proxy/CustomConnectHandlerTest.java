@@ -119,42 +119,11 @@ class CustomConnectHandlerTest {
         assertThat(CustomConnectHandler.isSuccessfulConnect("HTTP/1.1 notanumber OK")).isFalse();
     }
 
-    @Test
-    void hostBlocked_matchesLiteralHostname() {
-        List<Pattern> patterns = List.of(Pattern.compile("evil\\.example\\.com"));
-        assertThat(CustomConnectHandler.hostBlocked("evil.example.com:443", patterns)).isTrue();
-        assertThat(CustomConnectHandler.hostBlocked("ok.example.com:443", patterns)).isFalse();
-    }
 
-    @Test
-    void hostBlocked_matchesRegexPattern() {
-        List<Pattern> patterns = List.of(Pattern.compile(".*\\.bad\\.com"));
-        assertThat(CustomConnectHandler.hostBlocked("foo.bad.com:443", patterns)).isTrue();
-        assertThat(CustomConnectHandler.hostBlocked("bad.com:443", patterns)).isFalse();
-    }
 
-    @Test
-    void hostBlocked_stripsPortBeforeMatching() {
-        List<Pattern> patterns = List.of(Pattern.compile("^evil\\.com$"));
-        assertThat(CustomConnectHandler.hostBlocked("evil.com:8443", patterns)).isTrue();
-    }
 
-    @Test
-    void hostBlocked_caseInsensitive() {
-        List<Pattern> patterns = List.of(Pattern.compile("evil\\.com"));
-        assertThat(CustomConnectHandler.hostBlocked("EVIL.COM:443", patterns)).isTrue();
-    }
 
-    @Test
-    void hostBlocked_returnsFalseForEmptyPatterns() {
-        assertThat(CustomConnectHandler.hostBlocked("anything.com:443", Collections.emptyList())).isFalse();
-    }
 
-    @Test
-    void hostBlocked_returnsFalseForNullHost() {
-        List<Pattern> patterns = List.of(Pattern.compile(".*"));
-        assertThat(CustomConnectHandler.hostBlocked(null, patterns)).isFalse();
-    }
 
     @Test
     void setBlackList_silentlyIgnoresInvalidRegex() {
@@ -197,22 +166,5 @@ class CustomConnectHandlerTest {
         assertThat(handler.validateDestination("anything.example.com", 443)).isTrue();
     }
 
-    @Test
-    void hostBlocked_matchesBracketedIpv6Literals() {
-        // "[::1]:443" used to be truncated at the first colon, leaving "[", so no pattern
-        // could ever match an IPv6 destination and fast-fail silently let it through.
-        List<Pattern> patterns = List.of(Pattern.compile("::1"));
 
-        assertThat(CustomConnectHandler.hostBlocked("[::1]:443", patterns)).isTrue();
-        assertThat(CustomConnectHandler.hostBlocked("[::1]", patterns)).isTrue();
-    }
-
-    @Test
-    void hostBlocked_stripsThePortButNotABareIpv6Literal() {
-        assertThat(CustomConnectHandler.hostBlocked("example.com:443",
-                List.of(Pattern.compile("^example\\.com$")))).isTrue();
-        // Unbracketed and multi-colon: a bare IPv6 literal, so nothing may be stripped.
-        assertThat(CustomConnectHandler.hostBlocked("fe80::1",
-                List.of(Pattern.compile("^fe80::1$")))).isTrue();
-    }
 }

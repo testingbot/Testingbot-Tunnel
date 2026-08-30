@@ -60,57 +60,14 @@ public class CustomConnectHandler extends ConnectHandler {
     private final ProxySpec proxySpec;
     private final String proxyUserPassword;
     private String proxyAuth = null;
-    private List<Pattern> blackList = Collections.emptyList();
+    private FastFailPolicy fastFail = FastFailPolicy.none();
+    private ConnectToMap connectTo = ConnectToMap.none();
+    private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
 
     public void setBlackList(String[] patterns) {
-        if (patterns == null || patterns.length == 0) {
-            this.blackList = Collections.emptyList();
-            return;
-        }
-        List<Pattern> compiled = new ArrayList<>(patterns.length);
-        for (String entry : patterns) {
-            if (entry == null) {
-                continue;
-            }
-            String trimmed = entry.trim();
-            if (trimmed.isEmpty()) {
-                continue;
-            }
-            try {
-                compiled.add(Pattern.compile(trimmed));
-            } catch (PatternSyntaxException ex) {
-                Logger.getLogger(CustomConnectHandler.class.getName())
-                    .log(Level.WARNING, "Invalid fast-fail pattern ''{0}'' ignored: {1}",
-                        new Object[]{trimmed, ex.getDescription()});
-            }
-        }
-        this.blackList = Collections.unmodifiableList(compiled);
+        this.fastFail = FastFailPolicy.compile(patterns);
     }
 
-    static boolean hostBlocked(String hostHeader, List<Pattern> patterns) {
-        if (hostHeader == null || patterns.isEmpty()) {
-            return false;
-        }
-        // May arrive as "host", "host:port" or a bracketed IPv6 literal. Truncating at the
-        // first colon turned "[::1]" into "[", so no pattern could ever match an IPv6 target.
-        String host = hostHeader;
-        if (host.startsWith("[")) {
-            int close = host.indexOf(']');
-            host = close > 0 ? host.substring(1, close) : host;
-        } else {
-            int colon = host.indexOf(':');
-            if (colon >= 0 && host.indexOf(':', colon + 1) < 0) {
-                host = host.substring(0, colon);   // host:port, not a bare IPv6 literal
-            }
-        }
-        host = host.toLowerCase(Locale.ROOT);
-        for (Pattern p : patterns) {
-            if (p.matcher(host).find()) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     public CustomConnectHandler(final App app) {
         this.proxySpec = ProxySpec.parse(app.getProxy());
@@ -142,14 +99,28 @@ public class CustomConnectHandler extends ConnectHandler {
      */
     @Override
     protected java.net.InetSocketAddress newConnectAddress(String host, int port) {
+        // --connect-to first: it decides *where* to dial, and --dns then resolves that name.
+        // The CONNECT authority the client sent is untouched, so the tunnel still carries the
+        // original host and the TLS handshake inside it still uses the original SNI.
+        ConnectToMap.Target target = connectTo.remap(host, port);
+        String dialHost = target.host();
+        int dialPort = target.port();
         if (dnsResolver != null) {
             try {
-                return new java.net.InetSocketAddress(dnsResolver.resolve(host)[0], port);
+                return new java.net.InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort);
             } catch (java.net.UnknownHostException ex) {
-                LOG.warn("Custom DNS could not resolve {}: {}", host, ex.getMessage());
+                LOG.warn("Custom DNS could not resolve {}: {}", dialHost, ex.getMessage());
             }
         }
-        return super.newConnectAddress(host, port);
+        return super.newConnectAddress(dialHost, dialPort);
+    }
+
+    public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {
+        this.localhostPolicy = localhostPolicy == null ? LocalhostPolicy.ALLOW : localhostPolicy;
+    }
+
+    public void setConnectTo(ConnectToMap connectTo) {
+        this.connectTo = connectTo == null ? ConnectToMap.none() : connectTo;
     }
 
     public void setDebugMode(boolean mode) {
@@ -264,7 +235,14 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     public boolean validateDestination(String host, int port) {
-        if (hostBlocked(host, blackList)) {
+        if (localhostPolicy.blocks(host)) {
+            Logger.getLogger(CustomConnectHandler.class.getName())
+                .log(Level.INFO, "Localhost policy: rejecting CONNECT to {0}:{1}",
+                     new Object[]{host, port});
+            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("denied_localhost").inc();
+            return false;
+        }
+        if (fastFail.blocks(host)) {
             Logger.getLogger(CustomConnectHandler.class.getName())
                 .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0}:{1} (matched blacklist)",
                      new Object[]{host, port});

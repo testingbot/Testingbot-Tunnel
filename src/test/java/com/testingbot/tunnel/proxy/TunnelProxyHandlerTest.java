@@ -39,55 +39,12 @@ class TunnelProxyHandlerTest {
         }).doesNotThrowAnyException();
     }
 
-    @Test
-    void hostMatchesAny_matchesLiteralHostname() {
-        List<Pattern> patterns = List.of(Pattern.compile("blocked\\.example\\.com"));
-        assertThat(TunnelProxyHandler.hostMatchesAny("blocked.example.com", patterns)).isTrue();
-        assertThat(TunnelProxyHandler.hostMatchesAny("safe.example.com", patterns)).isFalse();
-    }
 
-    @Test
-    void hostMatchesAny_matchesRegex() {
-        List<Pattern> patterns = List.of(Pattern.compile(".*\\.internal$"));
-        assertThat(TunnelProxyHandler.hostMatchesAny("api.internal", patterns)).isTrue();
-        assertThat(TunnelProxyHandler.hostMatchesAny("public.example.com", patterns)).isFalse();
-    }
 
-    @Test
-    void hostMatchesAny_returnsFalseForNullHost() {
-        List<Pattern> patterns = List.of(Pattern.compile(".*"));
-        assertThat(TunnelProxyHandler.hostMatchesAny(null, patterns)).isFalse();
-    }
 
-    @Test
-    void hostMatchesAny_returnsFalseForEmptyPatterns() {
-        assertThat(TunnelProxyHandler.hostMatchesAny("anything.com", Collections.emptyList())).isFalse();
-    }
 
-    @Test
-    void hostMatchesAny_iteratesUntilMatch() {
-        List<Pattern> patterns = List.of(
-                Pattern.compile("nomatch\\.com"),
-                Pattern.compile("alsonomatch\\.com"),
-                Pattern.compile("blocked\\.com"));
-        assertThat(TunnelProxyHandler.hostMatchesAny("blocked.com", patterns)).isTrue();
-    }
 
-    @Test
-    void compilePatterns_skipsInvalidAndBlankEntries() {
-        // A bad regex from --fast-fail-regexps must not take the whole tunnel down.
-        List<Pattern> patterns = TunnelProxyHandler.compilePatterns(
-                new String[]{"good\\.com", "  ", "[unclosed", null});
 
-        assertThat(patterns).hasSize(1);
-        assertThat(TunnelProxyHandler.hostMatchesAny("good.com", patterns)).isTrue();
-    }
-
-    @Test
-    void compilePatterns_emptyInputYieldsNoPatterns() {
-        assertThat(TunnelProxyHandler.compilePatterns(null)).isEmpty();
-        assertThat(TunnelProxyHandler.compilePatterns(new String[0])).isEmpty();
-    }
 
     @Test
     void methodLabel_collapsesUnknownVerbs() {

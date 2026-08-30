@@ -58,7 +58,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private static final Set<String> KNOWN_METHODS = new HashSet<>(Arrays.asList(
             "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "TRACE", "CONNECT"));
 
-    private List<Pattern> blackList = Collections.emptyList();
+    private FastFailPolicy fastFail = FastFailPolicy.none();
     private Map<String, String> extraHeaders = Collections.emptyMap();
     private String proxyAuthHeaderValue;
     private String upstreamProxy;
@@ -66,10 +66,12 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private String[] basicAuth;
     private boolean debugMode;
     private CustomDnsResolver dnsResolver;
+    private ConnectToMap connectTo = ConnectToMap.none();
+    private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
     private long idleTimeoutMs = 120_000L;
 
     public void setBlackList(String[] patterns) {
-        this.blackList = compilePatterns(patterns);
+        this.fastFail = FastFailPolicy.compile(patterns);
     }
 
     public void setExtraHeaders(Map<String, String> extraHeaders) {
@@ -113,6 +115,14 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         this.dnsResolver = dnsResolver;
     }
 
+    public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {
+        this.localhostPolicy = localhostPolicy == null ? LocalhostPolicy.ALLOW : localhostPolicy;
+    }
+
+    public void setConnectTo(ConnectToMap connectTo) {
+        this.connectTo = connectTo == null ? ConnectToMap.none() : connectTo;
+    }
+
     public void setDebugMode(boolean debugMode) {
         this.debugMode = debugMode;
     }
@@ -121,37 +131,6 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         this.idleTimeoutMs = idleTimeoutMs;
     }
 
-    static List<Pattern> compilePatterns(String[] patterns) {
-        if (patterns == null || patterns.length == 0) {
-            return Collections.emptyList();
-        }
-        List<Pattern> compiled = new ArrayList<>(patterns.length);
-        for (String entry : patterns) {
-            if (entry == null || entry.trim().isEmpty()) {
-                continue;
-            }
-            String trimmed = entry.trim();
-            try {
-                compiled.add(Pattern.compile(trimmed));
-            } catch (PatternSyntaxException ex) {
-                LOG.log(Level.WARNING, "Invalid fast-fail pattern ''{0}'' ignored: {1}",
-                        new Object[]{trimmed, ex.getDescription()});
-            }
-        }
-        return Collections.unmodifiableList(compiled);
-    }
-
-    static boolean hostMatchesAny(String host, List<Pattern> patterns) {
-        if (host == null) {
-            return false;
-        }
-        for (Pattern p : patterns) {
-            if (p.matcher(host).find()) {
-                return true;
-            }
-        }
-        return false;
-    }
 
     static String methodLabel(String method) {
         if (method == null) {
@@ -166,21 +145,51 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         super.configureHttpClient(client);
         client.setIdleTimeout(idleTimeoutMs);
 
-        if (dnsResolver != null) {
+        if (dnsResolver != null || !connectTo.isEmpty()) {
+            // Resolving is where --connect-to belongs: it changes where we dial without
+            // touching the request URI, so the Host header and TLS SNI still carry the name
+            // the caller asked for. Rewriting the request instead would defeat the purpose.
+            //
             // Jetty resolves asynchronously; the lookup is blocking, so hand it to the client's
             // executor rather than running it on the caller's thread.
-            client.setSocketAddressResolver((host, port, context, promise) ->
-                client.getExecutor().execute(() -> {
-                    try {
-                        List<InetSocketAddress> resolved = new ArrayList<>();
-                        for (InetAddress address : dnsResolver.resolve(host)) {
-                            resolved.add(new InetSocketAddress(address, port));
-                        }
-                        promise.succeeded(resolved);
-                    } catch (Throwable x) {
-                        promise.failed(x);
+            client.setSocketAddressResolver(new org.eclipse.jetty.util.SocketAddressResolver() {
+                // Built on first use, not here: the client's executor and scheduler are only
+                // available once it has started, and getSocketAddressResolver() is still null
+                // at configure time.
+                private volatile org.eclipse.jetty.util.SocketAddressResolver platform;
+
+                @Override
+                public void resolve(String host, int port, java.util.Map<String, Object> context,
+                                    org.eclipse.jetty.util.Promise<List<InetSocketAddress>> promise) {
+                    ConnectToMap.Target target = connectTo.remap(host, port);
+                    if (dnsResolver == null) {
+                        platformResolver().resolve(target.host(), target.port(), context, promise);
+                        return;
                     }
-                }));
+                    client.getExecutor().execute(() -> {
+                        try {
+                            List<InetSocketAddress> resolved = new ArrayList<>();
+                            for (InetAddress address : dnsResolver.resolve(target.host())) {
+                                resolved.add(new InetSocketAddress(address, target.port()));
+                            }
+                            promise.succeeded(resolved);
+                        } catch (Throwable x) {
+                            promise.failed(x);
+                        }
+                    });
+                }
+
+                private org.eclipse.jetty.util.SocketAddressResolver platformResolver() {
+                    org.eclipse.jetty.util.SocketAddressResolver resolver = platform;
+                    if (resolver == null) {
+                        resolver = new org.eclipse.jetty.util.SocketAddressResolver.Async(
+                                client.getExecutor(), client.getScheduler(),
+                                client.getAddressResolutionTimeout());
+                        platform = resolver;
+                    }
+                    return resolver;
+                }
+            });
         }
         // A forward proxy fans out to many origins at once and relays bodies rather than
         // parsing them, so Jetty's request/response defaults (sized for an application
@@ -238,9 +247,19 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     public boolean handle(Request request, Response response, Callback callback) {
         String method = methodLabel(request.getMethod());
 
-        if (!blackList.isEmpty()) {
-            String host = Request.getServerName(request);
-            if (hostMatchesAny(host, blackList)) {
+        String targetHost = Request.getServerName(request);
+        if (localhostPolicy.blocks(targetHost)) {
+            LOG.log(Level.INFO, "Localhost policy: rejecting {0}", targetHost);
+            TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
+            TunnelMetrics.ERRORS_TOTAL.labels("denied_localhost").inc();
+            Statistics.addRequest();
+            ProxyErrors.write(request, response, callback, ProxyErrors.Reason.DENIED_LOCALHOST);
+            return true;
+        }
+
+        if (!fastFail.isEmpty()) {
+            String host = targetHost;
+            if (fastFail.blocks(host)) {
                 LOG.log(Level.INFO, "Fast-fail: rejecting {0} (matched blacklist)", host);
                 TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
                 TunnelMetrics.ERRORS_TOTAL.labels("blacklisted").inc();

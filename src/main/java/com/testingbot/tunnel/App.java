@@ -36,6 +36,8 @@ public class App {
     private String readyFile;
     private int seleniumPort = 4445;
     private String[] fastFail;
+    private String[] connectTo;
+    private String localhostPolicy;
     private SSHTunnel tunnel;
     private String tunnelIdentifier;
     private String serverIP;
@@ -132,7 +134,24 @@ public class App {
         seleniumPort.setArgName("PORT");
         options.addOption(seleniumPort);
 
-        Option fastFail = new Option("F", "fast-fail-regexps", true, "Specify domains you don't want to proxy, comma separated.");
+        Option localhostPolicy = new Option(null, "localhost-policy", true,
+            "Whether requests coming through the tunnel may reach this machine's loopback "
+            + "interface: allow (default) or deny. Denying is for tunnels meant to reach a "
+            + "staging network and nothing running locally. Does not affect the Selenium relay.");
+        localhostPolicy.setArgName("allow|deny");
+        options.addOption(localhostPolicy);
+
+        Option connectTo = new Option(null, "connect-to", true,
+            "Dial a different host/port than the request asks for, without changing the URL, "
+            + "Host header or TLS SNI. Format HOST1:PORT1:HOST2:PORT2, comma separated. "
+            + "Empty fields match anything / leave that half unchanged.");
+        connectTo.setArgName("HOST1:PORT1:HOST2:PORT2");
+        options.addOption(connectTo);
+
+        Option fastFail = new Option("F", "fast-fail-regexps", true,
+            "Specify domains you don't want to proxy, comma separated. "
+            + "Prefix an entry with ! to make it an exception, so '.*,!ok\\.com' blocks "
+            + "everything except ok.com.");
         fastFail.setArgName("OPTIONS");
         options.addOption(fastFail);
 
@@ -211,7 +230,10 @@ public class App {
         try {
             // Config entries are expanded into the argument list, so everything below sees
             // them exactly as if they had been typed on the command line.
-            commandLine = cmdLinePosixParser.parse(options, ConfigFile.expand(args, options));
+            // Config entries first, then the environment for anything still unset, so the
+            // parser below sees all three sources as if they had been typed on the command line.
+            commandLine = cmdLinePosixParser.parse(options,
+                    EnvOptions.expand(ConfigFile.expand(args, options), options));
             if (commandLine.hasOption("help")) {
                 HelpFormatter help = new HelpFormatter();
                 help.setWidth(180);
@@ -373,6 +395,19 @@ public class App {
             } else {
                 app.clientKey = commandLine.getArgs()[0].trim();
                 app.clientSecret = commandLine.getArgs()[1].trim();
+            }
+
+            if (commandLine.hasOption("localhost-policy")) {
+                String value = commandLine.getOptionValue("localhost-policy").trim();
+                if (!value.equalsIgnoreCase("allow") && !value.equalsIgnoreCase("deny")) {
+                    throw new ParseException("Invalid --localhost-policy value: " + value
+                            + ". Expected allow or deny.");
+                }
+                app.setLocalhostPolicy(value);
+            }
+
+            if (commandLine.hasOption("connect-to")) {
+                app.setConnectTo(commandLine.getOptionValue("connect-to").split(","));
             }
 
             if (commandLine.hasOption("fast-fail-regexps")) {
@@ -836,6 +871,22 @@ public class App {
     /**
      * @return the fastFail
      */
+    public String getLocalhostPolicy() {
+        return localhostPolicy;
+    }
+
+    public void setLocalhostPolicy(String localhostPolicy) {
+        this.localhostPolicy = localhostPolicy;
+    }
+
+    public String[] getConnectTo() {
+        return connectTo;
+    }
+
+    public void setConnectTo(String[] connectTo) {
+        this.connectTo = connectTo;
+    }
+
     public void setFastFail(String[] fastFail) {
         this.fastFail = fastFail;
     }
@@ -960,6 +1011,11 @@ public class App {
     /**
      * @param metricsPort the metricsPort to set
      */
+    /** Companion to {@link #setJettyPort} and {@link #setMetricsPort}; --se-port sets this. */
+    public void setSeleniumPort(int seleniumPort) {
+        this.seleniumPort = seleniumPort;
+    }
+
     public void setMetricsPort(int metricsPort) {
         this.metricsPort = metricsPort;
     }

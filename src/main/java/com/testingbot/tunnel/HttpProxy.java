@@ -1,5 +1,7 @@
 package com.testingbot.tunnel;
 
+import com.testingbot.tunnel.proxy.ConnectToMap;
+import com.testingbot.tunnel.proxy.LocalhostPolicy;
 import com.testingbot.tunnel.proxy.CustomConnectHandler;
 import com.testingbot.tunnel.proxy.CustomDnsResolver;
 import com.testingbot.tunnel.proxy.TunnelProxyHandler;
@@ -131,14 +133,20 @@ public final class HttpProxy {
         // One resolver shared by all three dial paths, so --dns applies to plain HTTP,
         // HTTPS CONNECT and the WebSocket relay alike. Null when --dns was not given.
         CustomDnsResolver dnsResolver = CustomDnsResolver.create(app.getDnsServer());
+        // Likewise shared, so a --connect-to rule means the same thing on every path.
+        ConnectToMap connectTo = ConnectToMap.parse(app.getConnectTo());
+        LocalhostPolicy localhostPolicy = LocalhostPolicy.parse(app.getLocalhostPolicy());
 
         ConnectHandler connectHandler = new CustomConnectHandler(app);
         ((CustomConnectHandler) connectHandler).setBlackList(app.getFastFail());
         ((CustomConnectHandler) connectHandler).setDnsResolver(dnsResolver);
+        ((CustomConnectHandler) connectHandler).setConnectTo(connectTo);
+        ((CustomConnectHandler) connectHandler).setLocalhostPolicy(localhostPolicy);
         tuneTunnelRelay(connectHandler);
 
         WebsocketHandler websocketHandler = new WebsocketHandler();
         websocketHandler.setDnsResolver(dnsResolver);
+        websocketHandler.setConnectTo(connectTo);
         tuneTunnelRelay(websocketHandler);
 
         TunnelProxyHandler proxyHandler = new TunnelProxyHandler();
@@ -149,6 +157,8 @@ public final class HttpProxy {
         proxyHandler.setUpstreamProxy(app.getProxy(), app.getProxyAuth());
         proxyHandler.setBasicAuth(app.getBasicAuth());
         proxyHandler.setDnsResolver(dnsResolver);
+        proxyHandler.setConnectTo(connectTo);
+        proxyHandler.setLocalhostPolicy(localhostPolicy);
 
         connectHandler.setHandler(proxyHandler);
         websocketHandler.setHandler(connectHandler);

@@ -49,6 +49,7 @@ public class WebsocketHandler extends ConnectHandler {
             WebsocketHandler.class.getName() + ".wsResponseHeaders";
 
     private CustomDnsResolver dnsResolver;
+    private ConnectToMap connectTo = ConnectToMap.none();
 
     public WebsocketHandler() {
         super();
@@ -61,14 +62,23 @@ public class WebsocketHandler extends ConnectHandler {
     /** Honours --dns for the WebSocket relay's outbound connection. */
     @Override
     protected InetSocketAddress newConnectAddress(String host, int port) {
+        // --connect-to decides where to dial; --dns then resolves that name. The upgrade
+        // request replayed to the target still carries the original Host header.
+        ConnectToMap.Target target = connectTo.remap(host, port);
+        String dialHost = target.host();
+        int dialPort = target.port();
         if (dnsResolver != null) {
             try {
-                return new InetSocketAddress(dnsResolver.resolve(host)[0], port);
+                return new InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort);
             } catch (java.net.UnknownHostException ex) {
-                LOG.warn("Custom DNS could not resolve {}: {}", host, ex.getMessage());
+                LOG.warn("Custom DNS could not resolve {}: {}", dialHost, ex.getMessage());
             }
         }
-        return super.newConnectAddress(host, port);
+        return super.newConnectAddress(dialHost, dialPort);
+    }
+
+    public void setConnectTo(ConnectToMap connectTo) {
+        this.connectTo = connectTo == null ? ConnectToMap.none() : connectTo;
     }
 
     public WebsocketHandler(Handler handler) {

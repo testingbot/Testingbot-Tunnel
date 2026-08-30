@@ -81,15 +81,28 @@ java -jar testingbot-tunnel.jar --doctor
 
 - `--se-port`: Local Selenium port (default 4445)
 - `--localproxy`: Local HTTP proxy port (default 8087)
-- `--fast-fail-regexps`: Domains to bypass proxy
+- `--fast-fail-regexps`: Domains to refuse, comma separated. Prefix an entry with `!` to make
+  it an exception, so `.*,!ok\.com` blocks everything except `ok.com`
 - `--auth`: Basic authentication for specific hosts
 - `--proxy`: Upstream proxy configuration
 - `--extra-headers`: Custom HTTP headers injection
 - `--tunnel-identifier`: Multiple tunnel support
 - `--nobump`: Disable SSL certificate rewriting
 - `--nocache`: Bypass TestingBot caching layer
+- `--connect-to`: Dial `HOST2:PORT2` for requests naming `HOST1:PORT1`, leaving the URL, Host
+  header and TLS SNI untouched (`HOST1:PORT1:HOST2:PORT2`, comma separated)
+- `--localhost-policy`: `allow` (default) or `deny` for tunnel traffic reaching this machine's
+  loopback interface
 - `--metrics-port`: Port for the insight endpoints (default 8003)
 - `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)
+
+### Configuration sources
+
+Every option can come from three places. Precedence is command line, then `--config` file, then
+environment. Each long option has a `TESTINGBOT_*` alias derived from its name, so `--se-port`
+reads `TESTINGBOT_SE_PORT` -- this is what lets a container be configured without building a
+command line. `--help`, `--version`, `--doctor`, `--ready` and `--config` are excluded, as is
+`TESTINGBOT_AUTH`, which is comma-split into several `--auth` values elsewhere.
 
 ### Insight endpoints (metrics port, default 8003)
 
