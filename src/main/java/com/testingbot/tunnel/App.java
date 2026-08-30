@@ -53,7 +53,8 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private String dnsServer = null;
-    private int metricsPort = 8003;
+    static final int DEFAULT_METRICS_PORT = 8003;
+    private int metricsPort = DEFAULT_METRICS_PORT;
     private String metricsAuth;
     private int sshPort = 0;
     private boolean shared = false;
@@ -138,6 +139,10 @@ public class App {
         Option metrics = Option.builder().longOpt("metrics-port").hasArg().valueSeparator().desc("Use the specified port to access metrics. Default port 8003").build();
         options.addOption(metrics);
 
+        options.addOption(null, "ready", false,
+            "Ask a running tunnel whether it is ready, then exit 0 (ready) or 1 (not ready). "
+            + "Queries /readyz on --metrics-port; intended for Docker HEALTHCHECK and k8s probes.");
+
         Option metricsAuthOpt = Option.builder().longOpt("metrics-auth").hasArg().argName("user:password")
                 .desc("Require HTTP Basic auth on the /metrics (Prometheus) endpoint. Format: user:password. Off by default. Env: TESTINGBOT_METRICS_AUTH.").build();
         options.addOption(metricsAuthOpt);
@@ -215,6 +220,12 @@ public class App {
             } else if (commandLine.hasOption("version")) {
                 System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
                 System.exit(0);
+            } else if (commandLine.hasOption("ready")) {
+                // Queries a tunnel running in another process, so it needs no credentials and
+                // must not perform any of the local setup below -- binding a proxy port here
+                // would be a side effect on a machine whose tunnel is already running.
+                System.exit(ReadinessProbe.probe("127.0.0.1", readinessPort(commandLine),
+                        ReadinessProbe.DEFAULT_TIMEOUT_MS));
             }
 
 
@@ -707,6 +718,19 @@ public class App {
         }
 
         return healthy;
+    }
+
+    /** The metrics port --ready should query: the flag if given, otherwise the default. */
+    private static int readinessPort(CommandLine commandLine) throws ParseException {
+        String value = commandLine.getOptionValue("metrics-port");
+        if (value == null) {
+            return DEFAULT_METRICS_PORT;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException notANumber) {
+            throw new ParseException("Invalid --metrics-port value: " + value);
+        }
     }
 
     public void doctor() {

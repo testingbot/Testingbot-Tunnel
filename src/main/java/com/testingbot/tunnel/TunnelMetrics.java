@@ -200,8 +200,21 @@ public final class TunnelMetrics {
         ).set(1.0);
     }
 
+    /**
+     * Mirrors the {@code TUNNEL_UP} gauge so readiness can be answered without reading it back
+     * out of the Prometheus registry. Set at every transition: tunnel established, connection
+     * lost, reconnected, shut down.
+     */
+    private static volatile boolean tunnelUp;
+
     public static void setTunnelUp(boolean up) {
+        tunnelUp = up;
         TUNNEL_UP.set(up ? 1.0 : 0.0);
+    }
+
+    /** True once the SSH tunnel is authenticated, forwarding and the local proxies are up. */
+    public static boolean isTunnelUp() {
+        return tunnelUp;
     }
 
     public static void refreshUptime(long startTimeMillis) {

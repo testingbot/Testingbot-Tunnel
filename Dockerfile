@@ -36,6 +36,14 @@ USER tunnel
 WORKDIR /home/tunnel
 
 # Metrics / insight endpoint (default --metrics-port 8003)
+# Also serves /healthz (process alive) and /readyz (tunnel forwarding).
 EXPOSE 8003
+
+# --ready queries /readyz and exits 0/1. The image ships no curl or wget on purpose, so the
+# jar probing itself is the lightest option available here. start-period covers tunnel setup,
+# which involves provisioning a remote server and normally takes well under a minute.
+# If you override --metrics-port, override this HEALTHCHECK too -- it assumes the default.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
+    CMD ["java", "-jar", "/opt/testingbot/testingbot-tunnel.jar", "--ready"]
 
 ENTRYPOINT ["/usr/bin/tini", "--", "java", "-jar", "/opt/testingbot/testingbot-tunnel.jar"]

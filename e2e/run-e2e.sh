@@ -271,6 +271,20 @@ scenario_combined() {
   assert_eq "metrics accepts basic auth" \
     "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 -u e2euser:e2epass "http://127.0.0.1:$mport/metrics")" "200"
 
+  # Health probes must answer without credentials even though --metrics-auth is set here;
+  # container probes have no good way to carry them.
+  assert_eq "healthz is anonymous 200" \
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$mport/healthz")" "200"
+  assert_eq "readyz reports ready" \
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "http://127.0.0.1:$mport/readyz")" "200"
+  java -jar "$JAR" --ready --metrics-port "$mport" >/dev/null 2>&1 \
+    && ok "--ready exits 0 for a live tunnel" "exit 0" \
+    || bad "--ready exits 0 for a live tunnel" "non-zero exit"
+  # A port nothing is listening on is the pre-startup case; must fail cleanly, not hang.
+  java -jar "$JAR" --ready --metrics-port "$(free_port)" >/dev/null 2>&1 \
+    && bad "--ready exits 1 when no tunnel" "unexpected exit 0" \
+    || ok "--ready exits 1 when no tunnel" "exit 1"
+
   check_browser combined
 }
 

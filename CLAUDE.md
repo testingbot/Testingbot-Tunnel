@@ -88,6 +88,22 @@ java -jar testingbot-tunnel.jar --doctor
 - `--tunnel-identifier`: Multiple tunnel support
 - `--nobump`: Disable SSL certificate rewriting
 - `--nocache`: Bypass TestingBot caching layer
+- `--metrics-port`: Port for the insight endpoints (default 8003)
+- `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)
+
+### Insight endpoints (metrics port, default 8003)
+
+| Path | Purpose |
+|---|---|
+| `/` | JSON status: version, uptime, request count, bytes transferred |
+| `/metrics` | Prometheus exposition; honours `--metrics-auth` and `?name[]=` filtering |
+| `/healthz` | Liveness -- 200 whenever the process is answering, including during a reconnect |
+| `/readyz` | Readiness -- 200 when the tunnel is forwarding, 503 otherwise |
+
+`/healthz` and `/readyz` are deliberately not behind `--metrics-auth`: container probes cannot
+easily carry credentials, and they disclose nothing beyond up/down. Prefer them over
+`--readyfile`, which is written once and never removed, so it cannot express a tunnel that was
+ready and has since lost its connection.
 
 ## Development Notes
 

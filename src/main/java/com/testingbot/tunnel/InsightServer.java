@@ -50,6 +50,13 @@ public class InsightServer {
         routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/"), new JsonStatusHandler());
         routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/metrics"),
                 protect(new MetricsHandler(), app.getMetricsAuth()));
+        // Deliberately NOT behind --metrics-auth. Docker HEALTHCHECK and Kubernetes probes have
+        // no good way to carry credentials, and these endpoints disclose nothing beyond whether
+        // the tunnel is up -- which anyone who can reach this port can infer anyway.
+        routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/healthz"),
+                new LivenessHandler());
+        routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/readyz"),
+                new ReadinessHandler());
         server.setHandler(routes);
 
         try {
@@ -70,6 +77,38 @@ public class InsightServer {
         BasicAuthHandler auth = new BasicAuthHandler(userColonPassword);
         auth.setHandler(handler);
         return auth;
+    }
+
+    /**
+     * Liveness: the process is running and its HTTP stack is answering. Deliberately says
+     * nothing about the tunnel -- a liveness probe that fails during a reconnect would have
+     * the supervisor kill a process that is busy recovering on its own.
+     */
+    static class LivenessHandler extends Handler.Abstract {
+        @Override
+        public boolean handle(Request request, Response response, Callback callback) {
+            response.setStatus(HttpStatus.OK_200);
+            response.getHeaders().put(HttpHeader.CONTENT_TYPE, "application/json");
+            Content.Sink.write(response, true, "{\"status\":\"ok\"}\n", callback);
+            return true;
+        }
+    }
+
+    /**
+     * Readiness: the tunnel is established and forwarding, so tests routed through it will
+     * work. 503 while starting up or reconnecting, which is what takes an instance out of
+     * rotation without killing it.
+     */
+    static class ReadinessHandler extends Handler.Abstract {
+        @Override
+        public boolean handle(Request request, Response response, Callback callback) {
+            boolean ready = TunnelMetrics.isTunnelUp();
+            response.setStatus(ready ? HttpStatus.OK_200 : HttpStatus.SERVICE_UNAVAILABLE_503);
+            response.getHeaders().put(HttpHeader.CONTENT_TYPE, "application/json");
+            Content.Sink.write(response, true,
+                    "{\"status\":\"" + (ready ? "ready" : "not_ready") + "\"}\n", callback);
+            return true;
+        }
     }
 
     static class JsonStatusHandler extends Handler.Abstract {
