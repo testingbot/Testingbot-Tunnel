@@ -63,6 +63,28 @@ class LocalhostPolicyTest {
     }
 
     @Test
+    void theConfiguredResolverDecides() throws Exception {
+        // The policy and the dial must agree on what a name means. Checking against the platform
+        // resolver while dialling through --dns let a name look external to the policy and
+        // resolve to loopback for the connection, which defeats denying it at all.
+        LocalhostPolicy.HostResolver resolver = host -> host.equals("rebind.example")
+                ? new java.net.InetAddress[]{java.net.InetAddress.getByName("127.0.0.1")}
+                : new java.net.InetAddress[]{java.net.InetAddress.getByName("93.184.216.34")};
+
+        assertThat(LocalhostPolicy.DENY.blocks("rebind.example", resolver)).isTrue();
+        assertThat(LocalhostPolicy.DENY.blocks("elsewhere.example", resolver)).isFalse();
+        // ALLOW still short-circuits before any lookup.
+        assertThat(LocalhostPolicy.ALLOW.blocks("rebind.example", resolver)).isFalse();
+    }
+
+    @Test
+    void withoutAConfiguredResolverThePlatformOneIsUsed() {
+        // --dns is optional; the default behaviour must be unchanged.
+        assertThat(LocalhostPolicy.DENY.blocks("127.0.0.1", null)).isTrue();
+        assertThat(LocalhostPolicy.DENY.blocks("no-such-host.invalid", null)).isFalse();
+    }
+
+    @Test
     void handlesNullAndEmptyTargets() {
         assertThat(LocalhostPolicy.DENY.blocks(null)).isFalse();
         assertThat(LocalhostPolicy.DENY.blocks("")).isFalse();

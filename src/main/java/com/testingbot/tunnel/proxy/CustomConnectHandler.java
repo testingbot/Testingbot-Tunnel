@@ -278,7 +278,7 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     public boolean validateDestination(String host, int port) {
-        if (localhostPolicy.blocks(host)) {
+        if (localhostPolicy.blocks(host, dnsResolver == null ? null : dnsResolver::resolve)) {
             JUL.log(Level.INFO, "Localhost policy: rejecting CONNECT to {0}:{1}",
                      new Object[]{host, port});
             TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("denied_localhost").inc();

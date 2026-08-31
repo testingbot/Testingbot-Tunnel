@@ -37,13 +37,27 @@ public enum LocalhostPolicy {
 
     /** True when {@code target} must be refused under this policy. */
     public boolean blocks(String target) {
+        return blocks(target, null);
+    }
+
+    /**
+     * @param resolver the resolver the dial will use, so the policy and the connection agree on
+     *                 what a name means. Checking against the platform resolver while dialling
+     *                 through {@code --dns} let a name look external here and resolve to
+     *                 loopback a moment later, which defeats the point of denying it.
+     */
+    public boolean blocks(String target, HostResolver resolver) {
         if (this == ALLOW || target == null) {
             return false;
         }
-        return isLoopback(FastFailPolicy.normalise(target));
+        return isLoopback(FastFailPolicy.normalise(target), resolver);
     }
 
     static boolean isLoopback(String host) {
+        return isLoopback(host, null);
+    }
+
+    static boolean isLoopback(String host, HostResolver resolver) {
         if (host.isEmpty()) {
             return false;
         }
@@ -56,7 +70,7 @@ public enum LocalhostPolicy {
         try {
             // Every address, not just the first: a name answering with both a routable address
             // and a loopback one would otherwise slip through half the time.
-            for (InetAddress address : InetAddress.getAllByName(host)) {
+            for (InetAddress address : resolve(host, resolver)) {
                 if (address.isLoopbackAddress() || address.isAnyLocalAddress()) {
                     return true;
                 }
@@ -67,5 +81,21 @@ public enum LocalhostPolicy {
             return false;
         }
         return false;
+    }
+
+    private static InetAddress[] resolve(String host, HostResolver resolver)
+            throws UnknownHostException {
+        return resolver == null ? InetAddress.getAllByName(host) : resolver.resolve(host);
+    }
+
+    /**
+     * Name resolution, narrowed to what this policy needs.
+     *
+     * <p>An interface rather than CustomDnsResolver directly: that class is final with a private
+     * constructor, and the policy only ever needs "what does this name resolve to".
+     */
+    @FunctionalInterface
+    public interface HostResolver {
+        InetAddress[] resolve(String host) throws UnknownHostException;
     }
 }

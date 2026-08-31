@@ -331,7 +331,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             return true;
         }
 
-        if (localhostPolicy.blocks(targetHost)) {
+        if (localhostPolicy.blocks(targetHost, dnsResolver == null ? null : dnsResolver::resolve)) {
             LOG.log(Level.INFO, "Localhost policy: rejecting {0}", targetHost);
             TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
             TunnelMetrics.ERRORS_TOTAL.labels("denied_localhost").inc();
