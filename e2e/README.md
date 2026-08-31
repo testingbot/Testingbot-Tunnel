@@ -85,6 +85,7 @@ may hold tunnel slots on the same account.
 | `localhost_deny` | 1 | `--localhost-policy deny` over CONNECT and plain HTTP |
 | `dns` | 1 | `--dns` against a local server, using a `.invalid` name nothing else can resolve |
 | `websocket` | 1 | `ws://` through both handler paths and a real browser; `wss://` through the CONNECT relay |
+| `protocols` | 1 | which HTTP versions survive the tunnel, and streamed-vs-buffered responses |
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
@@ -100,6 +101,25 @@ may hold tunnel slots on the same account.
 - `socks5_proxy.py` — minimal upstream SOCKS5 proxy for `--proxy socks5://`
 - `ws_client.py` — WebSocket client that upgrades through the local proxy
 - `dns_server.py` — minimal authoritative DNS server for `--dns`
+
+### HTTP versions
+
+Measured by the `protocols` scenario rather than assumed:
+
+| | Result |
+|---|---|
+| HTTP/1.1, plain proxying | by construction — the proxy port is a bare `HttpConnectionFactory` and ProxyHandler's client is HTTP/1.1-only |
+| HTTP/2 over CONNECT | works. The relay is opaque, so ALPN is negotiated end to end |
+| HTTP/2 with SSL bumping | works. Squid terminates the TLS and its ALPN does offer h2 |
+| HTTP/3 | **not carried.** QUIC is UDP; an HTTP CONNECT tunnel is TCP. Carrying UDP through one needs CONNECT-UDP (RFC 9298), which nothing in this path implements, so a proxied client falls back to h2 or 1.1 |
+
+The h3 check only runs on a curl built with HTTP3 support, which most are not; it is skipped
+with that reason rather than silently passing.
+
+Server-side streaming is checked by timing rather than content: a proxy that buffers a whole
+response still delivers every byte, so only the gap between the first byte and the last
+distinguishes the two. Checked proxied, through a CONNECT tunnel, and from a real browser
+consuming an `EventSource` — the last of which is the only one with Squid in the path.
 
 ### wss:// from a browser
 

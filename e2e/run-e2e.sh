@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (14 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (15 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -337,6 +337,49 @@ check_websocket_browser() {  # $1 label, $2 url, $3 "insecure" for a self-signed
     case "$text" in ws-pending|"") sleep 1;; *) break;; esac
   done
   assert_eq "$label ws-browser-echo" "$text" "$MARKER"
+  wd_delete 4445 "$sid"
+}
+
+# Whether a response reaches the client as it is produced or all at once at the end.
+check_streaming() {  # $1 label, $2 url, $3.. extra curl args
+  local label="$1" url="$2"; shift 2
+  local timing first total
+  timing="$(curl -s -N --max-time 60 -o /dev/null -x "127.0.0.1:$PROXY_PORT" "$@" \
+             -w '%{time_starttransfer} %{time_total}' "$url")"
+  first="${timing%% *}"; total="${timing##* }"
+  # The stream runs for three seconds; a buffering proxy makes the first byte arrive with the
+  # last one. Comparing the two is what distinguishes them -- both deliver all the content.
+  if python3 -c "import sys; sys.exit(0 if float('$first') < float('$total') / 2 else 1)"; then
+    ok "$label response is streamed, not buffered" "first byte at ${first}s of ${total}s"
+  else
+    bad "$label response is streamed, not buffered" "first byte at ${first}s of ${total}s"
+  fi
+}
+
+# The same question, but with Squid in the path and the browser's own parser.
+check_sse_browser() {  # $1 label
+  local label="$1" sid text i elapsed
+  if [ "$SKIP_BROWSER" = "1" ]; then skip "$label sse-browser" "E2E_SKIP_BROWSER=1"; return; fi
+  sid="$(wd_new_session 4445 "$label-sse")"
+  if [ -z "$sid" ]; then bad "$label sse-browser-session" "could not create session"; return; fi
+  assert_eq "$label sse-browser-navigate" \
+    "$(wd_goto 4445 "$sid" "http://localhost:$ORIGIN_PORT/ssetest")" "200"
+  for i in $(seq 1 30); do
+    text="$(wd_source 4445 "$sid" | sed -n 's/.*id="marker">\([^<]*\)<.*/\1/p')"
+    case "$text" in sse-pending|"") sleep 1;; *) break;; esac
+  done
+  case "$text" in
+    "$MARKER-0|"*)
+      elapsed="${text#*|}"
+      # The stream lasts three seconds; the first event is emitted immediately. Arriving
+      # inside two proves nothing along the way waited for the response to finish.
+      if [ "$elapsed" -lt 2000 ] 2>/dev/null; then
+        ok "$label browser receives events as they are sent" "first event after ${elapsed}ms"
+      else
+        bad "$label browser receives events as they are sent" "first event after ${elapsed}ms"
+      fi;;
+    *) bad "$label sse-browser-echo" "got '$text'";;
+  esac
   wd_delete 4445 "$sid"
 }
 
@@ -723,6 +766,65 @@ PACFILE
   assert_contains "pac names the offending line" "$out" "2"
 }
 
+# Which HTTP versions survive the tunnel, and whether a response is streamed or buffered.
+#
+# --nobump because HTTP/2 over TLS is negotiated by ALPN between the browser and the origin.
+# The tunnel relays a CONNECT as opaque bytes and cannot affect that, but the remote Squid
+# terminates the TLS when it bumps, and it is Squid that then chooses the ALPN protocol.
+scenario_protocols() {
+  # E2E_PROTOCOLS_BUMP=1 runs the same checks with Squid bumping, which is the default for a
+  # real tunnel. The h2 assertion is relaxed there because the negotiation is then Squid's.
+  local bump_args="--nobump"
+  [ "${E2E_PROTOCOLS_BUMP:-0}" = "1" ] && bump_args=""
+  start_tunnel $bump_args || return 1
+
+  # HTTP/2 through CONNECT. Nothing in the tunnel parses these bytes, so a downgrade here is
+  # something in the path terminating TLS.
+  local negotiated
+  negotiated="$(curl -s -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" --http2 \
+                 -w '%{http_version}' https://example.com/)"
+  if [ "${E2E_PROTOCOLS_BUMP:-0}" = "1" ]; then
+    # Bumping terminates the TLS, so the version is whatever Squid negotiated, not what the
+    # origin offered. Measured as HTTP/2 -- Squid's ALPN does offer it -- but recorded rather
+    # than asserted, because it is a property of the remote Squid and not of this code.
+    ok "http/2 with SSL bumping enabled" "negotiated HTTP/$negotiated"
+  else
+    assert_eq "http/2 survives the CONNECT relay" "$negotiated" "2"
+  fi
+
+  # Plain HTTP proxying is HTTP/1.1 on both hops by construction: the proxy port is a bare
+  # HttpConnectionFactory, and ProxyHandler's client is HTTP/1.1-only. Asserted rather than
+  # assumed, so that turning either into h2c is a decision and not an accident.
+  assert_eq "plain HTTP proxying stays on 1.1" \
+    "$(curl -s -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" --http2 \
+        -w '%{http_version}' "http://127.0.0.1:$ORIGIN_PORT/")" "1.1"
+
+  # HTTP/3 is QUIC, which is UDP. An HTTP CONNECT tunnel is TCP, and carrying UDP through one
+  # needs CONNECT-UDP (RFC 9298), which nothing in this path implements -- so a proxied client
+  # cannot use h3 and falls back. Checked when curl can speak it; most builds cannot.
+  if curl -V | grep -q HTTP3; then
+    if curl -s -o /dev/null --max-time 20 -x "127.0.0.1:$PROXY_PORT" --http3-only \
+         https://example.com/ 2>/dev/null; then
+      bad "http/3 is not carried by a CONNECT tunnel" "unexpectedly succeeded"
+    else
+      ok "http/3 is not carried by a CONNECT tunnel" "refused, as expected"
+    fi
+  else
+    skip "http/3 through the tunnel" "this curl has no HTTP3 support"
+  fi
+
+  # Streaming, proxied and tunnelled. Four events a second apart: a proxy that buffers still
+  # delivers all of them, so only the time to the first byte tells the difference.
+  check_streaming protocols "http://127.0.0.1:$ORIGIN_PORT/stream?events=4&delay=1"
+  check_streaming protocols-connect \
+    "http://127.0.0.1:$ORIGIN_PORT/stream?events=4&delay=1" --proxytunnel
+
+  # And through a real browser, which is the only way the remote Squid is in the path.
+  check_sse_browser protocols
+
+  stop_tunnel
+}
+
 # WebSockets, all four ways they reach the tunnel.
 #
 # --nobump because wss:// is a CONNECT the remote Squid must relay untouched. With SSL bumping
@@ -878,7 +980,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }

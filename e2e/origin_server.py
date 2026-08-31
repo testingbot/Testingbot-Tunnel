@@ -12,6 +12,8 @@ Routes:
   /protected   401 unless Basic auth matches e2euser:e2epass, for --auth
   /ws          WebSocket echo endpoint, for the upgrade relay
   /wstest      page whose JS opens a WebSocket and puts the echo in the DOM, for browsers
+  /stream      server-sent events, one per second (?events=N&delay=S), chunked and flushed
+  /ssetest     page whose JS consumes /stream and records the first event in the DOM
 
 With a cert and key it serves HTTPS instead, so wss:// has somewhere to go.
 
@@ -61,12 +63,65 @@ class Handler(BaseHTTPRequestHandler):
             self._websocket()
         elif path == "/wstest":
             self._send(self._ws_test_page())
+        elif path == "/stream":
+            self._send_stream()
+        elif path == "/ssetest":
+            self._send(self._sse_test_page())
         else:
             body = (
                 "<!doctype html><html><head><title>Tunnel E2E Origin</title></head>"
                 f'<body><h1 id="marker">{MARKER}</h1></body></html>'
             ).encode()
             self._send(body)
+
+    def _sse_test_page(self):
+        """Records the first event and how long it took, so a buffering proxy is visible.
+
+        A proxy that holds the whole response still delivers every event, so correctness alone
+        cannot tell the two apart -- the elapsed time is the only signal, and it has to be
+        measured in the browser.
+        """
+        return (
+            "<!doctype html><html><head><title>SSE E2E</title></head><body>"
+            '<h1 id="marker">sse-pending</h1><script>\n'
+            "var started = Date.now();\n"
+            'var source = new EventSource("/stream?events=4&delay=1");\n'
+            'source.addEventListener("tick", function (event) {\n'
+            "  var elapsed = Date.now() - started;\n"
+            '  document.getElementById("marker").textContent = event.data + "|" + elapsed;\n'
+            "  source.close();\n"
+            "});\n"
+            'source.onerror = function () {'
+            '  document.getElementById("marker").textContent = "sse-error"; };\n'
+            "</script></body></html>").encode()
+
+    def _send_stream(self):
+        """An event stream, flushed per event and with no Content-Length.
+
+        A proxy that buffers a response until it is complete looks perfectly correct on every
+        assertion about content -- the bytes all arrive, just not until the end. Only the timing
+        distinguishes streaming from buffering, so the events are spaced deliberately.
+        """
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        events, delay = 5, 1.0
+        for part in query.split("&"):
+            if part.startswith("events="):
+                events = max(1, min(100, int(part[7:])))
+            elif part.startswith("delay="):
+                delay = max(0.0, min(10.0, float(part[6:])))
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Transfer-Encoding", "chunked")
+        self.end_headers()
+        for i in range(events):
+            payload = ("event: tick\ndata: %s-%d\n\n" % (MARKER, i)).encode()
+            self.wfile.write(b"%x\r\n" % len(payload) + payload + b"\r\n")
+            self.wfile.flush()
+            if i < events - 1:
+                time.sleep(delay)
+        self.wfile.write(b"0\r\n\r\n")
+        self.wfile.flush()
 
     def _ws_test_page(self):
         """A page a real browser can run, so the upgrade is driven by the browser's own stack.
