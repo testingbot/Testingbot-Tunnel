@@ -11,6 +11,11 @@ Routes:
   /large       N MiB of deterministic bytes (?mb=N, default 8), for buffering behaviour
   /protected   401 unless Basic auth matches e2euser:e2epass, for --auth
   /ws          WebSocket echo endpoint, for the upgrade relay
+  /wstest      page whose JS opens a WebSocket and puts the echo in the DOM, for browsers
+
+With a cert and key it serves HTTPS instead, so wss:// has somewhere to go.
+
+    origin_server.py PORT [MARKER] [CERT KEY]
 """
 import base64
 import hashlib
@@ -54,12 +59,37 @@ class Handler(BaseHTTPRequestHandler):
             self._send_protected()
         elif path == "/ws":
             self._websocket()
+        elif path == "/wstest":
+            self._send(self._ws_test_page())
         else:
             body = (
                 "<!doctype html><html><head><title>Tunnel E2E Origin</title></head>"
                 f'<body><h1 id="marker">{MARKER}</h1></body></html>'
             ).encode()
             self._send(body)
+
+    def _ws_test_page(self):
+        """A page a real browser can run, so the upgrade is driven by the browser's own stack.
+
+        The result goes into the DOM because that is what the harness can read back through
+        WebDriver's page source. A failure writes the reason rather than just failing to write
+        the marker, so a broken relay is distinguishable from a page that never loaded.
+        """
+        scheme = "wss" if self.server.is_tls else "ws"
+        host = self.headers.get("Host") or ("127.0.0.1:%d" % self.server.server_address[1])
+        return (
+            "<!doctype html><html><head><title>WebSocket E2E</title></head><body>"
+            '<h1 id="marker">ws-pending</h1><script>\n'
+            f'var socket = new WebSocket("{scheme}://{host}/ws");\n'
+            'var done = function (text) {'
+            '  document.getElementById("marker").textContent = text; };\n'
+            'socket.onopen = function () { socket.send("' + MARKER + '"); };\n'
+            'socket.onmessage = function (event) { done(event.data); };\n'
+            'socket.onerror = function () { done("ws-error"); };\n'
+            'socket.onclose = function (event) {'
+            '  if (document.getElementById("marker").textContent === "ws-pending") {'
+            '    done("ws-closed-" + event.code); } };\n'
+            "</script></body></html>").encode()
 
     def _send_large(self, path):
         """A body far bigger than any single buffer, to catch truncation or stalling."""
@@ -173,4 +203,14 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 7777
-    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()
+    server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    server.is_tls = False
+    if len(sys.argv) > 4:
+        import ssl
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        context.load_cert_chain(certfile=sys.argv[3], keyfile=sys.argv[4])
+        server.socket = context.wrap_socket(server.socket, server_side=True)
+        server.is_tls = True
+        sys.stderr.write("[origin] serving TLS on %d\n" % port)
+        sys.stderr.flush()
+    server.serve_forever()

@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (13 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (14 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -261,15 +261,95 @@ check_proxy_http()    { assert_eq "$1 http-via-proxy"  "$(curl -s -o /dev/null -
 check_proxy_connect() { assert_eq "$1 https-connect"   "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" https://example.com/)" "200"; }
 check_se_status()     { assert_contains "$1 se-hub-status" "$(curl -s --max-time 30 "http://127.0.0.1:${2:-4445}/wd/hub/status")" '"ready":true'; }
 
+# A TLS twin of the origin, for wss://. Self-signed: the tunnel relays these bytes without
+# being able to read them either, so what the certificate says is not what is under test.
+TLS_ORIGIN_PORT=""; TLS_ORIGIN_PID=""
+start_tls_origin() {
+  local cert="${E2E_TLS_CERT:-$WORK/origin.crt}" key="${E2E_TLS_KEY:-$WORK/origin.key}"
+  if [ -n "${E2E_TLS_CERT:-}" ] && [ -f "$cert" ] && [ -f "$key" ]; then
+    TLS_ORIGIN_PORT="$(free_port)"
+    python3 "$HERE/origin_server.py" "$TLS_ORIGIN_PORT" "$MARKER" "$cert" "$key" \
+      > "$WORK/origin-tls.log" 2>&1 &
+    TLS_ORIGIN_PID=$!
+    sleep 1
+    return 0
+  fi
+  if ! command -v openssl >/dev/null 2>&1; then
+    skip "tls origin" "openssl not available"
+    return 1
+  fi
+  openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+      -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+      -keyout "$key" -out "$cert" >/dev/null 2>&1 || { bad "tls origin" "openssl failed"; return 1; }
+
+  TLS_ORIGIN_PORT="$(free_port)"
+  python3 "$HERE/origin_server.py" "$TLS_ORIGIN_PORT" "$MARKER" "$cert" "$key" \
+    > "$WORK/origin-tls.log" 2>&1 &
+  TLS_ORIGIN_PID=$!
+  local i
+  for i in $(seq 1 40); do
+    if curl -sk --max-time 5 "https://127.0.0.1:$TLS_ORIGIN_PORT/" 2>/dev/null | grep -q "$MARKER"; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  bad "tls origin" "did not start on port $TLS_ORIGIN_PORT"
+  return 1
+}
+
+stop_tls_origin() {
+  [ -n "$TLS_ORIGIN_PID" ] && kill "$TLS_ORIGIN_PID" 2>/dev/null
+  TLS_ORIGIN_PID=""
+}
+
 # WebsocketHandler is a whole handler in the proxy chain with no other end-to-end coverage.
 # An upgrade is relayed as opaque bytes once the handshake has been replayed against the
 # target, so only a real upgrade carrying a real frame exercises it.
-check_websocket() {  # $1 label
-  local out
-  out="$(python3 "$HERE/ws_client.py" "127.0.0.1:$PROXY_PORT" "127.0.0.1:$ORIGIN_PORT" \
-          "ws-e2e-payload" 2>&1)" \
-    && assert_eq "$1 websocket-echo" "$out" "ws-e2e-payload" \
-    || bad "$1 websocket-relay" "$(printf '%.160s' "$out")"
+check_websocket() {  # $1 label, $2 mode (default proxy), $3 origin (default the plain origin)
+  local label="$1" mode="${2:-proxy}" origin="${3:-127.0.0.1:$ORIGIN_PORT}" out
+  out="$(python3 "$HERE/ws_client.py" "127.0.0.1:$PROXY_PORT" "$origin" \
+          "ws-e2e-payload" "$mode" 2>&1)" \
+    && assert_eq "$label websocket-echo ($mode)" "$out" "ws-e2e-payload" \
+    || bad "$label websocket-relay ($mode)" "$(printf '%.160s' "$out")"
+}
+
+# The same upgrade, but driven by a real browser in TestingBot's cloud rather than by a local
+# socket. This is the path a customer's test actually takes, and it is the one that goes
+# through the remote Squid: ws:// is a plain upgrade Squid must relay, and wss:// is a CONNECT
+# it must not try to interpret.
+check_websocket_browser() {  # $1 label, $2 url, $3 "insecure" for a self-signed origin
+  local label="$1" url="$2" insecure="${3:-}" sid text i
+  if [ "$SKIP_BROWSER" = "1" ]; then skip "$label ws-browser" "E2E_SKIP_BROWSER=1"; return; fi
+  sid="$(wd_new_session 4445 "$label" "" "$insecure")"
+  if [ -z "$sid" ]; then bad "$label ws-browser-session" "could not create session"; return; fi
+  local nav; nav="$(wd_goto_verbose 4445 "$sid" "$url")"
+  if [ "${nav%%|*}" != "200" ]; then
+    bad "$label ws-browser-navigate" "$(printf '%.200s' "${nav#*|}")"
+    wd_delete 4445 "$sid"
+    return
+  fi
+  ok "$label ws-browser-navigate" "200"
+
+  # The socket opens after load, so poll the DOM rather than reading it once. The page writes
+  # why it failed, so a refused upgrade is distinguishable from a page that never ran.
+  for i in $(seq 1 30); do
+    text="$(wd_source 4445 "$sid" | sed -n 's/.*id="marker">\([^<]*\)<.*/\1/p')"
+    case "$text" in ws-pending|"") sleep 1;; *) break;; esac
+  done
+  assert_eq "$label ws-browser-echo" "$text" "$MARKER"
+  wd_delete 4445 "$sid"
+}
+
+# The browser's own TLS path through the tunnel and Squid, as distinct from curl's.
+check_browser_https() {  # $1 label
+  local label="$1" sid nav
+  if [ "$SKIP_BROWSER" = "1" ]; then skip "$label https-browser" "E2E_SKIP_BROWSER=1"; return; fi
+  sid="$(wd_new_session 4445 "$label-https")"
+  if [ -z "$sid" ]; then bad "$label https-browser-session" "could not create session"; return; fi
+  nav="$(wd_goto_verbose 4445 "$sid" "https://example.com/")"
+  if [ "${nav%%|*}" = "200" ]; then ok "$label browser reaches https through the tunnel" "200"
+  else bad "$label browser reaches https through the tunnel" "$(printf '%.200s' "${nav#*|}")"; fi
+  wd_delete 4445 "$sid"
 }
 
 # A body far larger than any single buffer, both proxied and through a CONNECT tunnel.
@@ -643,6 +723,48 @@ PACFILE
   assert_contains "pac names the offending line" "$out" "2"
 }
 
+# WebSockets, all four ways they reach the tunnel.
+#
+# --nobump because wss:// is a CONNECT the remote Squid must relay untouched. With SSL bumping
+# it decrypts and re-encrypts, and a bumped connection carrying an Upgrade is where WebSocket
+# support classically breaks -- Squid has to pass a 101 through rather than treating the
+# response as the end of a request. Running this scenario without --nobump is the way to find
+# out whether that still holds.
+scenario_websocket() {
+  start_tls_origin || return 1
+  # E2E_WS_BUMP=1 runs the same scenario with Squid bumping, to tell a bump problem from a
+  # certificate problem: the two fail identically from the browser's side.
+  local bump_args="--nobump"
+  [ "${E2E_WS_BUMP:-0}" = "1" ] && bump_args=""
+  start_tunnel $bump_args || { stop_tls_origin; return 1; }
+
+  # Local first, so a failure below can be attributed. These need no browser and no Squid.
+  check_websocket websocket proxy
+  check_websocket websocket connect
+  check_websocket websocket tls "127.0.0.1:$TLS_ORIGIN_PORT"
+
+  # Then the real thing: a browser in the cloud opening a socket back to this machine.
+  check_websocket_browser websocket-ws "http://localhost:$ORIGIN_PORT/wstest"
+
+  # wss:// from the browser needs a certificate the *remote* side trusts. acceptInsecureCerts
+  # only relaxes the browser, and the refusal happens before that -- at Squid, which terminates
+  # or validates the TLS it is asked to carry. Verified: a self-signed origin fails with
+  # ERR_SSL_PROTOCOL_ERROR identically with and without --nobump, so it is the certificate and
+  # not the bumping. A harness cannot mint a certificate that chain, so this runs only when one
+  # is supplied.
+  if [ -n "${E2E_TLS_CERT:-}" ] && [ -n "${E2E_TLS_KEY:-}" ]; then
+    check_websocket_browser websocket-wss "https://${E2E_TLS_HOST:-localhost}:$TLS_ORIGIN_PORT/wstest"
+  else
+    skip "websocket-wss ws-browser-echo" "set E2E_TLS_CERT/E2E_TLS_KEY to a trusted certificate"
+    # What can still be checked without one: that the browser reaches https at all through the
+    # tunnel. If this fails, TLS through Squid is broken and the skip above is hiding it.
+    check_browser_https websocket-wss
+  fi
+
+  stop_tunnel
+  stop_tls_origin
+}
+
 # --dns sends name resolution to a server the operator names instead of the platform resolver.
 # It is easy for this to be wired and yet dead -- the option spent years setting JDK 8 system
 # properties that had no effect on any supported JDK -- and only a name that cannot resolve any
@@ -756,7 +878,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }

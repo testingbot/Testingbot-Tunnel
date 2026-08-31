@@ -6,14 +6,22 @@ Jetty 12 migration -- had no end-to-end coverage at all. An upgrade is relayed a
 once the handshake is replayed against the target, so nothing short of a real upgrade and a
 real frame exercises it.
 
+Three modes, because a WebSocket reaches the tunnel three different ways:
+
+  proxy    absolute-URI GET with an Upgrade -- handled by WebsocketHandler
+  connect  CONNECT first, then the upgrade inside the tunnel -- handled by CustomConnectHandler
+           relaying bytes it does not interpret
+  tls      CONNECT, then TLS, then the upgrade inside that, which is what wss:// really is
+
 Prints the echoed payload on success and exits 0; prints the reason and exits 1 otherwise.
 
-    ws_client.py PROXY_HOST:PROXY_PORT ORIGIN_HOST:ORIGIN_PORT MESSAGE
+    ws_client.py PROXY_HOST:PROXY_PORT ORIGIN_HOST:ORIGIN_PORT MESSAGE [MODE]
 """
 import base64
 import hashlib
 import os
 import socket
+import ssl
 import struct
 import sys
 
@@ -62,18 +70,49 @@ def read_frame(sock):
     return read_exactly(sock, length) if length else b""
 
 
+def open_tunnel(proxy_host, proxy_port, origin):
+    """CONNECT through the proxy and hand back the socket, positioned at the tunnel."""
+    sock = socket.create_connection((proxy_host, proxy_port), timeout=30)
+    sock.settimeout(30)
+    sock.sendall((f"CONNECT {origin} HTTP/1.1\r\nHost: {origin}\r\n\r\n").encode())
+    head = b""
+    while b"\r\n\r\n" not in head:
+        byte = sock.recv(1)
+        if not byte:
+            fail("proxy closed the connection during CONNECT: %r" % head[:200])
+        head += byte
+    status = head.split(b"\r\n", 1)[0].decode(errors="replace")
+    if " 200" not in status:
+        fail("CONNECT was refused: %r" % status)
+    return sock
+
+
 def main():
     proxy_host, proxy_port = sys.argv[1].rsplit(":", 1)
     origin = sys.argv[2]
     message = sys.argv[3].encode()
+    mode = sys.argv[4] if len(sys.argv) > 4 else "proxy"
+
+    if mode == "proxy":
+        sock = socket.create_connection((proxy_host, int(proxy_port)), timeout=30)
+        sock.settimeout(30)
+        # An absolute URI, because this goes to a forward proxy rather than to the origin.
+        target = f"http://{origin}/ws"
+    else:
+        sock = open_tunnel(proxy_host, int(proxy_port), origin)
+        if mode == "tls":
+            # The origin's certificate is self-signed, and checking it is not what this test
+            # is about -- the tunnel relays these bytes without being able to read them either.
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+            context.check_hostname = False
+            context.verify_mode = ssl.CERT_NONE
+            sock = context.wrap_socket(sock, server_hostname=origin.rsplit(":", 1)[0])
+        # Inside the tunnel we are speaking to the origin directly, so an origin-form path.
+        target = "/ws"
 
     key = base64.b64encode(os.urandom(16)).decode()
-    sock = socket.create_connection((proxy_host, int(proxy_port)), timeout=30)
-    sock.settimeout(30)
-
-    # An absolute URI, because this goes to a forward proxy rather than to the origin.
     request = (
-        f"GET http://{origin}/ws HTTP/1.1\r\n"
+        f"GET {target} HTTP/1.1\r\n"
         f"Host: {origin}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -86,7 +125,7 @@ def main():
     while b"\r\n\r\n" not in head:
         byte = sock.recv(1)
         if not byte:
-            fail("proxy closed the connection during the upgrade: %r" % head[:200])
+            fail("connection closed during the upgrade: %r" % head[:200])
         head += byte
 
     status = head.split(b"\r\n", 1)[0].decode(errors="replace")

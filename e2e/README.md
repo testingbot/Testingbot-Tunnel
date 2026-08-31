@@ -84,6 +84,7 @@ may hold tunnel slots on the same account.
 | `pac` | 0 | `--pac-local` routing decisions via `--pac-test`, and refusal of unsupported syntax |
 | `localhost_deny` | 1 | `--localhost-policy deny` over CONNECT and plain HTTP |
 | `dns` | 1 | `--dns` against a local server, using a `.invalid` name nothing else can resolve |
+| `websocket` | 1 | `ws://` through both handler paths and a real browser; `wss://` through the CONNECT relay |
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
@@ -99,3 +100,15 @@ may hold tunnel slots on the same account.
 - `socks5_proxy.py` — minimal upstream SOCKS5 proxy for `--proxy socks5://`
 - `ws_client.py` — WebSocket client that upgrades through the local proxy
 - `dns_server.py` — minimal authoritative DNS server for `--dns`
+
+### wss:// from a browser
+
+The `websocket` scenario checks `wss://` through the tunnel's own CONNECT relay, which is the
+tunnel's actual responsibility, and skips the browser half unless `E2E_TLS_CERT` and
+`E2E_TLS_KEY` point at a certificate the remote side trusts.
+
+A self-signed origin fails from the browser with `ERR_SSL_PROTOCOL_ERROR`, **identically with
+and without `--nobump`** -- so it is the certificate, not the SSL bumping. `acceptInsecureCerts`
+does not help: it relaxes the browser, and the refusal happens before that. The scenario proves
+the browser reaches `https://` through the tunnel in the same run, so the skip cannot hide a
+genuinely broken TLS path.
