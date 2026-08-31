@@ -144,6 +144,7 @@ public final class HttpProxy {
         ((CustomConnectHandler) connectHandler).setDnsResolver(dnsResolver);
         ((CustomConnectHandler) connectHandler).setConnectTo(connectTo);
         ((CustomConnectHandler) connectHandler).setLocalhostPolicy(localhostPolicy);
+        ((CustomConnectHandler) connectHandler).setPacPolicy(app.getPacPolicy());
         tuneTunnelRelay(connectHandler);
 
         WebsocketHandler websocketHandler = new WebsocketHandler();
@@ -167,6 +168,7 @@ public final class HttpProxy {
         proxyHandler.setDnsResolver(dnsResolver);
         proxyHandler.setConnectTo(connectTo);
         proxyHandler.setLocalhostPolicy(localhostPolicy);
+        proxyHandler.setPacPolicy(app.getPacPolicy());
 
         connectHandler.setHandler(proxyHandler);
         websocketHandler.setHandler(connectHandler);

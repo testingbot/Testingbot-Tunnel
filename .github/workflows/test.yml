@@ -11,8 +11,12 @@ jobs:
     runs-on: ubuntu-latest
     
     strategy:
+      fail-fast: false
       matrix:
-        java-version: [17, 21]
+        # 17 is the supported floor, 21 and 25 the LTS releases above it. 25 matters
+        # specifically: dnsjava's multi-release service registration broke every hostname
+        # lookup on JVMs >= 18, and nothing below that line would have caught it.
+        java-version: [17, 21, 25]
     
     steps:
     - name: Checkout code

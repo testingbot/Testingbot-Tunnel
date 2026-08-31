@@ -63,6 +63,7 @@ public class CustomConnectHandler extends ConnectHandler {
     private FastFailPolicy fastFail = FastFailPolicy.none();
     private ConnectToMap connectTo = ConnectToMap.none();
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
+    private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
 
     public void setBlackList(String[] patterns) {
         this.fastFail = FastFailPolicy.compile(patterns);
@@ -117,6 +118,30 @@ public class CustomConnectHandler extends ConnectHandler {
             }
         }
         return super.newConnectAddress(dialHost, dialPort);
+    }
+
+    public void setPacPolicy(com.testingbot.tunnel.pac.PacPolicy pacPolicy) {
+        this.pacPolicy = pacPolicy;
+    }
+
+    /**
+     * The upstream proxy for this destination.
+     *
+     * <p>--pac-local wins over --proxy for hosts the file routes: a PAC file is per-destination
+     * by definition, and a static --proxy is the fallback for everything it does not mention.
+     * Only the first directive is used; the failover list would need a retry loop through this
+     * hand-rolled NIO exchange to honour properly.
+     */
+    private ProxySpec upstreamFor(String host, int port) {
+        if (pacPolicy == null) {
+            return proxySpec;
+        }
+        com.testingbot.tunnel.pac.PacResult result =
+                pacPolicy.resolve("https://" + host + ":" + port + "/", host);
+        if (result.first().isDirect()) {
+            return null;
+        }
+        return ProxySpec.parse(result.first().toProxySpec());
     }
 
     public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {
@@ -258,7 +283,10 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
-        if (proxyHost == null) {
+        // Resolved per destination: with --pac-local the answer differs by host, and without it
+        // this is just the static --proxy.
+        ProxySpec upstream = upstreamFor(host, port);
+        if (upstream == null) {
             // Not wrapped in timedDial: Jetty's default connectToServer succeeds the promise as
             // soon as the non-blocking connect is *initiated*, so wrapping it recorded every
             // dial as an instant success and never saw a refusal. Start the clock here and stop
@@ -269,10 +297,10 @@ public class CustomConnectHandler extends ConnectHandler {
             return;
         }
         Promise<SocketChannel> timed = TunnelMetrics.timedDial("connect", promise);
-        if (proxySpec.isSocks5()) {
-            connectViaSocks5(host, port, timed);
+        if (upstream.isSocks5()) {
+            connectViaSocks5(upstream, host, port, timed);
         } else {
-            connectToProxy(request, host, port, timed);
+            connectToProxy(upstream, request, host, port, timed);
         }
     }
 
@@ -281,13 +309,14 @@ public class CustomConnectHandler extends ConnectHandler {
      * so it runs on the executor rather than being woven into the selector loop the HTTP
      * CONNECT path uses; the channel is switched back to non-blocking before Jetty gets it.
      */
-    private void connectViaSocks5(String host, int port, Promise<SocketChannel> promise) {
+    private void connectViaSocks5(ProxySpec upstream, String host, int port,
+                                  Promise<SocketChannel> promise) {
         getExecutor().execute(() -> {
             SocketChannel channel = null;
             try {
                 channel = SocketChannel.open();
                 channel.socket().setTcpNoDelay(true);
-                channel.socket().connect(newConnectAddress(proxyHost, proxyPort), (int) getConnectTimeout());
+                channel.socket().connect(newConnectAddress(upstream.getHost(), upstream.getPort()), (int) getConnectTimeout());
                 // Bounds the handshake reads too, not just the TCP connect: without this a
                 // SOCKS proxy that stalls mid-handshake pins this thread and the CONNECT
                 // callback is never completed, so the client request hangs forever.
@@ -301,12 +330,12 @@ public class CustomConnectHandler extends ConnectHandler {
                 channel.configureBlocking(false);
                 if (debugMode) {
                     LOG.info("Established SOCKS5 tunnel through {}:{} to {}:{}",
-                            proxyHost, proxyPort, host, port);
+                            upstream.getHost(), upstream.getPort(), host, port);
                 }
                 promise.succeeded(channel);
             } catch (Throwable x) {
                 LOG.error("Failed to establish SOCKS5 tunnel through {}:{} to {}:{}: {}",
-                        proxyHost, proxyPort, host, port, x.getMessage());
+                        upstream.getHost(), upstream.getPort(), host, port, x.getMessage());
                 if (channel != null) {
                     try {
                         channel.close();
@@ -319,14 +348,15 @@ public class CustomConnectHandler extends ConnectHandler {
         });
     }
 
-    private void connectToProxy(Request request, String host, int port, Promise<SocketChannel> promise) {
+    private void connectToProxy(ProxySpec upstream, Request request, String host, int port,
+                                Promise<SocketChannel> promise) {
         SocketChannel channel = null;
         Selector selector = null;
         try {
             channel = SocketChannel.open();
             channel.socket().setTcpNoDelay(true);
             channel.configureBlocking(false);
-            channel.connect(newConnectAddress(proxyHost, proxyPort));
+            channel.connect(newConnectAddress(upstream.getHost(), upstream.getPort()));
 
             selector = Selector.open();
             channel.register(selector, SelectionKey.OP_CONNECT);
@@ -337,7 +367,7 @@ public class CustomConnectHandler extends ConnectHandler {
             while (true) {
                 long remaining = deadline - System.currentTimeMillis();
                 if (remaining <= 0) {
-                    throw new IOException("Timed out waiting for upstream proxy " + proxyHost + ":" + proxyPort);
+                    throw new IOException("Timed out waiting for upstream proxy " + upstream.getHost() + ":" + upstream.getPort());
                 }
                 int ready = selector.select(remaining);
                 if (ready == 0) {
@@ -352,7 +382,7 @@ public class CustomConnectHandler extends ConnectHandler {
 
                     if (key.isConnectable()) {
                         if (!channel.finishConnect()) {
-                            throw new IOException("finishConnect() returned false for " + proxyHost + ":" + proxyPort);
+                            throw new IOException("finishConnect() returned false for " + upstream.getHost() + ":" + upstream.getPort());
                         }
 
                         channel.register(selector, SelectionKey.OP_READ);
@@ -379,7 +409,7 @@ public class CustomConnectHandler extends ConnectHandler {
                         // Sent pre-emptively rather than after a 407. A proxy that does not
                         // want it ignores it, and waiting for the challenge would mean
                         // replaying the CONNECT over this hand-rolled NIO exchange.
-                        String authorization = proxyAuthenticator.authorizationValue(proxyHost);
+                        String authorization = proxyAuthenticator.authorizationValue(upstream.getHost());
                         if (authorization != null) {
                             connect.append("Proxy-Authorization: ").append(authorization).append("\r\n");
                         }
@@ -409,7 +439,7 @@ public class CustomConnectHandler extends ConnectHandler {
                             }
                         }
                         if (n < 0) {
-                            throw new IOException("Upstream proxy " + proxyHost + ":" + proxyPort + " closed connection before sending CONNECT response");
+                            throw new IOException("Upstream proxy " + upstream.getHost() + ":" + upstream.getPort() + " closed connection before sending CONNECT response");
                         }
                         // Wait until we've seen the end of headers
                         if (responseBuf.indexOf("\r\n\r\n") < 0) {
@@ -420,12 +450,12 @@ public class CustomConnectHandler extends ConnectHandler {
                         if (!isSuccessfulConnect(statusLine)) {
                             throw new IOException(String.format(
                                 "Upstream proxy (%s:%d) rejected CONNECT to %s:%d. Status: %s",
-                                proxyHost, proxyPort, host, port, statusLine));
+                                upstream.getHost(), upstream.getPort(), host, port, statusLine));
                         }
 
                         if (debugMode) {
                             LOG.info("Successfully established CONNECT tunnel through upstream proxy {}:{} to {}:{}",
-                                    proxyHost, proxyPort, host, port);
+                                    upstream.getHost(), upstream.getPort(), host, port);
                         }
 
                         selector.close();
@@ -440,7 +470,7 @@ public class CustomConnectHandler extends ConnectHandler {
             // leaking the SocketChannel on every CONNECT and leaving the dial promise (and so
             // the client's request) uncompleted.
             LOG.error("Failed to establish CONNECT tunnel through upstream proxy {}:{} to {}:{}: {}",
-                    proxyHost, proxyPort, host, port, x.getMessage());
+                    upstream.getHost(), upstream.getPort(), host, port, x.getMessage());
             if (channel != null) {
                 try {
                     channel.close();

@@ -75,6 +75,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private CustomDnsResolver dnsResolver;
     private ConnectToMap connectTo = ConnectToMap.none();
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
+    private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private long idleTimeoutMs = 120_000L;
 
     public void setBlackList(String[] patterns) {
@@ -133,6 +134,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     public void setDnsResolver(CustomDnsResolver dnsResolver) {
         this.dnsResolver = dnsResolver;
+    }
+
+    public void setPacPolicy(com.testingbot.tunnel.pac.PacPolicy pacPolicy) {
+        this.pacPolicy = pacPolicy;
     }
 
     public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {

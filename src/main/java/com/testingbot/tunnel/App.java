@@ -38,6 +38,8 @@ public class App {
     private String[] fastFail;
     private String[] connectTo;
     private String localhostPolicy;
+    private String pacLocal;
+    private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private String proxyAuthScheme;
     private String proxySpn;
     private String krb5KeyTab;
@@ -87,7 +89,8 @@ public class App {
         return 0.0f;
     }
 
-    private static final int MINIMUM_JAVA_VERSION = 11;
+    /** Matches maven.compiler.release; the jar's class files cannot load below this. */
+    private static final int MINIMUM_JAVA_VERSION = 17;
 
     static boolean checkJavaVersion() {
         int major = getMajorJavaVersion();
@@ -149,6 +152,23 @@ public class App {
         Option seleniumPort = new Option("P", "se-port", true, "The local port your Selenium test should connect to.");
         seleniumPort.setArgName("PORT");
         options.addOption(seleniumPort);
+
+        // Distinct from --pac, which forwards a PAC URL to the cloud browser. This one is
+        // evaluated here, by this process, to pick the tunnel's own egress.
+        Option pacLocal = new Option(null, "pac-local", true,
+            "Choose this tunnel's egress per destination from a proxy auto-config file. Accepts "
+            + "a path or an http(s) URL. Evaluated locally by a restricted interpreter -- no "
+            + "JavaScript engine is embedded -- so unsupported syntax is reported rather than "
+            + "guessed at. Overrides --proxy for hosts the file routes. Unrelated to --pac, "
+            + "which tells the remote browser which PAC to use.");
+        pacLocal.setArgName("FILE|URL");
+        options.addOption(pacLocal);
+
+        Option pacTest = new Option(null, "pac-test", true,
+            "Evaluate --pac-local against a URL and print the result, then exit. "
+            + "For checking a file before deploying it.");
+        pacTest.setArgName("URL");
+        options.addOption(pacTest);
 
         Option proxyAuthScheme = new Option(null, "proxy-auth-scheme", true,
             "Authentication scheme for the upstream --proxy: basic (default) or negotiate "
@@ -311,6 +331,12 @@ public class App {
             } else if (commandLine.hasOption("version")) {
                 System.out.println("Version: testingbot-tunnel.jar " + App.VERSION);
                 System.exit(0);
+            } else if (commandLine.hasOption("pac-test")) {
+                if (!commandLine.hasOption("pac-local")) {
+                    throw new ParseException("--pac-test also needs --pac-local.");
+                }
+                System.exit(pacTest(commandLine.getOptionValue("pac-local").trim(),
+                        commandLine.getOptionValue("pac-test").trim()));
             } else if (commandLine.hasOption("ready")) {
                 // Queries a tunnel running in another process, so it needs no credentials and
                 // must not perform any of the local setup below -- binding a proxy port here
@@ -851,6 +877,38 @@ public class App {
         return healthy;
     }
 
+    /**
+     * Evaluates a PAC file against one URL and prints the outcome.
+     *
+     * <p>A PAC file decides where a customer's traffic goes, and the usual way to discover it is
+     * wrong is that some requests quietly take the wrong route. Being able to ask directly turns
+     * that into a one-line check.
+     */
+    private static int pacTest(String location, String url) {
+        try {
+            com.testingbot.tunnel.pac.PacPolicy policy =
+                    com.testingbot.tunnel.pac.PacPolicy.load(location);
+            String host = java.net.URI.create(url).getHost();
+            if (host == null) {
+                System.err.println("Could not read a host from " + url
+                        + "; expected something like https://example.com/path");
+                return 1;
+            }
+            com.testingbot.tunnel.pac.PacResult result = policy.evaluateUncached(url, host);
+            System.out.println("PAC file : " + location);
+            System.out.println("URL      : " + url);
+            System.out.println("Host     : " + host);
+            System.out.println("Result   : " + result);
+            System.out.println("Egress   : " + (result.first().isDirect()
+                    ? "direct connection"
+                    : "via " + result.first().toProxySpec()));
+            return 0;
+        } catch (RuntimeException failure) {
+            System.err.println(failure.getMessage());
+            return 1;
+        }
+    }
+
     /** The metrics port --ready should query: the flag if given, otherwise the default. */
     /**
      * Applies the upstream-proxy options.
@@ -862,6 +920,9 @@ public class App {
     private static void applyUpstreamProxyOptions(App app, CommandLine commandLine) throws ParseException {
         if (commandLine.hasOption("proxy")) {
             app.setProxy(commandLine.getOptionValue("proxy"));
+        }
+        if (commandLine.hasOption("pac-local")) {
+            app.setPacLocal(commandLine.getOptionValue("pac-local").trim());
         }
             if (commandLine.hasOption("proxy-auth-scheme")) {
                 String value = commandLine.getOptionValue("proxy-auth-scheme").trim();
@@ -1003,6 +1064,23 @@ public class App {
     /**
      * @return the fastFail
      */
+    public String getPacLocal() {
+        return pacLocal;
+    }
+
+    public void setPacLocal(String pacLocal) {
+        this.pacLocal = pacLocal;
+        this.pacPolicy = null;
+    }
+
+    /** Loaded once and shared; null when --pac-local was not given. */
+    public synchronized com.testingbot.tunnel.pac.PacPolicy getPacPolicy() {
+        if (pacPolicy == null && pacLocal != null) {
+            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(pacLocal);
+        }
+        return pacPolicy;
+    }
+
     public String getProxyAuthScheme() {
         return proxyAuthScheme;
     }

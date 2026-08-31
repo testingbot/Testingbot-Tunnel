@@ -12,13 +12,13 @@ This creates a shaded JAR in the `target/` directory with all dependencies inclu
 
 **Run the application:** (the runnable uber jar is the `shaded` classifier; the main jar is thin)
 ```bash
-java -jar target/TestingBotTunnel-4.9-shaded.jar <API_KEY> <API_SECRET>
+java -jar target/TestingBotTunnel-5.0-shaded.jar <API_KEY> <API_SECRET>
 ```
 Or use environment variables:
 ```bash
 export TESTINGBOT_KEY=<your_key>
 export TESTINGBOT_SECRET=<your_secret>
-java -jar target/TestingBotTunnel-4.9.jar
+java -jar target/TestingBotTunnel-5.0.jar
 ```
 
 **Docker build:**
@@ -26,7 +26,7 @@ java -jar target/TestingBotTunnel-4.9.jar
 docker buildx build --platform linux/amd64,linux/arm64 \
   --no-cache \
   --push \
-  -t testingbot/tunnel:4.9 \
+  -t testingbot/tunnel:5.0 \
   -t testingbot/tunnel:latest .
 ```
 
@@ -99,8 +99,24 @@ java -jar testingbot-tunnel.jar --doctor
   header and TLS SNI untouched (`HOST1:PORT1:HOST2:PORT2`, comma separated)
 - `--localhost-policy`: `allow` (default) or `deny` for tunnel traffic reaching this machine's
   loopback interface
+- `--pac-local`: Evaluate a PAC file locally to choose egress per destination. Distinct from
+  `--pac`, which forwards a PAC URL to the remote browser
+- `--pac-test`: Evaluate `--pac-local` against one URL and exit
 - `--metrics-port`: Port for the insight endpoints (default 8003)
 - `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)
+
+### PAC evaluation
+
+`--pac-local` is evaluated by `com.testingbot.tunnel.pac`, a restricted interpreter written for
+this purpose -- Nashorn is gone as of Java 15 and embedding GraalVM JS would be a large
+dependency and a large attack surface for a process in the network path.
+
+`PacLexer` -> `PacParser` -> `PacInterpreter`, with `PacDateTime` for the time predicates,
+`PacResult` for the returned directive list and `PacPolicy` for loading and per-host caching.
+
+The design rule is that unsupported syntax is **refused with its line number**, never
+approximated: a misread PAC file silently routes customer traffic to the wrong place. Object
+literals, regular expressions, `new`, closures and top-level statements are all rejected.
 
 ### Upstream proxy authentication
 
