@@ -75,12 +75,15 @@ may hold tunnel slots on the same account.
 | Scenario | Tunnels | Covers |
 |---|---|---|
 | `doctor` | 0 | `--doctor` diagnostics |
-| `combined` | 1 | proxying, CONNECT, `--extra-headers`, `--fast-fail-regexps`, `--metrics-auth`, Selenium session |
+| `combined` | 1 | proxying, CONNECT, WebSocket relay, 8 MiB payloads, `--extra-headers`, `--auth`, `--fast-fail-regexps`, `--metrics-auth` and moving counters, Selenium session |
 | `nobump` | 1 | `--nobump` + browser |
 | `nocache` | 1 | `--nocache` |
 | `custom_ports` | 1 | `--se-port`, `--localproxy`, `--metrics-port` + browser |
 | `localproxy_only` | 1 | `--localproxy` alone, to isolate it from the other port flags |
 | `tunnel_identifier` | 1 | `--tunnel-identifier` + browser using that identifier |
+| `pac` | 0 | `--pac-local` routing decisions via `--pac-test`, and refusal of unsupported syntax |
+| `localhost_deny` | 1 | `--localhost-policy deny` over CONNECT and plain HTTP |
+| `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
 | `socks5_proxy` | 1 | `--proxy socks5://` chaining through a local SOCKS5 proxy |
@@ -90,6 +93,7 @@ may hold tunnel slots on the same account.
 
 - `run-e2e.sh` — harness and scenarios
 - `webdriver.sh` — minimal W3C WebDriver client over `curl` (no Selenium bindings needed)
-- `origin_server.py` — local origin: marker page, header echo, slow endpoint
+- `origin_server.py` — local origin: marker page, header echo, slow endpoint, large body, Basic-auth-protected page, WebSocket echo
 - `upstream_proxy.py` — minimal upstream HTTP proxy for `--proxy`
 - `socks5_proxy.py` — minimal upstream SOCKS5 proxy for `--proxy socks5://`
+- `ws_client.py` — WebSocket client that upgrades through the local proxy

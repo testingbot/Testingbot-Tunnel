@@ -8,13 +8,23 @@ Routes:
   /            marker page (HTML, contains the marker string)
   /headers     JSON of the request headers this server received
   /slow        responds after ~2s, for timeout behaviour
+  /large       N MiB of deterministic bytes (?mb=N, default 8), for buffering behaviour
+  /protected   401 unless Basic auth matches e2euser:e2epass, for --auth
+  /ws          WebSocket echo endpoint, for the upgrade relay
 """
+import base64
+import hashlib
 import json
+import os
+import struct
 import sys
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 MARKER = sys.argv[2] if len(sys.argv) > 2 else "TB-MARKER"
+
+WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+PROTECTED_CREDENTIALS = "e2euser:e2epass"
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -38,12 +48,124 @@ class Handler(BaseHTTPRequestHandler):
         elif path == "/slow":
             time.sleep(2)
             self._send(b"<html><body>slow-ok</body></html>")
+        elif path == "/large":
+            self._send_large(path)
+        elif path == "/protected":
+            self._send_protected()
+        elif path == "/ws":
+            self._websocket()
         else:
             body = (
                 "<!doctype html><html><head><title>Tunnel E2E Origin</title></head>"
                 f'<body><h1 id="marker">{MARKER}</h1></body></html>'
             ).encode()
             self._send(body)
+
+    def _send_large(self, path):
+        """A body far bigger than any single buffer, to catch truncation or stalling."""
+        query = self.path.split("?", 1)[1] if "?" in self.path else ""
+        megabytes = 8
+        for part in query.split("&"):
+            if part.startswith("mb="):
+                megabytes = max(1, min(512, int(part[3:])))
+        chunk = bytes(range(256)) * 4096                    # 1 MiB, deterministic
+        self.send_response(200)
+        self.send_header("Content-Type", "application/octet-stream")
+        self.send_header("Content-Length", str(megabytes * len(chunk)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        for _ in range(megabytes):
+            self.wfile.write(chunk)
+
+    def _send_protected(self):
+        """Demands Basic credentials, so --auth has something to satisfy."""
+        header = self.headers.get("Authorization", "")
+        scheme, _, token = header.partition(" ")
+        supplied = ""
+        if scheme.lower() == "basic":
+            try:
+                supplied = base64.b64decode(token).decode()
+            except Exception:
+                supplied = ""
+        if supplied != PROTECTED_CREDENTIALS:
+            self.log_message("PROTECTED-DENIED")
+            body = b"unauthorized"
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="e2e"')
+            self.send_header("Content-Type", "text/plain")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.log_message("PROTECTED-OK")
+        self._send(b"<html><body>protected-ok</body></html>")
+
+    def _websocket(self):
+        """RFC 6455 handshake, then echo every text frame back.
+
+        Hand-rolled because the standard library has no WebSocket server, and the point here
+        is only to give the tunnel's upgrade relay something real to carry.
+        """
+        key = self.headers.get("Sec-WebSocket-Key")
+        if self.headers.get("Upgrade", "").lower() != "websocket" or not key:
+            self._send(b"expected a websocket upgrade", "text/plain", 400)
+            return
+        accept = base64.b64encode(
+            hashlib.sha1((key + WS_GUID).encode()).digest()).decode()
+        self.log_message("WS-UPGRADE")
+        self.wfile.write(
+            ("HTTP/1.1 101 Switching Protocols\r\n"
+             "Upgrade: websocket\r\n"
+             "Connection: Upgrade\r\n"
+             f"Sec-WebSocket-Accept: {accept}\r\n\r\n").encode())
+        self.wfile.flush()
+        self.close_connection = True                        # this socket is no longer HTTP
+        try:
+            while True:
+                payload = self._read_frame()
+                if payload is None:
+                    return
+                self.connection.sendall(self._text_frame(payload))
+        except OSError:
+            return
+
+    def _read_frame(self):
+        """One client frame, unmasked. None on close or end of stream."""
+        head = self._read_exactly(2)
+        if head is None:
+            return None
+        opcode = head[0] & 0x0F
+        if opcode == 0x8:                                   # close
+            return None
+        masked = head[1] & 0x80
+        length = head[1] & 0x7F
+        if length == 126:
+            length = struct.unpack("!H", self._read_exactly(2))[0]
+        elif length == 127:
+            length = struct.unpack("!Q", self._read_exactly(8))[0]
+        mask = self._read_exactly(4) if masked else b"\x00\x00\x00\x00"
+        data = self._read_exactly(length) or b""
+        return bytes(b ^ mask[i % 4] for i, b in enumerate(data))
+
+    def _read_exactly(self, n):
+        buf = b""
+        while len(buf) < n:
+            chunk = self.connection.recv(n - len(buf))
+            if not chunk:
+                return None
+            buf += chunk
+        return buf
+
+    @staticmethod
+    def _text_frame(payload):
+        header = bytes([0x81])
+        if len(payload) < 126:
+            header += bytes([len(payload)])
+        elif len(payload) < (1 << 16):
+            header += bytes([126]) + struct.pack("!H", len(payload))
+        else:
+            header += bytes([127]) + struct.pack("!Q", len(payload))
+        return header + payload
 
     def log_message(self, fmt, *args):
         sys.stderr.write("[origin] " + (fmt % args) + "\n")

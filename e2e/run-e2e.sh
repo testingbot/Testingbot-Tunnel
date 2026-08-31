@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (10 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (12 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -261,6 +261,32 @@ check_proxy_http()    { assert_eq "$1 http-via-proxy"  "$(curl -s -o /dev/null -
 check_proxy_connect() { assert_eq "$1 https-connect"   "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" https://example.com/)" "200"; }
 check_se_status()     { assert_contains "$1 se-hub-status" "$(curl -s --max-time 30 "http://127.0.0.1:${2:-4445}/wd/hub/status")" '"ready":true'; }
 
+# WebsocketHandler is a whole handler in the proxy chain with no other end-to-end coverage.
+# An upgrade is relayed as opaque bytes once the handshake has been replayed against the
+# target, so only a real upgrade carrying a real frame exercises it.
+check_websocket() {  # $1 label
+  local out
+  out="$(python3 "$HERE/ws_client.py" "127.0.0.1:$PROXY_PORT" "127.0.0.1:$ORIGIN_PORT" \
+          "ws-e2e-payload" 2>&1)" \
+    && assert_eq "$1 websocket-echo" "$out" "ws-e2e-payload" \
+    || bad "$1 websocket-relay" "$(printf '%.160s' "$out")"
+}
+
+# A body far larger than any single buffer, both proxied and through a CONNECT tunnel.
+# Truncation and stalling on large transfers show up here and nowhere else in this suite.
+check_large_payload() {  # $1 label
+  local expected=$((8 * 1024 * 1024))
+  assert_eq "$1 large-body-via-proxy" \
+    "$(curl -s --max-time 120 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/large?mb=8" | wc -c | tr -d ' ')" \
+    "$expected"
+  # --proxytunnel forces a CONNECT and then speaks plain HTTP inside it, so the same body goes
+  # through the relay path, where the proxy passes bytes it cannot see. Kept local rather than
+  # fetching something over the internet, so a failure means the tunnel and not the weather.
+  assert_eq "$1 large-body-via-connect" \
+    "$(curl -s --max-time 120 -x "127.0.0.1:$PROXY_PORT" --proxytunnel "http://127.0.0.1:$ORIGIN_PORT/large?mb=8" | wc -c | tr -d ' ')" \
+    "$expected"
+}
+
 # The real end-to-end proof: a remote browser loads a page only this machine serves.
 check_browser() {  # $1 label, $2 se-port, $3 optional tunnel identifier
   local label="$1" seport="${2:-4445}" ident="${3:-}" sid src
@@ -294,6 +320,7 @@ scenario_combined() {
       --log-http headers \
       --fast-fail-regexps 'blocked\.example\.com,!allowed\.blocked\.example\.com' \
       --connect-to "remapped.example.invalid:80:127.0.0.1:$ORIGIN_PORT" \
+      --auth "127.0.0.1:$ORIGIN_PORT:e2euser:e2epass" \
       --metrics-port "$mport" --metrics-auth 'e2euser:e2epass' || return 1
 
   assert_proxy_port_ours combined
@@ -368,6 +395,27 @@ scenario_combined() {
   java -jar "$JAR" --ready --metrics-port "$(free_port)" >/dev/null 2>&1 \
     && bad "--ready exits 1 when no tunnel" "unexpected exit 0" \
     || ok "--ready exits 1 when no tunnel" "exit 1"
+
+  # --auth supplies credentials to the origin itself, so a client that sends none still gets in.
+  assert_contains "auth injects credentials for the configured host" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/protected")" \
+    "protected-ok"
+
+  check_websocket combined
+  check_large_payload combined
+
+  # Not just that /metrics answers, but that it is counting: a scrape with no moving counters
+  # looks healthy while reporting nothing. Every request above should be in these numbers.
+  local metrics; metrics="$(curl -s --max-time 15 -u e2euser:e2epass "http://127.0.0.1:$mport/metrics")"
+  assert_contains "metrics expose the tunnel build" "$metrics" "testingbot_tunnel_info"
+  assert_neq "http request counter has moved" \
+    "$(printf '%s' "$metrics" | awk '/^testingbot_http_requests_total/ {print ($2 > 0) ? "yes" : "no"}' | head -1)" "no"
+  assert_neq "bytes counter has moved" \
+    "$(printf '%s' "$metrics" | awk '/^testingbot_connection_bytes_received/ {print ($2 > 0) ? "yes" : "no"}' | head -1)" "no"
+  # ?name[]= filtering must actually narrow the output, not be ignored.
+  assert_eq "metrics name filter narrows the response" \
+    "$(curl -s --max-time 15 -u e2euser:e2epass "http://127.0.0.1:$mport/metrics?name%5B%5D=testingbot_tunnel_info" \
+        | grep -c '^testingbot_connection_bytes_received' || true)" "0"
 
   check_browser combined
 }
@@ -528,7 +576,142 @@ scenario_socks5_proxy_auth() {
   kill $up 2>/dev/null
 }
 
-# Costs no tunnel: --doctor runs diagnostics and exits.
+# --localhost-policy deny is a security control, and only its permissive default was covered.
+# The tunnel exists to reach this machine, so getting the deny case wrong either breaks the
+# product or silently exposes loopback services to anything that can drive a session.
+scenario_localhost_deny() {
+  start_tunnel --localhost-policy deny || return 1
+
+  # Named and by literal address: "localhost" is refused without resolving it, 127.0.0.1 after.
+  assert_eq "deny refuses CONNECT to localhost" \
+    "$(curl -s -o /dev/null -w '%{http_connect}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" "https://localhost:$ORIGIN_PORT/")" "403"
+  assert_eq "deny refuses CONNECT to 127.0.0.1" \
+    "$(curl -s -o /dev/null -w '%{http_connect}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" "https://127.0.0.1:$ORIGIN_PORT/")" "403"
+  # Plain HTTP is a separate path through the proxy and must refuse it too.
+  assert_neq "deny refuses plain HTTP to loopback" \
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/")" "200"
+  # Everything else still works: the policy must not be a blanket refusal.
+  check_proxy_http localhost-deny
+  check_proxy_connect localhost-deny
+}
+
+# Costs no tunnel: --pac-test evaluates a PAC file against one URL and exits. The interpreter
+# is written by hand -- Nashorn is gone and GraalVM JS is too much to embed -- so its output
+# decides where customer traffic egresses, and it has no other end-to-end coverage.
+scenario_pac() {
+  local pac="$WORK/e2e.pac"
+  cat > "$pac" <<'PACFILE'
+function FindProxyForURL(url, host) {
+    if (isPlainHostName(host)) {
+        return "DIRECT";
+    }
+    if (dnsDomainIs(host, ".internal.example")) {
+        return "PROXY internal-proxy.example:3128";
+    }
+    if (shExpMatch(host, "*.cdn.example")) {
+        return "DIRECT";
+    }
+    return "PROXY default-proxy.example:8080";
+}
+PACFILE
+
+  pac_says() { java -jar "$JAR" --pac-local "$pac" --pac-test "$1" 2>&1; }
+
+  assert_contains "pac routes an unqualified host DIRECT" \
+    "$(pac_says http://intranet/)" "DIRECT"
+  assert_contains "pac routes a matched domain to its proxy" \
+    "$(pac_says http://host.internal.example/)" "internal-proxy.example:3128"
+  assert_contains "pac honours a shExpMatch wildcard" \
+    "$(pac_says http://assets.cdn.example/x.js)" "DIRECT"
+  assert_contains "pac falls through to the default proxy" \
+    "$(pac_says https://www.example.com/)" "default-proxy.example:8080"
+
+  # Unsupported syntax must be refused with its line number, never approximated: a PAC file
+  # read wrongly sends traffic somewhere the operator did not choose.
+  cat > "$WORK/bad.pac" <<'PACFILE'
+function FindProxyForURL(url, host) {
+    var re = /example/;
+    return "DIRECT";
+}
+PACFILE
+  local out; out="$(java -jar "$JAR" --pac-local "$WORK/bad.pac" --pac-test http://x/ 2>&1)"
+  if java -jar "$JAR" --pac-local "$WORK/bad.pac" --pac-test http://x/ >/dev/null 2>&1; then
+    bad "pac refuses unsupported syntax" "exited 0 for a regular-expression literal"
+  else
+    ok "pac refuses unsupported syntax" "non-zero exit"
+  fi
+  assert_contains "pac names the offending line" "$out" "2"
+}
+
+# The reconnect path: everything that runs when the SSH connection drops and comes back.
+# Several bugs have lived here -- a SelectorManager leaked on every restart until the pool ran
+# out, port forwards that were not rebuilt, a BindException on the second start -- and none of
+# them are visible in a tunnel that is only ever started once.
+#
+# The SSH connection is forced through a local proxy we control, so restarting that proxy
+# severs it deterministically. Killing the tunnel's own process would prove nothing.
+scenario_reconnect() {
+  local uport mport; uport="$(free_port)"; mport="$(free_port)"
+  python3 "$HERE/upstream_proxy.py" "$uport" > "$WORK/reconnect-proxy.log" 2>&1 &
+  local up=$!
+  sleep 1
+  start_tunnel --proxy "127.0.0.1:$uport" --metrics-port "$mport" \
+    || { kill $up 2>/dev/null; return 1; }
+  check_proxy_http reconnect-before
+
+  # Sever every connection through the proxy, including SSH, and let it come back.
+  kill $up 2>/dev/null; wait $up 2>/dev/null
+  python3 "$HERE/upstream_proxy.py" "$uport" >> "$WORK/reconnect-proxy.log" 2>&1 &
+  up=$!
+
+  # Two waits, not one. The tunnel only notices through its 30s keepalive, so polling straight
+  # after the kill reads a readiness that is simply stale -- and a scenario that trusted it
+  # would report success without a reconnect having happened at all.
+  local noticed=0 i
+  for i in $(seq 1 60); do
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+              "http://127.0.0.1:$mport/readyz")" != "200" ]; then
+      noticed=1; break
+    fi
+    sleep 2
+  done
+  [ "$noticed" = "1" ] && ok "readyz reports not-ready while the connection is down" "503" \
+                       || bad "readyz reports not-ready while the connection is down" \
+                              "stayed 200 for 120s after the connection was severed"
+
+  # healthz answers the whole time: the process is alive, it is the tunnel that is not.
+  assert_eq "healthz stays 200 during the outage" \
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://127.0.0.1:$mport/healthz")" "200"
+
+  local recovered=0
+  for i in $(seq 1 90); do
+    if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+              "http://127.0.0.1:$mport/readyz")" = "200" ]; then
+      recovered=1; break
+    fi
+    sleep 2
+  done
+  [ "$recovered" = "1" ] && ok "tunnel reports ready again" "readyz 200" \
+                         || bad "tunnel reports ready again" "readyz never returned to 200"
+
+  assert_neq "the tunnel logged a reconnect" \
+    "$(grep -ciE 'reconnect|re-connect|connection lost|connection closed' "$TUNNEL_LOG" || true)" "0"
+
+  # The point of the whole scenario: it still serves traffic afterwards. A proxy that comes
+  # back "ready" but cannot forward is the failure mode these bugs produced. The local proxy
+  # is restarted as part of the reconnect, so the websocket and Selenium paths are retested
+  # too -- that restart is where the leaked selectors and the bind failure lived.
+  check_proxy_http reconnect-after
+  check_proxy_connect reconnect-after
+  check_websocket reconnect-after
+  check_se_status reconnect-after
+  check_browser reconnect-after
+
+  stop_tunnel
+  kill $up 2>/dev/null
+}
+
+# Costs no tunnel: --doctor runs diagnostics and exits.# Costs no tunnel: --doctor runs diagnostics and exits.
 scenario_doctor() {
   local out; out="$(java -jar "$JAR" --doctor 2>&1)"
   assert_contains "doctor reaches API"  "$out" "api.testingbot.com"
@@ -536,10 +719,10 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor combined nobump nocache custom_ports localproxy_only tunnel_identifier upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
-tunnel_cost() { case "$1" in doctor) echo 0;; *) echo 1;; esac; }
+tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }
 
 # ---------------------------------------------------------------------- main
 cleanup() {

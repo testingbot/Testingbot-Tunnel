@@ -6,10 +6,13 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -71,6 +74,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private String upstreamProxy;
     private String upstreamProxyAuth;
     private String[] basicAuth;
+    private Map<String, String> siteCredentials = Map.of();
     private boolean debugMode;
     private CustomDnsResolver dnsResolver;
     private ConnectToMap connectTo = ConnectToMap.none();
@@ -130,6 +134,56 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     public void setBasicAuth(String[] basicAuth) {
         this.basicAuth = basicAuth;
+        this.siteCredentials = parseSiteCredentials(basicAuth);
+    }
+
+    /**
+     * {@code host:port} to a ready-made {@code Basic ...} value, for {@code --auth}.
+     *
+     * <p>These used to be handed to jetty-client's AuthenticationStore alone, which answers a
+     * 401 by retrying with credentials. Jetty 12's ProxyHandler ends newHttpClient() with
+     * {@code protocolHandlers.clear()}, under a comment saying this configuration "should not be
+     * customized" -- so the handler that reacts to the challenge is removed after we configure
+     * the client, and the stored credential could never be sent. The 401 went straight back to
+     * the caller. Sending it pre-emptively is also better behaviour: it is what the option
+     * promises, and it costs one round trip fewer.
+     *
+     * <p>The store is still populated, so a target that challenges on a path we did not
+     * anticipate is unaffected either way.
+     */
+    private static Map<String, String> parseSiteCredentials(String[] entries) {
+        if (entries == null) {
+            return Map.of();
+        }
+        Map<String, String> parsed = new LinkedHashMap<>();
+        for (String entry : entries) {
+            // Limit 4: the password is the rest of the string and may contain colons itself.
+            String[] parts = entry.split(":", 4);
+            if (parts.length < 4) {
+                continue;                       // configureHttpClient warns about the format
+            }
+            String encoded = Base64.getEncoder().encodeToString(
+                    (parts[2] + ":" + parts[3]).getBytes(StandardCharsets.UTF_8));
+            parsed.put((parts[0] + ":" + parts[1]).toLowerCase(Locale.ROOT), "Basic " + encoded);
+        }
+        return Map.copyOf(parsed);
+    }
+
+    /** The credential configured for this request's target, or null. */
+    private String siteCredentialFor(Request clientToProxyRequest) {
+        if (siteCredentials.isEmpty()) {
+            return null;
+        }
+        HttpURI uri = clientToProxyRequest.getHttpURI();
+        String host = uri.getHost();
+        if (host == null) {
+            return null;
+        }
+        int port = uri.getPort();
+        if (port <= 0) {
+            port = HttpScheme.HTTPS.is(uri.getScheme()) ? 443 : 80;
+        }
+        return siteCredentials.get((host + ":" + port).toLowerCase(Locale.ROOT));
     }
 
     public void setDnsResolver(CustomDnsResolver dnsResolver) {
@@ -512,6 +566,12 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         proxyToServerRequest.headers(fields -> {
             if (proxyAuthHeaderValue != null) {
                 fields.put(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
+            }
+            // --auth, sent pre-emptively. Not put(): a client that supplied its own credentials
+            // meant them, and overwriting them would be a surprising thing for a proxy to do.
+            String siteCredential = siteCredentialFor(clientToProxyRequest);
+            if (siteCredential != null && !fields.contains(HttpHeader.AUTHORIZATION)) {
+                fields.put(HttpHeader.AUTHORIZATION, siteCredential);
             }
             // Jetty 11's AbstractProxyServlet added these; Jetty 12's ProxyHandler sends only
             // Via and Forwarded, so targets that key off X-Forwarded-* (very common for staging
