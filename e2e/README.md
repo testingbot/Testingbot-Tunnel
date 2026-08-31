@@ -82,6 +82,9 @@ may hold tunnel slots on the same account.
 | `localproxy_only` | 1 | `--localproxy` alone, to isolate it from the other port flags |
 | `tunnel_identifier` | 1 | `--tunnel-identifier` + browser using that identifier |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
+| `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
+| `socks5_proxy` | 1 | `--proxy socks5://` chaining through a local SOCKS5 proxy |
+| `socks5_proxy_auth` | 1 | the same, through a SOCKS5 proxy that demands RFC 1929 credentials |
 
 ## Files
 
@@ -89,3 +92,4 @@ may hold tunnel slots on the same account.
 - `webdriver.sh` — minimal W3C WebDriver client over `curl` (no Selenium bindings needed)
 - `origin_server.py` — local origin: marker page, header echo, slow endpoint
 - `upstream_proxy.py` — minimal upstream HTTP proxy for `--proxy`
+- `socks5_proxy.py` — minimal upstream SOCKS5 proxy for `--proxy socks5://`

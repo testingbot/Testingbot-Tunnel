@@ -1,6 +1,9 @@
 package com.testingbot.tunnel;
 
 import java.io.IOException;
+import java.net.Authenticator;
+import java.net.InetSocketAddress;
+import java.net.PasswordAuthentication;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -18,11 +21,15 @@ import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
 import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
+import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.NameValuePair;
+import org.apache.hc.core5.http.io.SocketConfig;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.message.BasicNameValuePair;
 import org.apache.hc.core5.util.Timeout;
+
+import com.testingbot.tunnel.proxy.ProxySpec;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -70,26 +77,85 @@ public class Api {
             .build();
     }
 
+    /**
+     * Routes the API calls through {@code --proxy}, so the tunnel can register and deregister
+     * itself on a network whose only egress is a proxy.
+     *
+     * <p>Parsing is delegated to {@link ProxySpec}, the same as every other egress path. Doing it
+     * here with a {@code split(":", 2)} meant {@code socks5://host:port} parsed as host
+     * "socks5", port "//host:port", and the tunnel died on a NumberFormatException before it
+     * could start -- so a SOCKS5 upstream proxy never worked at all. {@code http://host:port}
+     * was broken the same way.
+     */
     private HttpClientBuilder newBuilderWithProxy() {
         HttpClientBuilder builder = httpClientBuilderSupplier.get();
         builder.setDefaultRequestConfig(defaultRequestConfig());
-        if (app.getProxy() != null) {
-            String[] splitted = app.getProxy().split(":", 2);
-            int port = splitted.length > 1 ? Integer.parseInt(splitted[1]) : 80;
-            if (app.getProxyAuth() != null) {
-                String[] credentials = app.getProxyAuth().split(":", 2);
-                if (credentials.length == 2) {
-                    BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
-                    credsProvider.setCredentials(
-                        new AuthScope(splitted[0], port),
-                        new UsernamePasswordCredentials(credentials[0], credentials[1].toCharArray())
-                    );
-                    builder.setDefaultCredentialsProvider(credsProvider);
-                }
+        ProxySpec spec = ProxySpec.parse(app.getProxy());
+        if (spec == null) {
+            return builder;
+        }
+        String[] credentials = splitCredentials(app.getProxyAuth());
+        if (spec.isSocks5()) {
+            configureSocksProxy(builder, spec, credentials);
+        } else {
+            if (credentials != null) {
+                BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
+                credsProvider.setCredentials(
+                    new AuthScope(spec.getHost(), spec.getPort()),
+                    new UsernamePasswordCredentials(credentials[0], credentials[1].toCharArray())
+                );
+                builder.setDefaultCredentialsProvider(credsProvider);
             }
-            builder.setProxy(new HttpHost("http", splitted[0], port));
+            builder.setProxy(new HttpHost("http", spec.getHost(), spec.getPort()));
         }
         return builder;
+    }
+
+    /**
+     * SOCKS is below HTTP, so it is configured on the socket rather than as an HttpHost.
+     *
+     * <p>The JDK's SOCKS client is what performs the handshake here, and it asks for RFC 1929
+     * credentials through the global {@link Authenticator}. That is unpleasant, but it is the
+     * only hook it offers; the answer is therefore narrowed to a SOCKS5 request for this exact
+     * host and port, so nothing else in the process can be handed these credentials.
+     *
+     * <p>It asks as {@code RequestorType.SERVER} with protocol "SOCKS5", not as a proxy request
+     * -- matching on the requestor type never fires. When nothing answers it does not fail
+     * either: it sends {@code user.name} with an empty password, which a proxy rejects for
+     * reasons that look nothing like a misconfigured credential.
+     */
+    private void configureSocksProxy(HttpClientBuilder builder, ProxySpec spec,
+                                     String[] credentials) {
+        builder.setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
+            .setDefaultSocketConfig(SocketConfig.custom()
+                .setSocksProxyAddress(new InetSocketAddress(spec.getHost(), spec.getPort()))
+                .setSoTimeout(responseTimeout)
+                .build())
+            .build());
+
+        if (credentials != null) {
+            Authenticator.setDefault(new Authenticator() {
+                @Override
+                protected PasswordAuthentication getPasswordAuthentication() {
+                    if ("SOCKS5".equalsIgnoreCase(getRequestingProtocol())
+                            && spec.getHost().equals(getRequestingHost())
+                            && spec.getPort() == getRequestingPort()) {
+                        return new PasswordAuthentication(
+                                credentials[0], credentials[1].toCharArray());
+                    }
+                    return null;
+                }
+            });
+        }
+    }
+
+    /** {@code user:password}, or null when there is nothing usable. */
+    private static String[] splitCredentials(String userPassword) {
+        if (userPassword == null) {
+            return null;
+        }
+        String[] parts = userPassword.split(":", 2);
+        return parts.length == 2 ? parts : null;
     }
 
     /**

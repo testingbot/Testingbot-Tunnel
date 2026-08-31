@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (7 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (10 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -475,6 +475,59 @@ scenario_upstream_proxy_auth() {
   kill $up 2>/dev/null
 }
 
+# The same chaining, over SOCKS5 instead of HTTP CONNECT. Worth its own scenario because none
+# of the three egress paths shares an implementation with the HTTP-proxy ones: SSH goes through
+# JSch's ProxySOCKS5, plain HTTP through jetty-client's Socks5Proxy, and HTTPS CONNECT through
+# our own Socks5HandshakeConnection driving Socks5Handshake on Jetty's selector.
+scenario_socks5_proxy() {
+  local uport; uport="$(free_port)"
+  python3 "$HERE/socks5_proxy.py" "$uport" > "$WORK/socks5.log" 2>&1 &
+  local up=$!
+  sleep 1
+  start_tunnel --proxy "socks5://127.0.0.1:$uport" || { kill $up 2>/dev/null; return 1; }
+  check_proxy_http socks5-proxy
+  check_proxy_connect socks5-proxy
+  assert_contains "socks5 proxy saw traffic" "$(cat "$WORK/socks5.log")" "CONNECT"
+  # The SSH control connection goes through the proxy too, not just browser traffic. It is the
+  # IP-form request to :443: browser traffic and the API both name hosts.
+  assert_neq "socks5 proxy saw the ssh connection on :443" \
+    "$(grep -cE 'CONNECT [0-9.]+:443' "$WORK/socks5.log" || true)" "0"
+  # A real cloud browser loading a page only this machine serves, every hop over SOCKS5.
+  check_browser socks5-proxy
+  # Stop the tunnel before the proxy it depends on: its deregistration call to the API goes out
+  # through --proxy, so killing the proxy first leaves the tunnel registered server-side.
+  stop_tunnel
+  kill $up 2>/dev/null
+}
+
+# A SOCKS5 proxy that refuses the no-auth method outright, so nothing works until the tunnel
+# negotiates RFC 1929 credentials -- on every egress path at once.
+scenario_socks5_proxy_auth() {
+  local uport; uport="$(free_port)"
+  python3 "$HERE/socks5_proxy.py" "$uport" 'e2euser:e2epass' > "$WORK/socks5-auth.log" 2>&1 &
+  local up=$!
+  sleep 1
+
+  start_tunnel --proxy "socks5://127.0.0.1:$uport" --proxy-userpwd 'e2euser:e2epass' \
+    || { kill $up 2>/dev/null; return 1; }
+  ok "tunnel came up through an authenticating socks5 proxy" "ready"
+
+  # Coming up is not on its own proof that SSH used the proxy -- this machine has direct
+  # internet. The proof is an IP-form request to :443 in the proxy log, which this proxy only
+  # ever logs after the sub-negotiation succeeded.
+  assert_neq "ssh connection went through the authenticating socks5 proxy" \
+    "$(grep -cE 'CONNECT [0-9.]+:443' "$WORK/socks5-auth.log" || true)" "0"
+  assert_contains "socks5 proxy accepted our credentials" "$(cat "$WORK/socks5-auth.log")" "AUTH-OK"
+  assert_eq "no request was left unauthenticated" \
+    "$(grep -c 'AUTH-REJECTED' "$WORK/socks5-auth.log" || true)" "0"
+
+  check_proxy_http socks5-proxy-auth
+  check_proxy_connect socks5-proxy-auth
+  check_browser socks5-proxy-auth
+  stop_tunnel
+  kill $up 2>/dev/null
+}
+
 # Costs no tunnel: --doctor runs diagnostics and exits.
 scenario_doctor() {
   local out; out="$(java -jar "$JAR" --doctor 2>&1)"
@@ -483,7 +536,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor combined nobump nocache custom_ports localproxy_only tunnel_identifier upstream_proxy upstream_proxy_auth)
+ALL_SCENARIOS=(doctor combined nobump nocache custom_ports localproxy_only tunnel_identifier upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor) echo 0;; *) echo 1;; esac; }
