@@ -143,6 +143,7 @@ public class CustomConnectHandler extends ConnectHandler {
         }
     }
 
+
     public void setPacPolicy(com.testingbot.tunnel.pac.PacPolicy pacPolicy) {
         this.pacPolicy = pacPolicy;
     }

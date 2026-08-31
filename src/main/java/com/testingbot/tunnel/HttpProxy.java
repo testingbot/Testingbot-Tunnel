@@ -231,20 +231,21 @@ public final class HttpProxy {
 
         try {
             httpProxy.stop();
+        } catch (java.util.concurrent.TimeoutException drainTimedOut) {
+            // GracefulHandler could not drain within STOP_TIMEOUT_MS, so Jetty closed the
+            // remaining connections. On a busy tunnel that is a routine outcome of a reconnect;
+            // logging it at SEVERE with a null message made every reconnect look like a crash.
+            Logger.getLogger(HttpProxy.class.getName()).log(Level.INFO,
+                "Local proxy did not finish in-flight requests within {0}ms; "
+                + "remaining connections were closed.", STOP_TIMEOUT_MS);
         } catch (Exception ex) {
-            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE, null, ex);
+            Logger.getLogger(HttpProxy.class.getName()).log(Level.SEVERE,
+                "Could not stop the local proxy cleanly", ex);
         }
-        // After stop(), so connections closed during the graceful shutdown are included.
-        // Only this connector's bytes: it is the only one Jetty is about to reset. The Selenium
-        // forwarder's listener is registered in the same registry but is never restarted here,
-        // so banking the registry total re-counted it on every reconnect.
-        if (proxyConnectionStats != null) {
-            Statistics.bankBytesTransferred(
-                    proxyConnectionStats.getReceivedBytes() + proxyConnectionStats.getSentBytes());
-            // Reset so a second stop() before the next start() banks nothing. Jetty would clear
-            // these in doStart() anyway; doing it here makes stop() idempotent.
-            proxyConnectionStats.reset();
-        }
+        // No banking here any more. ConnectionMetrics notices the reset Jetty performs in
+        // doStart() and carries the previous total itself, which is both simpler and free of the
+        // race this had: banking and resetting were two steps, and a scrape landing between them
+        // counted the same bytes twice.
     }
 
     public void start() {

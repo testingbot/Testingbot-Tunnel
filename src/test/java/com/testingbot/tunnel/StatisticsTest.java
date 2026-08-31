@@ -172,4 +172,29 @@ class StatisticsTest {
         Statistics.reset();
     }
 
+
+    @Test
+    void bootSetsAStartTimeSoEmbeddedUptimeIsNotSinceTheEpoch() throws Exception {
+        // setStartTime() used to be called only from main(). An embedder constructs App
+        // directly, leaving it at zero, so uptime was reported as seconds since 1970 -- a number
+        // that keeps climbing and so never looks obviously wrong.
+        Statistics.reset();
+        assertThat(Statistics.getStartTime()).isZero();
+
+        App app = new App();
+        app.setClientKey("k");
+        app.setClientSecret("s");
+        try {
+            app.boot();
+        } catch (Exception expected) {
+            // No credentials that the API will accept; the start time is set before that.
+        }
+
+        assertThat(Statistics.getStartTime())
+                .as("an embedded tunnel should report a real start time")
+                .isGreaterThan(1_600_000_000_000L);
+        long uptimeMs = System.currentTimeMillis() - Statistics.getStartTime();
+        assertThat(uptimeMs).isLessThan(60_000);
+        Statistics.reset();
+    }
 }

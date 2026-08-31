@@ -13,10 +13,14 @@ import org.eclipse.jetty.io.ConnectionStatistics;
 /**
  * Exposes Jetty's {@link ConnectionStatistics} to Prometheus, one series per listener.
  *
- * <p>Byte counters used to be incremented from the proxy's per-response callback, which only
- * ever saw plain HTTP; everything tunnelled -- CONNECT and relayed WebSocket traffic, most of
- * what a tunnel actually carries -- went uncounted. Reading the connector's own statistics
- * counts bytes wherever they came from.
+ * <p>IMPORTANT: these byte counters see HTTP connections only. Traffic inside a CONNECT tunnel
+ * or a relayed WebSocket is NOT included, so on a tunnel carrying mostly HTTPS they account for
+ * very little of the real volume -- measured at 134 bytes for a tunnel that carried 80 KiB.
+ *
+ * <p>That is a limitation of Jetty rather than a bug here: ConnectHandler's TunnelConnection
+ * inherits AbstractConnection.getBytesIn()/getBytesOut(), which return -1, so a listener attached
+ * to it has nothing to read. Counting relayed bytes needs a counting EndPoint wrapper around the
+ * tunnel's endpoints, which is a piece of work in its own right.
  *
  * <p>The {@code listener} label separates the local proxy from the Selenium forwarder and the
  * metrics endpoint. Without it "are connections piling up?" cannot distinguish a wedged
@@ -33,9 +37,52 @@ public final class ConnectionMetrics extends Collector {
 
     private final Map<String, ConnectionStatistics> listeners = new LinkedHashMap<>();
 
+    /**
+     * Totals carried across connector restarts.
+     *
+     * <p>Jetty resets a ConnectionStatistics in doStart(), and the SSH reconnect restarts the
+     * proxy connector, so the raw figures fall back to zero on every reconnect. Prometheus
+     * counters must never go backwards -- a drop reads as a counter restart, so rate() spikes and
+     * any increase() spanning a reconnect is wrong.
+     *
+     * <p>Detecting the reset here rather than banking it in HttpProxy.stop() also removes a race:
+     * banking and resetting were two steps, and a scrape landing between them counted the same
+     * bytes twice.
+     */
+    private final Map<String, long[]> carried = new LinkedHashMap<>();
+
     /** Registers {@code stats} under {@code name}; replaces any previous entry for that name. */
     public synchronized void add(String name, ConnectionStatistics stats) {
-        listeners.put(name, stats);
+        ConnectionStatistics previous = listeners.put(name, stats);
+        if (previous != null && previous != stats) {
+            // A replacement listener starts from zero; keep what the old one had counted.
+            observe(name, previous.getReceivedBytes() + previous.getSentBytes());
+        }
+    }
+
+    /**
+     * Folds {@code live} into the carried total for {@code name} and returns the monotonic sum.
+     *
+     * <p>A live figure lower than last time means the connector restarted and Jetty zeroed the
+     * statistics, so whatever it had reached is banked before continuing.
+     */
+    /** Monotonic value for one counter series, banking whatever a restart zeroed. */
+    private synchronized long monotonic(String key, long live) {
+        long[] state = carried.computeIfAbsent(key, k -> new long[2]);
+        if (live < state[1]) {
+            state[0] += state[1];
+        }
+        state[1] = live;
+        return state[0] + live;
+    }
+
+    private synchronized long observe(String name, long live) {
+        long[] state = carried.computeIfAbsent(name, key -> new long[2]);
+        if (live < state[1]) {
+            state[0] += state[1];
+        }
+        state[1] = live;
+        return state[0] + live;
     }
 
     @Override
@@ -44,10 +91,10 @@ public final class ConnectionMetrics extends Collector {
 
         CounterMetricFamily received = new CounterMetricFamily(
                 "testingbot_connection_bytes_received",
-                "Bytes received on a listener, including tunnelled traffic.", labels);
+                "Bytes received on HTTP connections. Excludes traffic inside CONNECT tunnels.", labels);
         CounterMetricFamily sent = new CounterMetricFamily(
                 "testingbot_connection_bytes_sent",
-                "Bytes sent on a listener, including tunnelled traffic.", labels);
+                "Bytes sent on HTTP connections. Excludes traffic inside CONNECT tunnels.", labels);
         CounterMetricFamily total = new CounterMetricFamily(
                 "testingbot_connections_total",
                 "Connections accepted on a listener since startup.", labels);
@@ -59,11 +106,14 @@ public final class ConnectionMetrics extends Collector {
                 "Peak concurrent connections on a listener.", labels);
 
         for (Map.Entry<String, ConnectionStatistics> entry : listeners.entrySet()) {
-            List<String> value = Collections.singletonList(entry.getKey());
+            String name = entry.getKey();
+            List<String> value = Collections.singletonList(name);
             ConnectionStatistics stats = entry.getValue();
-            received.addMetric(value, stats.getReceivedBytes());
-            sent.addMetric(value, stats.getSentBytes());
-            total.addMetric(value, stats.getConnectionsTotal());
+            // Counters have to survive the connector restart the SSH reconnect performs; gauges
+            // describe the present moment and are read straight through.
+            received.addMetric(value, monotonic(name + ":received", stats.getReceivedBytes()));
+            sent.addMetric(value, monotonic(name + ":sent", stats.getSentBytes()));
+            total.addMetric(value, monotonic(name + ":total", stats.getConnectionsTotal()));
             current.addMetric(value, stats.getConnections());
             max.addMetric(value, stats.getConnectionsMax());
         }
@@ -84,14 +134,17 @@ public final class ConnectionMetrics extends Collector {
      * <p>Excludes the metrics listener. Scraping /metrics is our own overhead, not customer
      * traffic, and counting it would make a frequently-scraped tunnel look busier than it is.
      * The per-listener Prometheus series still report it.
+     *
+     * <p>Counts HTTP connections only; see the class comment on why tunnelled bytes are absent.
      */
     public synchronized long totalBytes() {
         long sum = 0;
         for (Map.Entry<String, ConnectionStatistics> entry : listeners.entrySet()) {
-            if (METRICS.equals(entry.getKey())) {
-                continue;
+            long monotonic = observe(entry.getKey(),
+                    entry.getValue().getReceivedBytes() + entry.getValue().getSentBytes());
+            if (!METRICS.equals(entry.getKey())) {
+                sum += monotonic;
             }
-            sum += entry.getValue().getReceivedBytes() + entry.getValue().getSentBytes();
         }
         return sum;
     }

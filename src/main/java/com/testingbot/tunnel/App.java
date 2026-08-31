@@ -759,6 +759,13 @@ public class App {
     }
 
     public void boot() throws Exception {
+        // Set here, not only in main(): an embedder constructs App directly, leaving startTime at
+        // zero, so uptime was reported as seconds since the epoch -- a number that keeps climbing
+        // and so never looks obviously wrong. main() sets it earlier to cover startup too.
+        if (Statistics.getStartTime() == 0) {
+            Statistics.setStartTime(System.currentTimeMillis());
+        }
+
         api = createApi();
         JsonNode tunnelData = null;
 

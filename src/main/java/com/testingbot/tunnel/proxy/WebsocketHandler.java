@@ -75,6 +75,7 @@ public class WebsocketHandler extends ConnectHandler {
         }
     }
 
+
     public void setDnsResolver(CustomDnsResolver dnsResolver) {
         this.dnsResolver = dnsResolver;
     }
