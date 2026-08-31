@@ -20,6 +20,10 @@ import org.eclipse.jetty.server.Request;
  */
 public class ForwarderHandler extends ProxyHandler.Reverse {
 
+    /** Looked up once: this was a global map lookup on every Selenium request. */
+    private static final Logger JUL = Logger.getLogger(ForwarderHandler.class.getName());
+
+
     private static final long FORWARD_IDLE_TIMEOUT_MS = 440_000L;
 
     private final App app;
@@ -86,7 +90,7 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
             }
         });
 
-        Logger.getLogger(ForwarderHandler.class.getName()).log(Level.INFO, "[{0}] {1}",
+        JUL.log(Level.INFO, "[{0}] {1}",
                 new Object[]{clientToProxyRequest.getMethod(), clientToProxyRequest.getHttpURI()});
 
         if (app.isDebugMode()) {
@@ -96,7 +100,7 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
                         .append(SensitiveHeaders.redactValue(field.getName(), field.getValue()))
                         .append(System.lineSeparator());
             }
-            Logger.getLogger(ForwarderHandler.class.getName()).log(Level.INFO, sb.toString());
+            JUL.log(Level.INFO, sb.toString());
         }
     }
 
@@ -107,7 +111,7 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
                                                   org.eclipse.jetty.server.Response proxyToClientResponse,
                                                   org.eclipse.jetty.util.Callback proxyToClientCallback,
                                                   Throwable failure) {
-        Logger.getLogger(ForwarderHandler.class.getName()).log(Level.WARNING,
+        JUL.log(Level.WARNING,
                 "Error when forwarding request: {0}", failure.getMessage());
         super.onServerToProxyResponseFailure(clientToProxyRequest, proxyToServerRequest,
                 serverToProxyResponse, proxyToClientResponse, proxyToClientCallback, failure);
@@ -120,7 +124,7 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
                                                   org.eclipse.jetty.server.Response proxyToClientResponse,
                                                   org.eclipse.jetty.util.Callback proxyToClientCallback,
                                                   Throwable failure) {
-        Logger.getLogger(ForwarderHandler.class.getName()).log(Level.WARNING,
+        JUL.log(Level.WARNING,
                 "Proxy response failure: {0}", failure.getMessage());
         super.onProxyToClientResponseFailure(clientToProxyRequest, proxyToServerRequest,
                 serverToProxyResponse, proxyToClientResponse, proxyToClientCallback, failure);

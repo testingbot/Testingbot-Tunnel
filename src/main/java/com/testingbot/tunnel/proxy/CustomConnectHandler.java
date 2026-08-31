@@ -41,6 +41,9 @@ public class CustomConnectHandler extends ConnectHandler {
     // Jetty 12's ConnectHandler no longer exposes a protected LOG to subclasses.
     private static final org.slf4j.Logger LOG = org.slf4j.LoggerFactory.getLogger(CustomConnectHandler.class);
 
+    /** Looked up once: this was a global map lookup on the request path. */
+    private static final Logger JUL = Logger.getLogger(CustomConnectHandler.class.getName());
+
     // Hop-by-hop headers that must not be forwarded per RFC 7230 §6.1
     private static final Set<String> HOP_BY_HOP_HEADERS = Collections.unmodifiableSet(new HashSet<>(Arrays.asList(
             "connection", "keep-alive", "proxy-authenticate", "proxy-authorization",
@@ -185,19 +188,10 @@ public class CustomConnectHandler extends ConnectHandler {
             // reported by the status endpoint.
             Statistics.addRequest();
         }
-        if (isConnect) {
-            // For CONNECT, the authority ("host:port") lives on the parsed HttpURI;
-            // the path component alone would not carry it.
-            String authority = request.getHttpURI().getAuthority();
-            if (authority == null || authority.isEmpty()) {
-                authority = request.getHeaders().get(HttpHeader.HOST);
-            }
-            // Blocked destinations are rejected in validateDestination(), which
-            // ConnectHandler already consults before dialling out.
-            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO,
-                    "[CONNECT] {0} -> {1}",
-                    new Object[]{Request.getRemoteAddr(request), authority != null ? authority : "<unknown>"});
-        }
+        // No per-CONNECT line here. HttpLogHandler sits outermost and logs every request,
+        // CONNECT included, under the --log-http switch. This one ignored that switch entirely,
+        // so "--log-http none" still produced a line per tunnelled connection -- and did a
+        // Logger.getLogger() lookup on the request path to produce it.
 
         if (debugMode) {
             StringBuilder sb = new StringBuilder();
@@ -206,7 +200,7 @@ public class CustomConnectHandler extends ConnectHandler {
                         .append(SensitiveHeaders.redactValue(field.getName(), field.getValue()))
                         .append(System.lineSeparator());
             }
-            Logger.getLogger(CustomConnectHandler.class.getName()).log(Level.INFO, sb.toString());
+            JUL.log(Level.INFO, sb.toString());
         }
 
         if (!isConnect) {
@@ -285,15 +279,13 @@ public class CustomConnectHandler extends ConnectHandler {
     @Override
     public boolean validateDestination(String host, int port) {
         if (localhostPolicy.blocks(host)) {
-            Logger.getLogger(CustomConnectHandler.class.getName())
-                .log(Level.INFO, "Localhost policy: rejecting CONNECT to {0}:{1}",
+            JUL.log(Level.INFO, "Localhost policy: rejecting CONNECT to {0}:{1}",
                      new Object[]{host, port});
             TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("denied_localhost").inc();
             return false;
         }
         if (fastFail.blocks(host)) {
-            Logger.getLogger(CustomConnectHandler.class.getName())
-                .log(Level.INFO, "Fast-fail: rejecting CONNECT to {0}:{1} (matched blacklist)",
+            JUL.log(Level.INFO, "Fast-fail: rejecting CONNECT to {0}:{1} (matched blacklist)",
                      new Object[]{host, port});
             TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("blacklisted").inc();
             return false;
