@@ -407,6 +407,15 @@
       <version>3.13.2</version>
       <scope>test</scope>
     </dependency>
+
+    <!-- An in-process SSH server, so the JSch session handling in SSHTunnel can be exercised
+         against a real SSH protocol exchange instead of only against the live service. -->
+    <dependency>
+      <groupId>org.apache.sshd</groupId>
+      <artifactId>sshd-core</artifactId>
+      <version>2.18.0</version>
+      <scope>test</scope>
+    </dependency>
     <!-- Jetty 12 core. ConnectHandler (used for CONNECT tunnelling and the WebSocket
          relay) lives here in jetty-server; the core jetty-proxy artifact only carries
          the Handler-based ProxyHandler, which we do not use. -->

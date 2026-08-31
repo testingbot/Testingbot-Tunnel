@@ -1335,6 +1335,11 @@ public class App {
     /**
      * @param metricsPort the metricsPort to set
      */
+    /** Companion to {@link #setJettyPort}; --hubport sets this. */
+    public void setHubPort(int hubPort) {
+        this.hubPort = hubPort;
+    }
+
     /** Companion to {@link #setJettyPort} and {@link #setMetricsPort}; --se-port sets this. */
     public void setSeleniumPort(int seleniumPort) {
         this.seleniumPort = seleniumPort;

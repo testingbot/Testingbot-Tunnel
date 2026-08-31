@@ -34,10 +34,33 @@ public class SSHTunnel implements ReconnectableTunnel {
     private final CustomConnectionMonitor connectionMonitor;
     private boolean portForwardingEstablished = false;
 
+    /** TestingBot's tunnel servers listen for SSH on 443, so egress firewalls let it out. */
+    static final int DEFAULT_SSH_PORT = 443;
+
+    /** Where the Selenium forward is delivered, resolved by the tunnel server, not by us. */
+    static final String DEFAULT_HUB_HOST = "hub.testingbot.com";
+
+    private final int sshPort;
+    private final String hubHost;
+
     public SSHTunnel(App app, String server) throws Exception {
+        this(app, server, DEFAULT_SSH_PORT, DEFAULT_HUB_HOST);
+    }
+
+    /**
+     * @param sshPort the tunnel server's SSH port
+     * @param hubHost where the local forward is delivered
+     *
+     * <p>Both are fixed in production. They are parameters so the session handling can be tested
+     * against an in-process SSH server on an ephemeral port, forwarding to a local stand-in for
+     * the hub -- otherwise none of this code is reachable without the live service.
+     */
+    SSHTunnel(App app, String server, int sshPort, String hubHost) throws Exception {
         /* Create a connection instance */
         this.app = app;
         this.server = server;
+        this.sshPort = sshPort;
+        this.hubHost = hubHost;
         this.connectionId = UUID.randomUUID().toString().substring(0, 8);
 
         this.jsch = new JSch();
@@ -92,7 +115,7 @@ public class SSHTunnel implements ReconnectableTunnel {
         try {
             /* Now connect */
             long startTime = System.currentTimeMillis();
-            session = jsch.getSession(app.getClientKey(), server, 443);
+            session = jsch.getSession(app.getClientKey(), server, sshPort);
             session.setPassword(app.getClientSecret());
             session.setConfig("StrictHostKeyChecking", "no");
             applyUpstreamProxy(session);
@@ -163,19 +186,57 @@ public class SSHTunnel implements ReconnectableTunnel {
     static final String REVERSE_FORWARD_HOST = "127.0.0.1";
 
     public void createPortForwarding() {
-        try {
-            session.setPortForwardingR(2010, REVERSE_FORWARD_HOST, app.getJettyPort());
-            String hubHost = "hub.testingbot.com";
-            session.setPortForwardingL(app.getSSHPort(), hubHost, app.getHubPort());
+        // The two directions are established independently. Doing both in one try meant a
+        // failure setting up the reverse forward skipped the local one entirely -- which is
+        // exactly what happened on every restart, because the reverse forward was still
+        // registered on the server and re-registering it throws.
+        boolean reverseOk = establishReverseForward();
+        boolean localOk = establishLocalForward();
 
-            portForwardingEstablished = true;
+        portForwardingEstablished = reverseOk && localOk;
+        if (portForwardingEstablished) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                 String.format("[%s] Port forwarding established: %s:2010 -> %s:%d, localhost:%d -> %s:%d",
                     connectionId, server, REVERSE_FORWARD_HOST, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
+        }
+    }
+
+    private boolean establishReverseForward() {
+        try {
+            session.setPortForwardingR(2010, REVERSE_FORWARD_HOST, app.getJettyPort());
+            return true;
         } catch (JSchException ex) {
-            portForwardingEstablished = false;
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                 String.format("[%s] Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.", connectionId), ex);
+            return false;
+        }
+    }
+
+    private boolean establishLocalForward() {
+        try {
+            session.setPortForwardingL(app.getSSHPort(), hubHost, app.getHubPort());
+            return true;
+        } catch (JSchException ex) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
+                String.format("[%s] Could not forward local port %d to %s:%d", connectionId,
+                    app.getSSHPort(), hubHost, app.getHubPort()), ex);
+            return false;
+        }
+    }
+
+    /** Drops both forwards, ignoring ones that are not registered. */
+    private void removePortForwarding() {
+        try {
+            session.delPortForwardingR(2010);
+        } catch (Exception notRegistered) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
+                String.format("[%s] Reverse forward was not registered", connectionId));
+        }
+        try {
+            session.delPortForwardingL(app.getSSHPort());
+        } catch (Exception notRegistered) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
+                String.format("[%s] Local forward was not registered", connectionId));
         }
     }
 
@@ -193,6 +254,11 @@ public class SSHTunnel implements ReconnectableTunnel {
         } catch (IOException ex) {
             return false;
         }
+    }
+
+    /** The live JSch session; package-private so tests can inspect the real forwarding tables. */
+    Session getSession() {
+        return session;
     }
 
     public boolean isShuttingDown() {
@@ -329,10 +395,12 @@ public class SSHTunnel implements ReconnectableTunnel {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                 String.format("[%s] Restarting port forwarding", connectionId));
 
-            // Clear existing port forwarding
+            // Drop whatever is still registered first. Without this the reverse forward is
+            // still bound on the server, re-registering it fails, and the local forward this
+            // restart exists to restore is never re-created.
             portForwardingEstablished = false;
+            removePortForwarding();
 
-            // Re-establish port forwarding
             createPortForwarding();
 
             if (portForwardingEstablished) {
