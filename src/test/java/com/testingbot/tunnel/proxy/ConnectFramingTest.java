@@ -1,317 +1,317 @@
 package com.testingbot.tunnel.proxy;
 
 import com.testingbot.tunnel.App;
-import org.eclipse.jetty.http.HttpFields;
-import org.eclipse.jetty.http.HttpVersion;
-import org.eclipse.jetty.server.ConnectionMetaData;
-import org.eclipse.jetty.server.Request;
-import org.eclipse.jetty.util.Promise;
+import com.testingbot.tunnel.HttpProxy;
 import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import java.io.ByteArrayOutputStream;
+import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
+import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
-import java.nio.channels.SocketChannel;
-import java.util.Enumeration;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 /**
- * Drives the private connectToProxy() method against a fake upstream proxy
- * (a plain ServerSocket) to verify CRLF framing, hop-by-hop stripping,
- * status-line parsing, and the upstream-silence timeout.
+ * The CONNECT exchange with an upstream HTTP proxy, driven through a real proxy from a real
+ * socket.
+ *
+ * <p>This used to call the private connectToProxy() reflectively. That method has been replaced
+ * by an event-driven handshake on Jetty's selector, and a reflective test would have gone on
+ * passing against code no longer reachable -- so it now exercises the path a client actually
+ * takes: client socket to local proxy, local proxy to upstream proxy, and back.
  */
 class ConnectFramingTest {
 
-    private ServerSocket fakeProxy;
-    private Thread acceptThread;
-    private final AtomicReference<byte[]> capturedRequest = new AtomicReference<>();
+    private ServerSocket upstream;
+    private ExecutorService pool;
+    private HttpProxy httpProxy;
+    private int proxyPort;
+    private final List<String> requestLines = new CopyOnWriteArrayList<>();
     private final CountDownLatch requestReceived = new CountDownLatch(1);
 
-    @BeforeEach
-    void setUp() throws IOException {
-        fakeProxy = new ServerSocket(0, 1, java.net.InetAddress.getLoopbackAddress());
+    private static int findFreePort() throws IOException {
+        try (ServerSocket s = new ServerSocket(0)) {
+            return s.getLocalPort();
+        }
     }
 
     @AfterEach
     void tearDown() throws Exception {
-        if (acceptThread != null) {
-            acceptThread.interrupt();
-            acceptThread.join(2_000);
+        if (httpProxy != null) {
+            httpProxy.stop();
         }
-        if (fakeProxy != null && !fakeProxy.isClosed()) {
-            fakeProxy.close();
+        if (upstream != null && !upstream.isClosed()) {
+            upstream.close();
+        }
+        if (pool != null) {
+            pool.shutdownNow();
+            pool.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
 
-    private void runFakeProxy(String responseStatusLine) {
-        runFakeProxy(responseStatusLine, null);
+    /**
+     * A stand-in upstream proxy.
+     *
+     * @param statusLine what to answer, or null to accept and stay silent
+     * @param pipelined  bytes written in the same write as the response
+     */
+    private void startUpstream(String statusLine, String pipelined) throws IOException {
+        startUpstream(statusLine, pipelined, 0);
     }
 
-    /** @param pipelined bytes written immediately after the header, in the same write */
-    private void runFakeProxy(String responseStatusLine, String pipelined) {
-        acceptThread = new Thread(() -> {
-            try (Socket s = fakeProxy.accept()) {
-                InputStream in = s.getInputStream();
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                byte[] buf = new byte[1024];
-                // Read until we've seen end-of-headers
-                while (true) {
-                    int n = in.read(buf);
-                    if (n < 0) break;
-                    baos.write(buf, 0, n);
-                    String soFar = baos.toString("US-ASCII");
-                    if (soFar.contains("\r\n\r\n")) break;
-                }
-                capturedRequest.set(baos.toByteArray());
-                requestReceived.countDown();
+    /**
+     * A stand-in upstream proxy.
+     *
+     * @param statusLine what to answer, or null to accept and stay silent
+     * @param pipelined  bytes written in the same write as the response
+     * @param dripMs     pause between individual response bytes, so the reply arrives in many
+     *                   separate reads instead of one
+     */
+    private void startUpstream(String statusLine, String pipelined, long dripMs)
+            throws IOException {
+        upstream = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        pool = Executors.newCachedThreadPool();
+        pool.submit(() -> {
+            while (!upstream.isClosed()) {
+                try {
+                    Socket socket = upstream.accept();
+                    pool.submit(() -> {
+                        try {
+                            BufferedReader in = new BufferedReader(new InputStreamReader(
+                                    socket.getInputStream(), StandardCharsets.UTF_8));
+                            List<String> lines = new ArrayList<>();
+                            String line;
+                            while ((line = in.readLine()) != null && !line.isEmpty()) {
+                                lines.add(line);
+                            }
+                            requestLines.addAll(lines);
+                            requestReceived.countDown();
 
-                if (responseStatusLine != null) {
-                    OutputStream out = s.getOutputStream();
-                    String reply = responseStatusLine + "\r\n\r\n"
-                            + (pipelined == null ? "" : pipelined);
-                    out.write(reply.getBytes("US-ASCII"));
-                    out.flush();
+                            if (statusLine != null) {
+                                OutputStream out = socket.getOutputStream();
+                                byte[] reply = (statusLine + "\r\n\r\n"
+                                        + (pipelined == null ? "" : pipelined))
+                                        .getBytes(StandardCharsets.US_ASCII);
+                                if (dripMs <= 0) {
+                                    out.write(reply);
+                                    out.flush();
+                                } else {
+                                    for (byte b : reply) {
+                                        out.write(b);
+                                        out.flush();
+                                        Thread.sleep(dripMs);
+                                    }
+                                }
+                            }
+                            Thread.sleep(30_000);
+                        } catch (Exception ignored) {
+                            // test finished
+                        }
+                    });
+                } catch (IOException closed) {
+                    return;
                 }
-                // Let test read the result before we close
-                Thread.sleep(200);
-            } catch (Exception ignore) {
-                requestReceived.countDown();
             }
-        }, "fake-upstream-proxy");
-        acceptThread.setDaemon(true);
-        acceptThread.start();
+        });
     }
 
-    private void runSilentFakeProxy() {
-        // Accept the socket but never write a response. The handler must time out.
-        acceptThread = new Thread(() -> {
-            try (Socket s = fakeProxy.accept()) {
-                // Drain the request bytes but never reply
-                InputStream in = s.getInputStream();
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                byte[] buf = new byte[1024];
-                while (true) {
-                    int n = in.read(buf);
-                    if (n < 0) break;
-                    baos.write(buf, 0, n);
-                    if (baos.toString("US-ASCII").contains("\r\n\r\n")) break;
-                }
-                capturedRequest.set(baos.toByteArray());
-                requestReceived.countDown();
-                // Hold connection open until test ends
-                Thread.sleep(20_000);
-            } catch (Exception ignore) {
-                requestReceived.countDown();
-            }
-        }, "silent-upstream-proxy");
-        acceptThread.setDaemon(true);
-        acceptThread.start();
-    }
-
-    private CustomConnectHandler buildHandler() {
+    private void startTunnel() throws Exception {
+        proxyPort = findFreePort();
         App app = new App();
-        app.setClientKey("k");
-        app.setClientSecret("s");
-        app.setProxy("127.0.0.1:" + fakeProxy.getLocalPort());
-        return new CustomConnectHandler(app);
+        app.setJettyPort(proxyPort);
+        app.setClientKey("test_key");
+        app.setClientSecret("test_secret");
+        app.setProxy("127.0.0.1:" + upstream.getLocalPort());
+        httpProxy = new HttpProxy(app);
+        for (int i = 0; i < 100; i++) {
+            try (Socket s = new Socket("127.0.0.1", proxyPort)) {
+                return;
+            } catch (IOException retry) {
+                Thread.sleep(50);
+            }
+        }
+        throw new IllegalStateException("proxy did not start");
     }
 
-    private Request mockConnectRequest() {
-        // Include a hop-by-hop header to confirm it gets stripped, and a regular one to confirm it's forwarded.
-        HttpFields headers = HttpFields.build()
-            .put("Connection", "keep-alive")
-            .put("Proxy-Connection", "keep-alive")
-            .put("User-Agent", "test-agent/1.0")
-            .put("X-Custom", "value-1")
-            .asImmutable();
-
-        ConnectionMetaData connectionMetaData = mock(ConnectionMetaData.class);
-        when(connectionMetaData.getHttpVersion()).thenReturn(HttpVersion.HTTP_1_1);
-
-        Request req = mock(Request.class);
-        when(req.getMethod()).thenReturn("CONNECT");
-        when(req.getConnectionMetaData()).thenReturn(connectionMetaData);
-        when(req.getHeaders()).thenReturn(headers);
-        return req;
+    /** Opens a CONNECT through the tunnel and returns the socket, positioned after the headers. */
+    private Socket connect(String extraHeaders, StringBuilder statusOut, int timeoutMs)
+            throws Exception {
+        Socket socket = new Socket("127.0.0.1", proxyPort);
+        socket.setSoTimeout(timeoutMs);
+        socket.getOutputStream().write(("CONNECT example.com:443 HTTP/1.1\r\n"
+                + "Host: example.com:443\r\n" + extraHeaders + "\r\n")
+                .getBytes(StandardCharsets.UTF_8));
+        socket.getOutputStream().flush();
+        InputStream in = socket.getInputStream();
+        StringBuilder head = new StringBuilder();
+        while (head.indexOf("\r\n\r\n") < 0) {
+            int b = in.read();
+            if (b < 0) {
+                break;
+            }
+            head.append((char) b);
+        }
+        statusOut.append(head.length() == 0 ? "" : head.toString().split("\r\n")[0]);
+        return socket;
     }
 
-    private static final class CapturingPromise implements Promise<SocketChannel> {
-        final CountDownLatch done = new CountDownLatch(1);
-        SocketChannel succeeded;
-        Throwable failed;
+    @Test
+    void aSuccessfulConnectIsFramedCorrectlyAndStripsHopByHopHeaders() throws Exception {
+        startUpstream("HTTP/1.1 200 Connection Established", null);
+        startTunnel();
 
-        @Override
-        public void succeeded(SocketChannel result) {
-            this.succeeded = result;
-            done.countDown();
+        StringBuilder status = new StringBuilder();
+        try (Socket ignored = connect("Proxy-Connection: keep-alive\r\nX-Keep: yes\r\n",
+                status, 20_000)) {
+            assertThat(status.toString()).contains("200");
         }
 
-        @Override
-        public void failed(Throwable x) {
-            this.failed = x;
-            done.countDown();
+        assertThat(requestReceived.await(10, TimeUnit.SECONDS)).isTrue();
+        assertThat(requestLines).first().asString()
+                .isEqualTo("CONNECT example.com:443 HTTP/1.1");
+        assertThat(requestLines).contains("Host: example.com:443");
+        // Hop-by-hop headers belong to our hop, not the upstream proxy's.
+        assertThat(requestLines).noneMatch(l -> l.toLowerCase().startsWith("proxy-connection"));
+        // Everything else is replayed.
+        assertThat(requestLines).contains("X-Keep: yes");
+    }
+
+    @Test
+    void aRejectionFromTheUpstreamProxyIsNotReportedAsSuccess() throws Exception {
+        startUpstream("HTTP/1.1 403 Forbidden", null);
+        startTunnel();
+
+        StringBuilder status = new StringBuilder();
+        try (Socket ignored = connect("", status, 20_000)) {
+            assertThat(status.toString()).doesNotContain("200");
         }
     }
 
-    private CapturingPromise invokeConnectToProxy(CustomConnectHandler handler, Request req,
-                                                  String host, int port) throws Exception {
-        // The upstream is resolved per destination now (--pac-local can vary it), so the dial
-        // takes the chosen ProxySpec rather than reading a field.
-        Method resolve = CustomConnectHandler.class.getDeclaredMethod(
-            "upstreamFor", String.class, int.class);
-        resolve.setAccessible(true);
-        Object upstream = resolve.invoke(handler, host, port);
-
-        Method m = CustomConnectHandler.class.getDeclaredMethod(
-            "connectToProxy", ProxySpec.class, Request.class, String.class, int.class, Promise.class);
-        m.setAccessible(true);
-        CapturingPromise promise = new CapturingPromise();
-        m.invoke(handler, upstream, req, host, port, promise);
-        return promise;
-    }
-
     @Test
-    void bytesPipelinedAfterTheConnectResponseAreNotSwallowed() throws Exception {
-        // A proxy is entitled to put its 200 and the first bytes of the tunnelled stream in the
-        // same segment. Reading the reply in blocks took those bytes off the socket and dropped
-        // them with the buffer, so the TLS handshake inside the tunnel failed for no visible
-        // reason. Everything after the header terminator must still be readable from the channel.
-        // Large enough that a 1 KiB block read is certain to swallow part of it, rather than
-        // relying on the header and the payload landing in the same TCP segment.
-        String pipelined = "X".repeat(8192);
-        runFakeProxy("HTTP/1.1 200 Connection Established", pipelined);
-        CustomConnectHandler handler = buildHandler();
-        Request req = mockConnectRequest();
+    void aStatusLineMentioning200InItsReasonIsStillARejection() throws Exception {
+        // The status code is parsed, not searched for: "502 ... 200-style header bug" must not
+        // read as success.
+        startUpstream("HTTP/1.1 502 Bad Gateway 200-style header bug", null);
+        startTunnel();
 
-        CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
-        assertThat(promise.done.await(20, TimeUnit.SECONDS)).isTrue();
-        assertThat(promise.failed).isNull();
-        assertThat(promise.succeeded).isNotNull();
-
-        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(pipelined.length());
-        promise.succeeded.configureBlocking(true);
-        while (buffer.hasRemaining() && promise.succeeded.read(buffer) > 0) {
-            // read what the proxy sent after the header
+        StringBuilder status = new StringBuilder();
+        try (Socket ignored = connect("", status, 20_000)) {
+            assertThat(status.toString()).doesNotContain("200");
         }
-        assertThat(new String(buffer.array(), java.nio.charset.StandardCharsets.US_ASCII))
-                .isEqualTo(pipelined);
     }
 
     @Test
-    void successfulConnect_writesCRLFFraming_andStripsHopByHopHeaders() throws Exception {
-        runFakeProxy("HTTP/1.1 200 Connection Established");
-        CustomConnectHandler handler = buildHandler();
-        Request req = mockConnectRequest();
+    void aSilentUpstreamProxyDoesNotHangForever() throws Exception {
+        // Accepts the connection and never answers. The handshake runs under its own 15s idle
+        // timeout rather than the tunnel's, which is minutes long -- inheriting that one left
+        // the client waiting over two minutes for a proxy that was never going to reply.
+        startUpstream(null, null);
+        startTunnel();
 
-        CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
-
-        assertThat(requestReceived.await(5, TimeUnit.SECONDS)).isTrue();
-        assertThat(promise.done.await(5, TimeUnit.SECONDS)).isTrue();
-        assertThat(promise.failed).isNull();
-        assertThat(promise.succeeded).isNotNull();
-
-        String requestStr = new String(capturedRequest.get(), "US-ASCII");
-
-        // Status line is the full CONNECT request-target with explicit port.
-        assertThat(requestStr).startsWith("CONNECT example.com:443 HTTP/1.1\r\n");
-
-        // Every header line ends with CRLF (the old bug used bare LF for inter-header separators).
-        // Quick way to check: number of \r\n pairs should match number of \n.
-        int crlfCount = countOccurrences(requestStr, "\r\n");
-        int lfCount = countOccurrences(requestStr, "\n");
-        assertThat(crlfCount).isEqualTo(lfCount);
-
-        // Hop-by-hop headers must NOT be forwarded.
-        assertThat(requestStr).doesNotContain("Connection: keep-alive");
-        assertThat(requestStr).doesNotContain("Proxy-Connection: keep-alive");
-
-        // User-agent and X-Custom (end-to-end) should pass through.
-        assertThat(requestStr).contains("User-Agent: test-agent/1.0\r\n");
-        assertThat(requestStr).contains("X-Custom: value-1\r\n");
-
-        // Synthetic Host header is added with explicit port.
-        assertThat(requestStr).contains("Host: example.com:443\r\n");
-
-        // Request ends with the bare CRLF that separates headers from body.
-        assertThat(requestStr).endsWith("\r\n\r\n");
-
-        promise.succeeded.close();
-    }
-
-    @Test
-    void rejectionByUpstream_failsPromise_andDoesNotMatchSubstring200() throws Exception {
-        // 502 contains no "200" substring; old buggy check would have failed for the right
-        // reason. But the more interesting case: status line that *contains* "200" elsewhere.
-        runFakeProxy("HTTP/1.1 407 Proxy Authentication Required");
-        CustomConnectHandler handler = buildHandler();
-        Request req = mockConnectRequest();
-
-        CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
-
-        assertThat(promise.done.await(5, TimeUnit.SECONDS)).isTrue();
-        assertThat(promise.succeeded).isNull();
-        assertThat(promise.failed).isInstanceOf(IOException.class);
-        assertThat(promise.failed.getMessage()).contains("407");
-    }
-
-    @Test
-    void rejection_whenStatusBodyMentions200() throws Exception {
-        // Old check `responseStr.contains("200")` would falsely accept this. New parser must reject.
-        runFakeProxy("HTTP/1.1 502 Bad Gateway 200-style header bug");
-        CustomConnectHandler handler = buildHandler();
-        Request req = mockConnectRequest();
-
-        CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
-
-        assertThat(promise.done.await(5, TimeUnit.SECONDS)).isTrue();
-        assertThat(promise.succeeded).isNull();
-        assertThat(promise.failed).isInstanceOf(IOException.class);
-        assertThat(promise.failed.getMessage()).contains("502");
-    }
-
-    @Test
-    void silentUpstream_timesOut() throws Exception {
-        // The selector deadline is 15s. We don't want to actually wait 15s in tests, so we
-        // assert the behavior indirectly: the test would have hung forever before the fix.
-        // Here we simply verify that within 20s the promise completes with a timeout failure.
-        runSilentFakeProxy();
-        CustomConnectHandler handler = buildHandler();
-        Request req = mockConnectRequest();
-
+        StringBuilder status = new StringBuilder();
         long start = System.currentTimeMillis();
-        CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
-        assertThat(promise.done.await(60, TimeUnit.SECONDS)).isTrue();
-        long elapsed = System.currentTimeMillis() - start;
-
-        assertThat(promise.succeeded).isNull();
-        assertThat(promise.failed).isInstanceOf(IOException.class);
-        assertThat(promise.failed.getMessage()).containsIgnoringCase("Timed out");
-        // What matters is that it waited for the deadline instead of returning immediately, and
-        // that it gave up at all. The upper bound is deliberately loose: the previous 20s ceiling
-        // sat only 5s above the 15s deadline and failed on a loaded machine, which is a flaky
-        // test rather than a real fault.
-        assertThat(elapsed).isGreaterThan(10_000L).isLessThan(60_000L);
+        try (Socket ignored = connect("", status, 90_000)) {
+            long elapsed = System.currentTimeMillis() - start;
+            assertThat(status.toString()).doesNotContain("200");
+            assertThat(elapsed)
+                    .as("should give up on the handshake timeout, not the tunnel's idle timeout")
+                    .isLessThan(45_000);
+        }
     }
 
-    private static int countOccurrences(String haystack, String needle) {
-        int count = 0;
-        int idx = 0;
-        while ((idx = haystack.indexOf(needle, idx)) != -1) {
-            count++;
-            idx += needle.length();
+    @Test
+    void aReplyArrivingOneByteAtATimeIsReassembled() throws Exception {
+        // The blocking version read the reply inside one select loop it owned. The event-driven
+        // one is re-entered by the selector for every readable event, so the parse state has to
+        // survive between callbacks -- and a fill() returning 0 must re-arm rather than be read
+        // as end-of-stream. A drip forces dozens of those callbacks.
+        startUpstream("HTTP/1.1 200 Connection Established", null, 5);
+        startTunnel();
+
+        StringBuilder status = new StringBuilder();
+        try (Socket ignored = connect("", status, 20_000)) {
+            assertThat(status.toString()).contains("200");
         }
-        return count;
+    }
+
+    @Test
+    void aRejectionArrivingOneByteAtATimeIsStillARejection() throws Exception {
+        startUpstream("HTTP/1.1 407 Proxy Authentication Required", null, 5);
+        startTunnel();
+
+        StringBuilder status = new StringBuilder();
+        try (Socket ignored = connect("", status, 20_000)) {
+            assertThat(status.toString()).doesNotContain("200");
+        }
+    }
+
+    @Test
+    void anUpstreamThatHangsUpMidReplyFailsRatherThanWaits() throws Exception {
+        // Half a status line and then EOF. fill() returns -1; without treating that as a failure
+        // the handshake would sit re-arming fillInterested until the idle timeout.
+        upstream = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        pool = Executors.newCachedThreadPool();
+        pool.submit(() -> {
+            try (Socket socket = upstream.accept()) {
+                socket.getInputStream().read(new byte[1024]);
+                socket.getOutputStream().write("HTTP/1.1 200 Conn".getBytes(StandardCharsets.US_ASCII));
+                socket.getOutputStream().flush();
+            } catch (IOException closed) {
+                // test finished
+            }
+        });
+        startTunnel();
+
+        StringBuilder status = new StringBuilder();
+        long start = System.currentTimeMillis();
+        try (Socket ignored = connect("", status, 30_000)) {
+            assertThat(status.toString()).doesNotContain("200");
+            assertThat(System.currentTimeMillis() - start)
+                    .as("EOF should fail the handshake at once, not wait for the timeout")
+                    .isLessThan(10_000);
+        }
+    }
+
+    @Test
+    void bytesPipelinedAfterTheResponseAreNotSwallowed() throws Exception {
+        // A proxy may put its 200 and the first bytes of the tunnelled stream in one segment.
+        // Reading the reply in blocks took those bytes off the socket and dropped them, and the
+        // TLS handshake inside failed with nothing to explain it. 8 KiB is large enough that a
+        // block read must swallow part of it rather than depending on TCP segmentation.
+        String pipelined = "X".repeat(8192);
+        startUpstream("HTTP/1.1 200 Connection Established", pipelined);
+        startTunnel();
+
+        StringBuilder status = new StringBuilder();
+        try (Socket socket = connect("", status, 20_000)) {
+            assertThat(status.toString()).contains("200");
+
+            byte[] relayed = new byte[pipelined.length()];
+            int got = 0;
+            InputStream in = socket.getInputStream();
+            while (got < relayed.length) {
+                int read = in.read(relayed, got, relayed.length - got);
+                if (read < 0) {
+                    break;
+                }
+                got += read;
+            }
+
+            assertThat(got).as("every pipelined byte should reach the client").isEqualTo(pipelined.length());
+            assertThat(new String(relayed, StandardCharsets.US_ASCII)).isEqualTo(pipelined);
+        }
     }
 }
