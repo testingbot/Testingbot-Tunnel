@@ -212,6 +212,7 @@ public class WebsocketHandler extends ConnectHandler {
                 com.testingbot.tunnel.TunnelMetrics.timedDial("websocket", promise);
         getExecutor().execute(() -> {
             SocketChannel channel = null;
+            SocketChannel prepared;
             try {
                 // Connect to the target using blocking I/O for the handshake
                 channel = SocketChannel.open();
@@ -228,12 +229,18 @@ public class WebsocketHandler extends ConnectHandler {
                 channel.configureBlocking(false);
                 request.setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
 
-                timed.succeeded(channel);
+                prepared = channel;
             } catch (Throwable x) {
                 close(channel);
                 LOG.warn("WebSocket connect/handshake failed", x);
                 timed.failed(x);
+                return;
             }
+            // Completed outside the try: succeeded() runs the rest of ConnectHandler's wiring
+            // synchronously, and if that throws -- SelectorManager.accept() NPEs once the
+            // manager has been stopped, which the SSH reconnect does -- the catch above would
+            // complete the same promise a second time.
+            timed.succeeded(prepared);
         });
     }
 

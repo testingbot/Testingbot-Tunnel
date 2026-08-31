@@ -27,18 +27,27 @@ public final class TunnelMetrics {
     public static <T> org.eclipse.jetty.util.Promise<T> timedDial(
             String path, org.eclipse.jetty.util.Promise<T> delegate) {
         Histogram.Timer timer = DIAL_DURATION_SECONDS.labels(path).startTimer();
+        // Records the outcome at most once. A dial path that completes its promise from inside
+        // the same try/catch can complete it twice when the success path itself throws, which
+        // would count one dial as both a success and a failure and observe the timer twice.
+        java.util.concurrent.atomic.AtomicBoolean recorded =
+                new java.util.concurrent.atomic.AtomicBoolean();
         return new org.eclipse.jetty.util.Promise<T>() {
             @Override
             public void succeeded(T result) {
-                timer.observeDuration();
-                DIAL_TOTAL.labels(path, "success").inc();
+                if (recorded.compareAndSet(false, true)) {
+                    timer.observeDuration();
+                    DIAL_TOTAL.labels(path, "success").inc();
+                }
                 delegate.succeeded(result);
             }
 
             @Override
             public void failed(Throwable x) {
-                timer.observeDuration();
-                DIAL_TOTAL.labels(path, "failure").inc();
+                if (recorded.compareAndSet(false, true)) {
+                    timer.observeDuration();
+                    DIAL_TOTAL.labels(path, "failure").inc();
+                }
                 delegate.failed(x);
             }
         };

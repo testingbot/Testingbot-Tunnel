@@ -333,6 +333,7 @@ public class CustomConnectHandler extends ConnectHandler {
                                   Promise<SocketChannel> promise) {
         getExecutor().execute(() -> {
             SocketChannel channel = null;
+            SocketChannel prepared;
             try {
                 channel = SocketChannel.open();
                 channel.socket().setTcpNoDelay(true);
@@ -352,7 +353,7 @@ public class CustomConnectHandler extends ConnectHandler {
                     LOG.info("Established SOCKS5 tunnel through {}:{} to {}:{}",
                             upstream.getHost(), upstream.getPort(), host, port);
                 }
-                promise.succeeded(channel);
+                prepared = channel;
             } catch (Throwable x) {
                 LOG.error("Failed to establish SOCKS5 tunnel through {}:{} to {}:{}: {}",
                         upstream.getHost(), upstream.getPort(), host, port, x.getMessage());
@@ -372,6 +373,7 @@ public class CustomConnectHandler extends ConnectHandler {
                                 Promise<SocketChannel> promise) {
         SocketChannel channel = null;
         Selector selector = null;
+        boolean handedOff = false;
         try {
             channel = SocketChannel.open();
             channel.socket().setTcpNoDelay(true);
@@ -479,12 +481,25 @@ public class CustomConnectHandler extends ConnectHandler {
                         }
 
                         selector.close();
+                        // From here the channel belongs to Jetty. succeeded() runs its wiring
+                        // synchronously and can throw -- SelectorManager.accept() NPEs once the
+                        // manager has been stopped, which every SSH reconnect does -- so the
+                        // catch below must neither close the channel nor complete the promise
+                        // a second time.
+                        handedOff = true;
                         promise.succeeded(channel);
                         return;
                     }
                 }
             }
         } catch (Throwable x) {
+            if (handedOff) {
+                // The tunnel was established and the channel passed on; this failure came out of
+                // Jetty's own wiring, and the promise is already completed.
+                LOG.error("CONNECT tunnel to {}:{} was established but could not be handed over: {}",
+                        host, port, x.getMessage());
+                return;
+            }
             // Throwable, not IOException: an unresolvable --proxy host makes channel.connect
             // throw UnresolvedAddressException, a RuntimeException. That escaped the method,
             // leaking the SocketChannel on every CONNECT and leaving the dial promise (and so
