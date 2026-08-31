@@ -83,6 +83,7 @@ may hold tunnel slots on the same account.
 | `tunnel_identifier` | 1 | `--tunnel-identifier` + browser using that identifier |
 | `pac` | 0 | `--pac-local` routing decisions via `--pac-test`, and refusal of unsupported syntax |
 | `localhost_deny` | 1 | `--localhost-policy deny` over CONNECT and plain HTTP |
+| `dns` | 1 | `--dns` against a local server, using a `.invalid` name nothing else can resolve |
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
@@ -97,3 +98,4 @@ may hold tunnel slots on the same account.
 - `upstream_proxy.py` — minimal upstream HTTP proxy for `--proxy`
 - `socks5_proxy.py` — minimal upstream SOCKS5 proxy for `--proxy socks5://`
 - `ws_client.py` — WebSocket client that upgrades through the local proxy
+- `dns_server.py` — minimal authoritative DNS server for `--dns`

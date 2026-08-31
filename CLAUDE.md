@@ -129,8 +129,12 @@ Credentials come from the ambient ticket cache, or from `--krb5-keytab` with
 defaults to `HTTP/<proxy-host>` and can be overridden with `--proxy-spn`.
 
 All three egress paths use it: the CONNECT tunnel, the plain-HTTP client, and the SSH
-connection. The CONNECT and SSH paths send the header pre-emptively; the plain-HTTP path uses
-jetty-client's 407-challenge handling.
+connection.
+
+All three send the header pre-emptively. The plain-HTTP path used to rely on jetty-client's
+407-challenge handling, but Jetty 12's `ProxyHandler.newHttpClient()` ends with
+`protocolHandlers.clear()`, which removes the handler that answers the challenge -- so the
+configured `SPNEGOAuthentication` could never fire. `--auth` was broken the same way.
 
 `--doctor` reports the whole chain -- JGSS availability, krb5 config, ticket cache or keytab,
 the SPN that will be requested, and whether a service ticket can actually be obtained. Every one
@@ -196,7 +200,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 676 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 679 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

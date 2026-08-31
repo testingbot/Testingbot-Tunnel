@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (12 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (13 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -643,6 +643,43 @@ PACFILE
   assert_contains "pac names the offending line" "$out" "2"
 }
 
+# --dns sends name resolution to a server the operator names instead of the platform resolver.
+# It is easy for this to be wired and yet dead -- the option spent years setting JDK 8 system
+# properties that had no effect on any supported JDK -- and only a name that cannot resolve any
+# other way can tell the difference. Hence .invalid, which is reserved never to resolve.
+scenario_dns() {
+  local dport; dport="$(free_port)"
+  python3 "$HERE/dns_server.py" "$dport" "dns-e2e.invalid=127.0.0.1" \
+    > "$WORK/dns.log" 2>&1 &
+  local dns=$!
+  sleep 1
+  start_tunnel --dns "127.0.0.1:$dport" || { kill $dns 2>/dev/null; return 1; }
+
+  # Plain HTTP: reaching the origin at all proves the custom resolver answered, because
+  # nothing else on this machine can turn this name into an address.
+  assert_contains "dns resolves a name only our server knows" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://dns-e2e.invalid:$ORIGIN_PORT/")" \
+    "$MARKER"
+  # CONNECT is resolved separately, in the handler's newConnectAddress.
+  assert_eq "dns applies to the CONNECT path too" \
+    "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" \
+        --proxytunnel "http://dns-e2e.invalid:$ORIGIN_PORT/")" "200"
+  # From the server's own side, not just from ours succeeding.
+  assert_neq "our dns server was the one asked" \
+    "$(grep -c 'query dns-e2e.invalid' "$WORK/dns.log" || true)" "0"
+
+  # A name it does not serve must still work: --dns falls back rather than becoming a
+  # single point of failure for everything the tests visit.
+  check_proxy_http dns
+  check_proxy_connect dns
+
+  # And the browser reaches the origin through it, the same as any other scenario.
+  check_browser dns
+
+  stop_tunnel
+  kill $dns 2>/dev/null
+}
+
 # The reconnect path: everything that runs when the SSH connection drops and comes back.
 # Several bugs have lived here -- a SelectorManager leaked on every restart until the pool ran
 # out, port forwards that were not rebuilt, a BindException on the second start -- and none of
@@ -719,7 +756,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }

@@ -71,6 +71,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private HeaderRules requestHeaderRules = HeaderRules.none();
     private HeaderRules responseHeaderRules = HeaderRules.none();
     private String proxyAuthHeaderValue;
+    /** Host of the upstream HTTP proxy, or null when there is not one. */
+    private String upstreamHttpProxyHost;
     private String upstreamProxy;
     private String upstreamProxyAuth;
     private String[] basicAuth;
@@ -114,10 +116,34 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         // every website their tests visit.
         ProxySpec spec = ProxySpec.parse(hostPort);
         boolean httpProxy = spec != null && !spec.isSocks5();
+        this.upstreamHttpProxyHost = httpProxy ? spec.getHost() : null;
         if (httpProxy && userPassword != null && !userPassword.isEmpty()) {
             this.proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(userPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
+    }
+
+    /**
+     * The {@code Proxy-Authorization} value for the upstream proxy, or null when there is
+     * nothing to send.
+     *
+     * <p>Negotiate is asked for a fresh token per request: SPNEGO tokens carry a timestamp and
+     * sequence number, so replaying one is exactly what a proxy is meant to reject.
+     *
+     * <p>Sent pre-emptively for the same reason {@code --auth} is. Jetty 12's
+     * ProxyHandler.newHttpClient() ends with {@code protocolHandlers.clear()}, which removes the
+     * handler that answers a 407 -- so the SPNEGOAuthentication configured on the client could
+     * never fire and every request through a Negotiate proxy failed. The CONNECT and SSH paths
+     * were already pre-emptive; this makes the plain-HTTP path agree with them.
+     */
+    private String upstreamAuthorization() {
+        if (upstreamHttpProxyHost == null) {
+            return null;
+        }
+        if (proxyAuthenticator.isNegotiate()) {
+            return proxyAuthenticator.authorizationValue(upstreamHttpProxyHost);
+        }
+        return proxyAuthHeaderValue;
     }
 
     /** Splits "user:password"; the password may itself contain colons. */
@@ -564,8 +590,9 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         super.addProxyHeaders(clientToProxyRequest, proxyToServerRequest);
 
         proxyToServerRequest.headers(fields -> {
-            if (proxyAuthHeaderValue != null) {
-                fields.put(HttpHeader.PROXY_AUTHORIZATION, proxyAuthHeaderValue);
+            String upstreamAuthorization = upstreamAuthorization();
+            if (upstreamAuthorization != null) {
+                fields.put(HttpHeader.PROXY_AUTHORIZATION, upstreamAuthorization);
             }
             // --auth, sent pre-emptively. Not put(): a client that supplied its own credentials
             // meant them, and overwriting them would be a surprising thing for a proxy to do.
