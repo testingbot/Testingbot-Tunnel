@@ -294,10 +294,12 @@ public final class PacInterpreter {
             case "*" -> numberOf(left) * numberOf(right);
             case "/" -> numberOf(left) / numberOf(right);
             case "%" -> numberOf(left) % numberOf(right);
-            case "<" -> compare(left, right) < 0;
-            case ">" -> compare(left, right) > 0;
-            case "<=" -> compare(left, right) <= 0;
-            case ">=" -> compare(left, right) >= 0;
+            // NaN compares false against everything in JavaScript. Double.compare orders NaN
+            // above every other value, so relying on it made "notANumber > 20" quietly true.
+            case "<" -> comparable(left, right) && compare(left, right) < 0;
+            case ">" -> comparable(left, right) && compare(left, right) > 0;
+            case "<=" -> comparable(left, right) && compare(left, right) <= 0;
+            case ">=" -> comparable(left, right) && compare(left, right) >= 0;
             // PAC files predate === and use == for value comparison; both compare by value here,
             // which matches how the files are written and read.
             case "==", "===" -> looseEquals(left, right);
@@ -324,6 +326,11 @@ public final class PacInterpreter {
         }
         if (target instanceof String text) {
             if (property instanceof String name) {
+                // A property, not a method: "host.length > 10" is one of the most common things
+                // a PAC file does, and returning the method handle here made it compare as NaN.
+                if (name.equals("length")) {
+                    return (double) text.length();
+                }
                 return new BoundMethod(text, name, member.line());
             }
             int index = (int) numberOf(property);
@@ -387,7 +394,16 @@ public final class PacInterpreter {
                 }
                 yield parts;
             }
-            case "replace" -> s.replace(stringOf(arg(args, 0)), stringOf(arg(args, 1)));
+            case "replace" -> {
+                // JavaScript's replace(string, string) substitutes only the first match;
+                // Java's String.replace substitutes every one.
+                String search = stringOf(arg(args, 0));
+                int at = s.indexOf(search);
+                yield at < 0 || search.isEmpty()
+                        ? s
+                        : s.substring(0, at) + stringOf(arg(args, 1))
+                          + s.substring(at + search.length());
+            }
             case "trim" -> s.trim();
             case "startsWith" -> s.startsWith(stringOf(arg(args, 0)));
             case "endsWith" -> s.endsWith(stringOf(arg(args, 0)));
@@ -604,6 +620,14 @@ public final class PacInterpreter {
             return stringOf(left).equals(stringOf(right));
         }
         return numberOf(left) == numberOf(right);
+    }
+
+    /** False when either side coerces to NaN, which makes every relational operator false. */
+    private static boolean comparable(Object left, Object right) {
+        if (left instanceof String && right instanceof String) {
+            return true;
+        }
+        return !Double.isNaN(numberOf(left)) && !Double.isNaN(numberOf(right));
     }
 
     private static int compare(Object left, Object right) {

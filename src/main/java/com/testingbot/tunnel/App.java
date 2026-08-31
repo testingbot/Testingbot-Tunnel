@@ -110,7 +110,7 @@ public class App {
     // RFC 7230 token: 1*tchar
     private static final java.util.regex.Pattern HEADER_NAME = java.util.regex.Pattern.compile("[!#$%&'*+\\-.^_`|~0-9A-Za-z]+");
 
-    private static void validateHeaderRules(String flag, String[] rules) throws ParseException {
+    static void validateHeaderRules(String flag, String[] rules) throws ParseException {
         try {
             com.testingbot.tunnel.proxy.HeaderRules.parse(rules);
         } catch (IllegalArgumentException invalid) {
@@ -130,13 +130,16 @@ public class App {
         }
     }
 
-    public static void main(String... args) throws Exception {
-        if (!checkJavaVersion()) {
-            System.exit(1);
-        }
-
-        final CommandLineParser cmdLinePosixParser = new PosixParser();
+    /**
+     * The full option set.
+     *
+     * <p>Extracted from main so the options and their validation can be exercised without
+     * starting a tunnel; previously the only way to reach any of this was to run the
+     * process.
+     */
+    static Options buildOptions() {
         final Options options = new Options();
+
 
         options.addOption("h", "help", false, "Displays help text");
         options.addOption("d", "debug", false, "Enables debug messages (alias for --log-level debug)");
@@ -312,6 +315,17 @@ public class App {
             + " (for example: se-port = 4445). Explicit command-line flags override the file.");
         configOption.setArgName("FILE");
         options.addOption(configOption);
+
+        return options;
+    }
+
+    public static void main(String... args) throws Exception {
+        if (!checkJavaVersion()) {
+            System.exit(1);
+        }
+
+        final CommandLineParser cmdLinePosixParser = new PosixParser();
+        final Options options = buildOptions();
 
         Statistics.setStartTime(System.currentTimeMillis());
 
@@ -884,7 +898,7 @@ public class App {
      * wrong is that some requests quietly take the wrong route. Being able to ask directly turns
      * that into a one-line check.
      */
-    private static int pacTest(String location, String url) {
+    static int pacTest(String location, String url) {
         try {
             com.testingbot.tunnel.pac.PacPolicy policy =
                     com.testingbot.tunnel.pac.PacPolicy.load(location);
@@ -917,7 +931,7 @@ public class App {
      * are useless if doctor runs before --proxy and --proxy-auth-scheme have been read, which is
      * where they sit in the argument handling below.
      */
-    private static void applyUpstreamProxyOptions(App app, CommandLine commandLine) throws ParseException {
+    static void applyUpstreamProxyOptions(App app, CommandLine commandLine) throws ParseException {
         if (commandLine.hasOption("proxy")) {
             app.setProxy(commandLine.getOptionValue("proxy"));
         }
@@ -949,7 +963,7 @@ public class App {
 
     }
 
-    private static int readinessPort(CommandLine commandLine) throws ParseException {
+    static int readinessPort(CommandLine commandLine) throws ParseException {
         String value = commandLine.getOptionValue("metrics-port");
         if (value == null) {
             return DEFAULT_METRICS_PORT;
