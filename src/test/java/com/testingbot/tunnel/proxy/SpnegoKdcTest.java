@@ -156,6 +156,49 @@ class SpnegoKdcTest {
                 .isNotEmpty();
     }
 
+    @Test
+    void theKerberosLoginIsPerformedOnceAndReused() throws Exception {
+        // The login is a keytab read plus an AS-REQ to the KDC, and it was being done on the
+        // request path for every single CONNECT. The ticket it yields is valid for hours.
+        SpnegoClient client = new SpnegoClient(SERVICE_PRINCIPAL, keyTab,
+                CLIENT_PRINCIPAL + "@" + REALM);
+
+        for (int i = 0; i < 10; i++) {
+            assertThat(client.initialToken(PROXY_HOST)).isNotBlank();
+        }
+
+        assertThat(client.getLoginCount())
+                .as("one login should cover every token")
+                .isEqualTo(1);
+    }
+
+    @Test
+    void reusingTheLoginStillYieldsAFreshTokenEachTime() throws Exception {
+        // Caching the login must not turn into caching the token: a replayed SPNEGO token is
+        // exactly what a proxy is entitled to reject.
+        SpnegoClient client = new SpnegoClient(SERVICE_PRINCIPAL, keyTab,
+                CLIENT_PRINCIPAL + "@" + REALM);
+
+        String first = client.initialToken(PROXY_HOST);
+        String second = client.initialToken(PROXY_HOST);
+
+        assertThat(client.getLoginCount()).isEqualTo(1);
+        assertThat(first).isNotEqualTo(second);
+    }
+
+    @Test
+    void aFailedLoginIsNotCachedAsASuccess() throws Exception {
+        // Otherwise a transient KDC problem would be latched for the life of the process.
+        SpnegoClient client = new SpnegoClient(SERVICE_PRINCIPAL, keyTab, "nobody@" + REALM);
+
+        assertThatThrownBy(() -> client.initialToken(PROXY_HOST))
+                .isInstanceOf(IllegalStateException.class);
+        assertThatThrownBy(() -> client.initialToken(PROXY_HOST))
+                .isInstanceOf(IllegalStateException.class);
+
+        assertThat(client.getLoginCount()).isZero();
+    }
+
     /* --------------------------------------------------------------- failure paths */
 
     @Test

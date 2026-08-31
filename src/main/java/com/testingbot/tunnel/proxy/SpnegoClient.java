@@ -41,9 +41,20 @@ public class SpnegoClient {
 
     private static final String LOGIN_CONTEXT_NAME = "TestingBotTunnelKerberos";
 
+    /** Re-login this long before the ticket actually expires, to absorb clock skew. */
+    private static final long EXPIRY_SKEW_MS = 60_000;
+
+    /** Used when the ticket carries no end time, which should not happen but must not hang. */
+    private static final long FALLBACK_LIFETIME_MS = 10 * 60_000;
+
     private final String servicePrincipal;
     private final Path keyTab;
     private final String principal;
+
+    private LoginContext loginContext;
+    private Subject subject;
+    private long subjectExpiresAtMs;
+    private int loginCount;
 
     /**
      * @param servicePrincipal SPN in {@code HTTP/host} or {@code HTTP@host} form; when null it is
@@ -84,8 +95,12 @@ public class SpnegoClient {
             return Base64.getEncoder().encodeToString(token(spn));
         }
         try {
-            Subject subject = loginWithKeyTab();
-            return Subject.doAs(subject, (PrivilegedExceptionAction<String>) () ->
+            // The login is the expensive half -- reading the keytab and an AS-REQ to the KDC --
+            // and it was being done on the request path for every single CONNECT. The ticket it
+            // yields is valid for hours, so it is kept and reused; only the service ticket is
+            // obtained per call, and the SPNEGO token itself must stay fresh for replay
+            // protection.
+            return Subject.doAs(cachedSubject(), (PrivilegedExceptionAction<String>) () ->
                     Base64.getEncoder().encodeToString(token(spn)));
         } catch (PrivilegedActionException ex) {
             if (ex.getCause() instanceof GSSException gss) {
@@ -120,7 +135,62 @@ public class SpnegoClient {
         }
     }
 
-    private Subject loginWithKeyTab() throws LoginException {
+    /** The logged-in Subject, refreshed only once its Kerberos ticket is close to expiring. */
+    private synchronized Subject cachedSubject() throws LoginException {
+        long now = System.currentTimeMillis();
+        if (subject != null && now < subjectExpiresAtMs) {
+            return subject;
+        }
+        logoutQuietly();
+        loginContext = loginWithKeyTab();
+        loginCount++;
+        subject = loginContext.getSubject();
+        subjectExpiresAtMs = expiryOf(subject, now);
+        return subject;
+    }
+
+    /**
+     * Releases the previous login.
+     *
+     * <p>Krb5LoginModule holds the ticket and, with storeKey, the secret key in the Subject until
+     * logout. Logging in per request without ever logging out accumulated those for the life of
+     * the process.
+     */
+    private void logoutQuietly() {
+        if (loginContext == null) {
+            return;
+        }
+        try {
+            loginContext.logout();
+        } catch (LoginException ignored) {
+            // Nothing useful to do; the replacement login is what matters.
+        } finally {
+            loginContext = null;
+            subject = null;
+        }
+    }
+
+    /** The earliest ticket expiry in the Subject, less a skew allowance. */
+    private static long expiryOf(Subject subject, long now) {
+        long earliest = Long.MAX_VALUE;
+        for (javax.security.auth.kerberos.KerberosTicket ticket
+                : subject.getPrivateCredentials(javax.security.auth.kerberos.KerberosTicket.class)) {
+            if (ticket.getEndTime() != null) {
+                earliest = Math.min(earliest, ticket.getEndTime().getTime());
+            }
+        }
+        if (earliest == Long.MAX_VALUE) {
+            return now + FALLBACK_LIFETIME_MS;
+        }
+        return Math.max(now, earliest - EXPIRY_SKEW_MS);
+    }
+
+    /** How many JAAS logins have been performed; for tests. */
+    synchronized int getLoginCount() {
+        return loginCount;
+    }
+
+    private LoginContext loginWithKeyTab() throws LoginException {
         if (principal == null || principal.isBlank()) {
             throw new LoginException("A keytab was configured without a principal to use it with");
         }
@@ -130,7 +200,7 @@ public class SpnegoClient {
         LoginContext login = new LoginContext(LOGIN_CONTEXT_NAME, null, null,
                 new KeyTabConfiguration(keyTab, principal));
         login.login();
-        return login.getSubject();
+        return login;
     }
 
     /** A Krb5LoginModule configured for unattended keytab login, built in code so no external
