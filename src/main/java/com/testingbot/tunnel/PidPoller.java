@@ -4,71 +4,110 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import ssh.Scheduler;
 
 /**
+ * Watches a pid file so an external supervisor can stop the tunnel by deleting it.
+ *
+ * <p>The shutdown action and the scheduler are injectable. Without that the only observable
+ * behaviour was {@code System.exit(0)} on a five-second timer, which is untestable in-process --
+ * so the file naming, the "already exists" path and the removal detection all went unverified,
+ * even though a wrong file name means a supervisor silently cannot stop the tunnel at all.
  *
  * @author testingbot
  */
 public class PidPoller {
+
+    private static final Logger LOG = Logger.getLogger(PidPoller.class.getName());
+
+    static final long POLL_INTERVAL_MS = 5000;
+
     private final File pidFile;
-    private Timer timer;
+    private final Scheduler scheduler;
+    private final Runnable onRemoved;
     private final Thread cleanupThread;
+    private boolean started;
 
     public PidPoller(App app) {
+        this(new File(pidFileName(app.getTunnelIdentifier())), Scheduler.timerBased(),
+                () -> System.exit(0), true);
+    }
 
-        // create a "pid" file which we'll watch, when deleted, shutdown the tunnel
-        String fileName = "testingbot-tunnel.pid";
-        if (app.getTunnelIdentifier() != null && !app.getTunnelIdentifier().isEmpty()) {
-            fileName = "testingbot-tunnel-" + app.getTunnelIdentifier() + ".pid";
+    /**
+     * @param registerShutdownHook false in tests, where a hook per instance would accumulate and
+     *                             delete files belonging to the surrounding process
+     */
+    PidPoller(File pidFile, Scheduler scheduler, Runnable onRemoved, boolean registerShutdownHook) {
+        this.pidFile = pidFile;
+        this.scheduler = scheduler;
+        this.onRemoved = onRemoved;
+        this.cleanupThread = new Thread(() -> deleteQuietly(pidFile));
+
+        if (!createIfAbsent()) {
+            return;
         }
+        if (registerShutdownHook) {
+            Runtime.getRuntime().addShutdownHook(cleanupThread);
+        }
+        scheduler.scheduleRepeating("PidPoller", this::poll, POLL_INTERVAL_MS, POLL_INTERVAL_MS);
+        started = true;
+    }
 
-        final String pidFileName = fileName;
+    /** {@code testingbot-tunnel.pid}, or one per tunnel when an identifier is set. */
+    static String pidFileName(String tunnelIdentifier) {
+        if (tunnelIdentifier == null || tunnelIdentifier.isEmpty()) {
+            return "testingbot-tunnel.pid";
+        }
+        // Without this, two tunnels on one machine share a pid file and deleting it stops
+        // whichever happens to notice first.
+        return "testingbot-tunnel-" + tunnelIdentifier + ".pid";
+    }
 
-        cleanupThread = new Thread() {
-          @Override
-          public void run() {
-              File f = new File(pidFileName);
-              if (f.exists() && !f.delete()) {
-                  Logger.getLogger(PidPoller.class.getName()).log(Level.WARNING, "Could not delete pid file: {0}", pidFileName);
-              }
-          }
-        };
+    /** @return false when the file could not be created, in which case polling never starts */
+    private boolean createIfAbsent() {
+        if (pidFile.exists()) {
+            return true;
+        }
+        try (FileWriter fw = new FileWriter(pidFile.getAbsoluteFile());
+             BufferedWriter bw = new BufferedWriter(fw)) {
+            bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
+            LOG.log(Level.INFO, "Pid file: {0}", pidFile.getAbsoluteFile().toString());
+            return true;
+        } catch (IOException ex) {
+            LOG.log(Level.SEVERE, "Can't create testingbot pidfile in current directory", ex);
+            return false;
+        }
+    }
 
-        pidFile = new File(fileName);
+    /** One poll. Package-private so a test can run it without waiting for the interval. */
+    void poll() {
         if (!pidFile.exists()) {
-            try (FileWriter fw = new FileWriter(pidFile.getAbsoluteFile());
-                 BufferedWriter bw = new BufferedWriter(fw)) {
-                bw.write("TestingBot Tunnel, Remove this file to shutdown the tunnel");
-                Logger.getLogger(PidPoller.class.getName()).log(Level.INFO, "Pid file: {0}", pidFile.getAbsoluteFile().toString());
-            } catch (IOException ex) {
-                Logger.getLogger(PidPoller.class.getName()).log(Level.SEVERE, "Can't create testingbot pidfile in current directory", ex);
-                return;
-            }
+            LOG.log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
+            scheduler.cancel();
+            onRemoved.run();
         }
-
-        Runtime.getRuntime().addShutdownHook(cleanupThread);
-
-        timer = new Timer();
-        timer.schedule(new PollTask(), 5000, 5000);
     }
 
     public void cancel() {
-       Runtime.getRuntime().removeShutdownHook(cleanupThread);
-       timer.cancel();
+        if (started) {
+            try {
+                Runtime.getRuntime().removeShutdownHook(cleanupThread);
+            } catch (IllegalStateException alreadyShuttingDown) {
+                // The JVM is on its way down and will run the hook itself.
+            }
+        }
+        scheduler.cancel();
     }
 
-    class PollTask extends TimerTask {
-        @Override
-        public void run() {
-            if (!pidFile.exists()) {
-                Logger.getLogger(PidPoller.class.getName()).log(Level.INFO, "{0} pidFile was removed, shutting down Tunnel", pidFile.toString());
-                timer.cancel();
-                System.exit(0);
-            }
+    boolean isStarted() {
+        return started;
+    }
+
+    private static void deleteQuietly(File file) {
+        if (file.exists() && !file.delete()) {
+            LOG.log(Level.WARNING, "Could not delete pid file: {0}", file.toString());
         }
     }
 }

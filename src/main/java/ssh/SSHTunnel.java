@@ -21,7 +21,7 @@ import java.util.logging.Logger;
 /**
  * @author TestingBot
  */
-public class SSHTunnel {
+public class SSHTunnel implements ReconnectableTunnel {
     private final App app;
     private final JSch jsch;
     private Session session;
@@ -243,25 +243,62 @@ public class SSHTunnel {
         }
     }
 
+    /**
+     * Is the local forward for {@code sshPort} still in JSch's list?
+     *
+     * <p>Extracted so it can be tested: the entries are free-form strings like
+     * {@code "4446:hub.testingbot.com:80"}, and a substring match on the port is looser than it
+     * looks -- 445 matches 4456 -- so the exact behaviour is worth pinning rather than assuming.
+     */
+    static boolean localForwardingActive(String[] forwardedPorts, int sshPort) {
+        if (forwardedPorts == null) {
+            return false;
+        }
+        for (String port : forwardedPorts) {
+            if (port != null && port.contains(String.valueOf(sshPort))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Tracks reverse-forward health so each change is logged once rather than every 15 seconds.
+     *
+     * <p>A broken reverse forward means every request through the tunnel fails, so it must be
+     * reported -- but repeating it on every poll buries everything else in the log.
+     */
+    static final class ReverseHealthTracker {
+        enum Change { UNCHANGED, BROKEN, RESTORED }
+
+        private boolean healthy = true;
+
+        Change update(boolean deliveryOk) {
+            Change change = Change.UNCHANGED;
+            if (!deliveryOk && healthy) {
+                change = Change.BROKEN;
+            } else if (deliveryOk && !healthy) {
+                change = Change.RESTORED;
+            }
+            healthy = deliveryOk;
+            return change;
+        }
+
+        boolean isHealthy() {
+            return healthy;
+        }
+    }
+
     class PortForwardingMonitorTask extends TimerTask {
-        private boolean reverseDeliveryHealthy = true;
+        private final ReverseHealthTracker reverseHealth = new ReverseHealthTracker();
 
         @Override
         public void run() {
             try {
                 if (session != null && session.isConnected() && !shuttingDown.get()) {
                     // Check if port forwarding is still active by testing the forwarded ports
-                    String[] forwardedPorts = session.getPortForwardingL();
-                    boolean localForwardingActive = false;
-
-                    if (forwardedPorts != null) {
-                        for (String port : forwardedPorts) {
-                            if (port.contains(String.valueOf(app.getSSHPort()))) {
-                                localForwardingActive = true;
-                                break;
-                            }
-                        }
-                    }
+                    boolean localForwardingActive =
+                            localForwardingActive(session.getPortForwardingL(), app.getSSHPort());
 
                     if (!localForwardingActive && portForwardingEstablished) {
                         Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
@@ -271,16 +308,14 @@ public class SSHTunnel {
 
                     // The reverse forward (2010 -> local jetty port) has no JSch-side
                     // status API, so probe the delivery target directly.
-                    boolean reverseDeliveryOk = verifyReverseForwardDelivery();
-                    if (!reverseDeliveryOk && reverseDeliveryHealthy) {
-                        Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
+                    switch (reverseHealth.update(verifyReverseForwardDelivery())) {
+                        case BROKEN -> Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
                             String.format("[%s] Reverse port forwarding is broken: cannot connect to %s:%d. Traffic through the tunnel will fail until a local proxy is listening on this port.",
                                 connectionId, REVERSE_FORWARD_HOST, app.getJettyPort()));
-                    } else if (reverseDeliveryOk && !reverseDeliveryHealthy) {
-                        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
+                        case RESTORED -> Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                             String.format("[%s] Reverse port forwarding delivery to %s:%d restored", connectionId, REVERSE_FORWARD_HOST, app.getJettyPort()));
+                        default -> { }
                     }
-                    reverseDeliveryHealthy = reverseDeliveryOk;
                 }
             } catch (Exception ex) {
                 Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
