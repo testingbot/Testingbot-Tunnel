@@ -100,6 +100,7 @@ class CustomConnectionMonitorTest {
     private static final class FakeHost implements ReconnectHost {
         private final List<String> calls = new ArrayList<>();
         private Exception rebuildFailure;
+        private RuntimeException startFailure;
 
         @Override
         public void stopLocalProxy() {
@@ -109,6 +110,9 @@ class CustomConnectionMonitorTest {
         @Override
         public void startLocalProxy() {
             calls.add("startLocalProxy");
+            if (startFailure != null) {
+                throw startFailure;
+            }
         }
 
         @Override
@@ -224,6 +228,40 @@ class CustomConnectionMonitorTest {
             assertThat(monitor.getRetryAttempts()).isEqualTo(i);
             assertThat(host.calls).doesNotContain("rebuildTunnel");
         }
+    }
+
+    @Test
+    void aProxyRestartFailureDoesNotTearDownAHealthySshSession() {
+        // The port may not have been released yet. That says nothing about the SSH session,
+        // which is up and authenticated -- re-dialling it would be pointless, and counting the
+        // failure against the retry limit escalates a transient bind error into a full rebuild.
+        tunnel.authenticated = true;
+        host.startFailure = new IllegalStateException("Address already in use");
+        monitor.connectionLost(new RuntimeException("drop"));
+
+        scheduler.fire();
+
+        assertThat(tunnel.calls).as("the SSH session must not be re-dialled")
+                .containsExactly("stop", "connect");
+        assertThat(monitor.getRetryAttempts())
+                .as("a proxy failure is not an SSH retry")
+                .isEqualTo(1);
+        assertThat(scheduler.hasPending()).as("the proxy start should be retried").isTrue();
+    }
+
+    @Test
+    void aProxyRestartThatRecoversCompletesTheReconnect() {
+        tunnel.authenticated = true;
+        host.startFailure = new IllegalStateException("Address already in use");
+        monitor.connectionLost(new RuntimeException("drop"));
+        scheduler.fire();
+
+        host.startFailure = null;
+        scheduler.fire();
+
+        assertThat(tunnel.calls).contains("createPortForwarding");
+        assertThat(monitor.isRetrying()).isFalse();
+        assertThat(monitor.getRetryAttempts()).isZero();
     }
 
     @Test

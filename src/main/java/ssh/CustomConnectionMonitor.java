@@ -105,12 +105,30 @@ public class CustomConnectionMonitor {
     }
 
     private void onReconnected() {
+        // Order matters: the proxy must be listening before the reverse forward is re-established,
+        // or the first requests through it arrive with nothing to deliver to.
+        //
+        // Its failure is reported separately from the SSH retry accounting. A local port that has
+        // not been released yet has nothing to do with the SSH session, which is up and
+        // authenticated at this point; letting it fall into the caller's catch reported it as
+        // "Reconnection attempt N failed", counted against the retry limit, and then tore down
+        // and re-dialled a perfectly healthy connection -- turning a transient bind failure into
+        // thirty pointless reconnects and a full tunnel rebuild, with nothing in the log naming
+        // the port.
+        try {
+            host.startLocalProxy();
+        } catch (RuntimeException proxyFailed) {
+            LOG.log(Level.SEVERE, String.format(
+                    "[%s] SSH reconnected, but the local proxy could not be restarted: %s",
+                    tunnel.getConnectionId(), proxyFailed.getMessage()), proxyFailed);
+            // The SSH session stays up; retry just the proxy rather than re-dialling it.
+            scheduleRetry();
+            return;
+        }
+
         retrying.set(false);
         scheduler.cancel();
 
-        // Order matters: the proxy must be listening before the reverse forward is re-established,
-        // or the first requests through it arrive with nothing to deliver to.
-        host.startLocalProxy();
         tunnel.createPortForwarding();
         TunnelMetrics.setTunnelUp(true);
 
