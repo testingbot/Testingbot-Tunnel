@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (16 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (17 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -671,6 +671,48 @@ scenario_socks5_proxy() {
   kill $up 2>/dev/null
 }
 
+# Test traffic and control traffic through two different proxies.
+#
+# Once egress is filtered by destination, the proxy that may reach the public internet is
+# often not the one that reaches internal test targets, and a single --proxy has no answer for
+# that. The proof is negative as well as positive: each proxy must see its own traffic and not
+# the other's, which one proxy carrying everything would also satisfy on the positive half.
+scenario_split_proxy() {
+  local tport cport; tport="$(free_port)"; cport="$(free_port)"
+  python3 "$HERE/upstream_proxy.py" "$tport" > "$WORK/proxy-test.log" 2>&1 &
+  local tproxy=$!
+  python3 "$HERE/upstream_proxy.py" "$cport" > "$WORK/proxy-control.log" 2>&1 &
+  local cproxy=$!
+  sleep 1
+
+  start_tunnel --proxy "127.0.0.1:$tport" --proxy-testingbot "127.0.0.1:$cport" \
+    || { kill $tproxy $cproxy 2>/dev/null; return 1; }
+
+  assert_contains "the SSH connection uses the control proxy" \
+    "$(cat "$TUNNEL_LOG")" "SSH connection will traverse the upstream proxy 127.0.0.1:$cport"
+
+  # The SSH control connection is the IP-form CONNECT to :443. It belongs to the control proxy
+  # and must not appear on the test-traffic one.
+  assert_neq "the control proxy carried the SSH connection" \
+    "$(grep -cE 'CONNECT [0-9.]+:443' "$WORK/proxy-control.log" || true)" "0"
+  assert_eq "the test-traffic proxy did not carry it" \
+    "$(grep -cE 'CONNECT [0-9.]+:443' "$WORK/proxy-test.log" || true)" "0"
+
+  # Now the other direction: browser traffic belongs to --proxy.
+  check_proxy_http split-proxy
+  check_proxy_connect split-proxy
+  assert_contains "the test-traffic proxy carried the test traffic" \
+    "$(cat "$WORK/proxy-test.log")" "example.com"
+  assert_eq "the control proxy did not carry it" \
+    "$(grep -c 'example.com' "$WORK/proxy-control.log" || true)" "0"
+
+  check_browser split-proxy
+
+  # Stop the tunnel before its proxies: deregistration goes out through the control proxy.
+  stop_tunnel
+  kill $tproxy $cproxy 2>/dev/null
+}
+
 # A SOCKS5 proxy that refuses the no-auth method outright, so nothing works until the tunnel
 # negotiates RFC 1929 credentials -- on every egress path at once.
 scenario_socks5_proxy_auth() {
@@ -1050,7 +1092,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols sslbump reconnect upstream_proxy upstream_proxy_auth socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols sslbump reconnect upstream_proxy upstream_proxy_auth split_proxy socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }

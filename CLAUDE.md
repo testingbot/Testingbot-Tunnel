@@ -84,7 +84,12 @@ java -jar testingbot-tunnel.jar --doctor
 - `--fast-fail-regexps`: Domains to refuse, comma separated. Prefix an entry with `!` to make
   it an exception, so `.*,!ok\.com` blocks everything except `ok.com`
 - `--auth`: Basic authentication for specific hosts
-- `--proxy`: Upstream proxy configuration (used by browser traffic *and* the SSH connection)
+- `--proxy`: Upstream proxy for test traffic, and for reaching TestingBot unless
+  `--proxy-testingbot` is given
+- `--proxy-testingbot`, `--proxy-testingbot-userpwd`: A separate upstream proxy for reaching
+  TestingBot itself -- the API and the SSH control connection. For networks where the proxy
+  allowed out to the internet is not the one that reaches internal test targets. Credentials are
+  deliberately *not* inherited from `--proxy-userpwd`: they belong to a different proxy
 - `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy
 - `--proxy-spn`, `--krb5-keytab`, `--krb5-principal`: Kerberos settings for `negotiate`
 - `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default)
@@ -137,7 +142,9 @@ Credentials come from the ambient ticket cache, or from `--krb5-keytab` with
 defaults to `HTTP/<proxy-host>` and can be overridden with `--proxy-spn`.
 
 All three egress paths use it: the CONNECT tunnel, the plain-HTTP client, and the SSH
-connection.
+connection. With `--proxy-testingbot` the SSH and API paths authenticate to that proxy instead,
+with their own credentials and their own SPN; `--doctor` reports a second service principal when
+the two proxies are different hosts.
 
 All three send the header pre-emptively. The plain-HTTP path used to rely on jetty-client's
 407-challenge handling, but Jetty 12's `ProxyHandler.newHttpClient()` ends with
@@ -224,7 +231,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 704 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 716 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

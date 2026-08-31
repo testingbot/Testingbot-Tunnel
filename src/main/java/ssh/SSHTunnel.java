@@ -77,13 +77,13 @@ public class SSHTunnel implements ReconnectableTunnel {
      * irrelevant because the control connection never came up.
      */
     private void applyUpstreamProxy(Session session) {
-        ProxySpec spec = ProxySpec.parse(app.getProxy());
+        ProxySpec spec = ProxySpec.parse(app.getControlProxy());
         if (spec == null) {
             return;
         }
         if (spec.isSocks5()) {
             ProxySOCKS5 socks = new ProxySOCKS5(spec.getHost(), spec.getPort());
-            String[] credentials = splitCredentials(app.getProxyAuth());
+            String[] credentials = splitCredentials(app.getControlProxyAuth());
             if (credentials != null) {
                 socks.setUserPasswd(credentials[0], credentials[1]);
             }
@@ -91,7 +91,7 @@ public class SSHTunnel implements ReconnectableTunnel {
         } else {
             // Our own CONNECT rather than JSch's ProxyHTTP, which only speaks Basic.
             session.setProxy(new SshHttpProxy(spec.getHost(), spec.getPort(),
-                    app.proxyAuthenticator()));
+                    app.controlProxyAuthenticator()));
         }
         Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
             String.format("[%s] SSH connection will traverse the upstream proxy %s:%d",

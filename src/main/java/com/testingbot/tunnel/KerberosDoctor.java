@@ -70,6 +70,19 @@ public final class KerberosDoctor {
         findings.add(new Finding(true, "Service principal that will be requested: " + spn
                 + (app.getProxySpn() == null ? " (derived from --proxy; override with --proxy-spn)" : "")));
         findings.add(serviceTicket(client, spec.getHost(), spn));
+
+        // A separate control proxy is a second host to authenticate to, needing its own ticket
+        // and usually its own SPN. Reporting only the first would leave the other failing as an
+        // indistinguishable 407, which is the whole reason this diagnostic exists.
+        ProxySpec control = ProxySpec.parse(app.getControlProxy());
+        if (app.hasSeparateControlProxy() && control != null && !control.isSocks5()
+                && !control.getHost().equalsIgnoreCase(spec.getHost())) {
+            String controlSpn = client.servicePrincipalFor(control.getHost());
+            findings.add(new Finding(true,
+                    "--proxy-testingbot is a different host, so a second service principal is "
+                    + "needed: " + controlSpn));
+            findings.add(serviceTicket(client, control.getHost(), controlSpn));
+        }
         return findings;
     }
 

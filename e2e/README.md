@@ -90,6 +90,7 @@ may hold tunnel slots on the same account.
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
+| `split_proxy` | 1 | `--proxy` and `--proxy-testingbot` as two different proxies, each asserted to see only its own traffic |
 | `socks5_proxy` | 1 | `--proxy socks5://` chaining through a local SOCKS5 proxy |
 | `socks5_proxy_auth` | 1 | the same, through a SOCKS5 proxy that demands RFC 1929 credentials |
 

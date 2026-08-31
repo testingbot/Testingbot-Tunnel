@@ -67,6 +67,8 @@ public class App {
     private String proxyAuth;
     private String[] basicAuth;
     private String pac = null;
+    private String controlProxy = null;
+    private String controlProxyAuth = null;
     private String dnsServer = null;
     private java.time.Duration dnsTimeout =
             com.testingbot.tunnel.proxy.CustomDnsResolver.DEFAULT_QUERY_TIMEOUT;
@@ -296,6 +298,19 @@ public class App {
         Option extraHeaders = new Option(null, "extra-headers", true, "Inject extra headers in the requests the tunnel makes.");
         extraHeaders.setArgName("JSON Map with Header Key and Value");
         options.addOption(extraHeaders);
+
+        Option controlProxy = new Option(null, "proxy-testingbot", true,
+            "Upstream proxy for reaching TestingBot itself -- the API and the SSH control "
+            + "connection -- when it differs from the one test traffic uses. Same forms as "
+            + "--proxy. Defaults to --proxy when not given.");
+        controlProxy.setArgName("host:port");
+        options.addOption(controlProxy);
+
+        Option controlProxyAuth = new Option(null, "proxy-testingbot-userpwd", true,
+            "Credentials for --proxy-testingbot. Not inherited from --proxy-userpwd: those "
+            + "belong to a different proxy and must not be sent to this one.");
+        controlProxyAuth.setArgName("user:pwd");
+        options.addOption(controlProxyAuth);
 
         Option dns = new Option("dns", "dns", true,
             "Resolve hostnames with specific DNS servers instead of the system resolver."
@@ -587,6 +602,30 @@ public class App {
             if ((app.hubPort != 80) && (app.hubPort != 4444)) {
                 throw new ParseException("The hub port must either be 80 or 4444");
             }
+        }
+
+        if (commandLine.hasOption("proxy-testingbot")) {
+            String value = commandLine.getOptionValue("proxy-testingbot").trim();
+            if (com.testingbot.tunnel.proxy.ProxySpec.parse(value) == null) {
+                throw new ParseException("Invalid --proxy-testingbot '" + value
+                        + "'; expected host:port, http://host:port or socks5://host:port");
+            }
+            app.setControlProxy(value);
+            Logger.getLogger(App.class.getName()).log(Level.INFO,
+                    "TestingBot API and SSH will use the upstream proxy {0}", value);
+        }
+        if (commandLine.hasOption("proxy-testingbot-userpwd")) {
+            String value = commandLine.getOptionValue("proxy-testingbot-userpwd");
+            if (value == null || !value.contains(":")) {
+                throw new ParseException(
+                        "--proxy-testingbot-userpwd must be in the form user:password");
+            }
+            app.setControlProxyAuth(value);
+        }
+        if (!commandLine.hasOption("proxy-testingbot")
+                && commandLine.hasOption("proxy-testingbot-userpwd")) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "--proxy-testingbot-userpwd has no effect without --proxy-testingbot.");
         }
 
         if (commandLine.hasOption("dns")) {
@@ -1421,6 +1460,56 @@ public class App {
 
     public void setDnsServer(String dnsServer) {
         this.dnsServer = dnsServer;
+    }
+
+    /**
+     * The upstream proxy for reaching TestingBot: the API and the SSH control connection.
+     *
+     * <p>Falls back to {@code --proxy} so that the common case -- one proxy for everything --
+     * needs no extra flag, and so this does not change behaviour for anyone already using it.
+     *
+     * <p>Splitting the two matters on networks where the proxy that may reach the public
+     * internet is not the proxy that reaches internal test targets, which is a normal shape
+     * once egress is filtered by destination.
+     */
+    public String getControlProxy() {
+        return controlProxy != null ? controlProxy : proxy;
+    }
+
+    public void setControlProxy(String controlProxy) {
+        this.controlProxy = controlProxy;
+    }
+
+    /**
+     * Credentials for {@link #getControlProxy()}.
+     *
+     * <p>Deliberately not inherited from {@code --proxy-userpwd} when a separate control proxy
+     * is configured: those credentials were issued for a different host, and sending them on
+     * would hand one proxy operator the credentials for another.
+     */
+    public String getControlProxyAuth() {
+        return controlProxy != null ? controlProxyAuth : getProxyAuth();
+    }
+
+    public void setControlProxyAuth(String controlProxyAuth) {
+        this.controlProxyAuth = controlProxyAuth;
+    }
+
+    /** True when control traffic and test traffic use different proxies. */
+    public boolean hasSeparateControlProxy() {
+        return controlProxy != null;
+    }
+
+    /** The authenticator for the control proxy, which may differ from the test-traffic one. */
+    public com.testingbot.tunnel.proxy.ProxyAuthenticator controlProxyAuthenticator() {
+        if (controlProxy == null) {
+            return proxyAuthenticator();
+        }
+        return com.testingbot.tunnel.proxy.ProxyAuthenticator.create(
+                com.testingbot.tunnel.proxy.ProxyAuthenticator.Scheme.parse(proxyAuthScheme),
+                getControlProxyAuth(), proxySpn,
+                krb5KeyTab == null ? null : java.nio.file.Path.of(krb5KeyTab),
+                krb5Principal);
     }
 
     /** Per-query timeout for the {@code --dns} servers. */

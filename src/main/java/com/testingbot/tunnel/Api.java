@@ -90,11 +90,11 @@ public class Api {
     private HttpClientBuilder newBuilderWithProxy() {
         HttpClientBuilder builder = httpClientBuilderSupplier.get();
         builder.setDefaultRequestConfig(defaultRequestConfig());
-        ProxySpec spec = ProxySpec.parse(app.getProxy());
+        ProxySpec spec = ProxySpec.parse(app.getControlProxy());
         if (spec == null) {
             return builder;
         }
-        String[] credentials = splitCredentials(app.getProxyAuth());
+        String[] credentials = splitCredentials(app.getControlProxyAuth());
         if (spec.isSocks5()) {
             configureSocksProxy(builder, spec, credentials);
         } else {
