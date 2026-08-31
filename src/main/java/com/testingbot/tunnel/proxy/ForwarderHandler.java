@@ -56,7 +56,9 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
         return getHttpClient().newRequest(newHttpURI.getHost(), port)
                 .scheme(newHttpURI.getScheme())
                 .path(pathQuery)
-                .timeout(FORWARD_IDLE_TIMEOUT_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+                // No Request.timeout() here either: it caps the whole conversation rather than
+                // idle time, and a Selenium command can legitimately run long. The client's idle
+                // timeout below bounds a stalled hub.
                 .method(clientToProxyRequest.getMethod());
     }
 

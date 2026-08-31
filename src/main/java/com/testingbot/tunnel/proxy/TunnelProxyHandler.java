@@ -423,11 +423,13 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                 getHttpClient().newRequest(newHttpURI.getHost(), port)
                         .scheme(newHttpURI.getScheme())
                         .path(pathQuery)
-                        // Jetty 11's ProxyServlet applied a total exchange timeout from its
-                        // "timeout" init parameter; Jetty 12's ProxyHandler never calls
-                        // Request.timeout(), so a response that trickles forever was no longer
-                        // bounded by anything.
-                        .timeout(idleTimeoutMs, java.util.concurrent.TimeUnit.MILLISECONDS)
+                        // Deliberately no Request.timeout(): that is the TOTAL length of the
+                        // request/response conversation, not an idle timeout, so it aborts a
+                        // perfectly healthy large download purely for taking a while. A tunnel
+                        // carries whatever the site under test serves, including multi-hundred-
+                        // megabyte artefacts. Stalls are bounded by the client's idle timeout,
+                        // configured in configureHttpClient, which is the right tool for
+                        // "a response that trickles forever".
                         .method(clientToProxyRequest.getMethod());
 
         // RFC 9112 3.2.2: requests to a forward proxy must use absolute-form. jetty-client
