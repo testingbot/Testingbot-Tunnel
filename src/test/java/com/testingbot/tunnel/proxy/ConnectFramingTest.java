@@ -56,6 +56,11 @@ class ConnectFramingTest {
     }
 
     private void runFakeProxy(String responseStatusLine) {
+        runFakeProxy(responseStatusLine, null);
+    }
+
+    /** @param pipelined bytes written immediately after the header, in the same write */
+    private void runFakeProxy(String responseStatusLine, String pipelined) {
         acceptThread = new Thread(() -> {
             try (Socket s = fakeProxy.accept()) {
                 InputStream in = s.getInputStream();
@@ -74,7 +79,9 @@ class ConnectFramingTest {
 
                 if (responseStatusLine != null) {
                     OutputStream out = s.getOutputStream();
-                    out.write((responseStatusLine + "\r\n\r\n").getBytes("US-ASCII"));
+                    String reply = responseStatusLine + "\r\n\r\n"
+                            + (pipelined == null ? "" : pipelined);
+                    out.write(reply.getBytes("US-ASCII"));
                     out.flush();
                 }
                 // Let test read the result before we close
@@ -173,6 +180,33 @@ class ConnectFramingTest {
         CapturingPromise promise = new CapturingPromise();
         m.invoke(handler, upstream, req, host, port, promise);
         return promise;
+    }
+
+    @Test
+    void bytesPipelinedAfterTheConnectResponseAreNotSwallowed() throws Exception {
+        // A proxy is entitled to put its 200 and the first bytes of the tunnelled stream in the
+        // same segment. Reading the reply in blocks took those bytes off the socket and dropped
+        // them with the buffer, so the TLS handshake inside the tunnel failed for no visible
+        // reason. Everything after the header terminator must still be readable from the channel.
+        // Large enough that a 1 KiB block read is certain to swallow part of it, rather than
+        // relying on the header and the payload landing in the same TCP segment.
+        String pipelined = "X".repeat(8192);
+        runFakeProxy("HTTP/1.1 200 Connection Established", pipelined);
+        CustomConnectHandler handler = buildHandler();
+        Request req = mockConnectRequest();
+
+        CapturingPromise promise = invokeConnectToProxy(handler, req, "example.com", 443);
+        assertThat(promise.done.await(20, TimeUnit.SECONDS)).isTrue();
+        assertThat(promise.failed).isNull();
+        assertThat(promise.succeeded).isNotNull();
+
+        java.nio.ByteBuffer buffer = java.nio.ByteBuffer.allocate(pipelined.length());
+        promise.succeeded.configureBlocking(true);
+        while (buffer.hasRemaining() && promise.succeeded.read(buffer) > 0) {
+            // read what the proxy sent after the header
+        }
+        assertThat(new String(buffer.array(), java.nio.charset.StandardCharsets.US_ASCII))
+                .isEqualTo(pipelined);
     }
 
     @Test

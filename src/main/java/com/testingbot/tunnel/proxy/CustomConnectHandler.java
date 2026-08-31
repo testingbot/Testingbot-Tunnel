@@ -439,19 +439,24 @@ public class CustomConnectHandler extends ConnectHandler {
                         if (responseBuf == null) {
                             responseBuf = new StringBuilder();
                         }
-                        final ByteBuffer buffer = ByteBuffer.allocate(1024);
+                        // One byte at a time, and only up to the header terminator. A block read
+                        // takes whatever the proxy has already sent off the socket, and anything
+                        // past "\r\n\r\n" lives only in this buffer, which is then dropped --
+                        // so a proxy that pipelines its 200 with the first bytes of the tunnelled
+                        // stream silently loses them, and the TLS handshake inside fails for no
+                        // visible reason. The WebSocket and SSH paths already read this way.
+                        final ByteBuffer buffer = ByteBuffer.allocate(1);
                         int n;
-                        while ((n = channel.read(buffer)) > 0) {
+                        while (responseBuf.indexOf("\r\n\r\n") < 0 && (n = channel.read(buffer)) > 0) {
                             buffer.flip();
-                            byte[] bytes = new byte[buffer.remaining()];
-                            buffer.get(bytes);
-                            responseBuf.append(new String(bytes, StandardCharsets.US_ASCII));
+                            responseBuf.append((char) (buffer.get() & 0xFF));
                             totalRead += n;
                             buffer.clear();
                             if (totalRead > MAX_RESPONSE_BYTES) {
                                 throw new IOException("Upstream proxy response exceeded " + MAX_RESPONSE_BYTES + " bytes");
                             }
                         }
+                        n = responseBuf.indexOf("\r\n\r\n") >= 0 ? 1 : channel.read(buffer);
                         if (n < 0) {
                             throw new IOException("Upstream proxy " + upstream.getHost() + ":" + upstream.getPort() + " closed connection before sending CONNECT response");
                         }
