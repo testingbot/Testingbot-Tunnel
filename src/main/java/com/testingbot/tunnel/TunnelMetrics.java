@@ -67,24 +67,41 @@ public final class TunnelMetrics {
             .labelNames("method", "code")
             .register();
 
+    /**
+     * Prometheus' default buckets stop at 10 seconds, which is where this metric stopped saying
+     * anything useful: a tunnel carries whatever the site under test serves, and a large asset
+     * over a slow link routinely takes minutes. Everything above the top bucket collapses into
+     * +Inf, so exactly the transfers worth investigating became indistinguishable.
+     */
     public static final Histogram HTTP_REQUEST_DURATION_SECONDS = Histogram.build()
             .name("testingbot_http_request_duration_seconds")
             .help("HTTP request duration as observed by the local proxy.")
             .labelNames("method")
+            .buckets(0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30, 60, 120, 300, 600)
             .register();
+
+    /**
+     * 1 KiB to 1 GiB. The previous range topped out at 16 MiB, so every genuinely large transfer
+     * -- video, build artefacts, anything a test downloads -- landed in the same +Inf bucket and
+     * no size question above 16 MiB could be answered.
+     */
+    private static final double[] PAYLOAD_SIZE_BUCKETS = {
+        1024, 4096, 16_384, 65_536, 262_144, 1_048_576, 4_194_304, 16_777_216,
+        67_108_864, 268_435_456, 1_073_741_824
+    };
 
     public static final Histogram HTTP_REQUEST_SIZE_BYTES = Histogram.build()
             .name("testingbot_http_request_size_bytes")
             .help("HTTP request payload size in bytes (when known via Content-Length).")
             .labelNames("method")
-            .exponentialBuckets(64, 4, 10)
+            .buckets(PAYLOAD_SIZE_BUCKETS)
             .register();
 
     public static final Histogram HTTP_RESPONSE_SIZE_BYTES = Histogram.build()
             .name("testingbot_http_response_size_bytes")
             .help("HTTP response payload size in bytes.")
             .labelNames("method")
-            .exponentialBuckets(64, 4, 10)
+            .buckets(PAYLOAD_SIZE_BUCKETS)
             .register();
 
     public static final Gauge HTTP_REQUESTS_IN_FLIGHT = Gauge.build()
