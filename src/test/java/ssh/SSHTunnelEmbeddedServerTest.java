@@ -392,6 +392,97 @@ class SSHTunnelEmbeddedServerTest {
                 .doesNotThrowAnyException();
     }
 
+    /* --------------------------------------------------------- forwarding failures */
+
+    @Test
+    void aLocalPortAlreadyInUseIsReportedAndLeavesForwardingIncomplete() throws Exception {
+        // Two tunnels on one machine, or anything else already on --se-port. The forward
+        // cannot be made, and pretending otherwise would leave Selenium quietly broken.
+        hub = serverAnswering("HUB");
+        App app = app();
+        app.setHubPort(hub.getLocalPort());
+        tunnel = connect(app, "127.0.0.1");
+
+        try (ServerSocket squatter = new ServerSocket(app.getSSHPort(), 50,
+                InetAddress.getLoopbackAddress())) {
+            tunnel.createPortForwarding();
+
+            assertThat(SSHTunnel.localForwardingActive(
+                    tunnel.getSession().getPortForwardingL(), app.getSSHPort())).isFalse();
+        }
+    }
+
+    @Test
+    void theReverseForwardFailingDoesNotSkipTheLocalOne() throws Exception {
+        // A second tunnel to the same server cannot bind remote 2010 -- it is already taken by
+        // the first. The local forward must still be established: doing both in one try block
+        // is what made the restart path unable to recover a lost forward.
+        hub = serverAnswering("HUB");
+        localProxy = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        App first = app();
+        first.setHubPort(hub.getLocalPort());
+        first.setJettyPort(localProxy.getLocalPort());
+        tunnel = connect(first, "127.0.0.1");
+        tunnel.createPortForwarding();
+
+        App second = app();
+        second.setHubPort(hub.getLocalPort());
+        second.setJettyPort(localProxy.getLocalPort());
+        SSHTunnel other = connect(second, "127.0.0.1");
+        try {
+            other.createPortForwarding();
+
+            assertThat(SSHTunnel.localForwardingActive(
+                    other.getSession().getPortForwardingL(), second.getSSHPort()))
+                    .as("the local forward must survive the reverse forward failing")
+                    .isTrue();
+        } finally {
+            other.stop(true);
+        }
+    }
+
+    /* ------------------------------------------------------- health state changes */
+
+    @Test
+    void theMonitorReportsReverseDeliveryBreakingAndRecovering() throws Exception {
+        // Only transitions are logged, so both directions of the change must be exercised.
+        hub = serverAnswering("HUB");
+        App app = app();
+        app.setHubPort(hub.getLocalPort());
+        app.setJettyPort(findFreePort());   // nothing listening: delivery is broken
+        tunnel = connect(app, "127.0.0.1");
+        tunnel.createPortForwarding();
+
+        SSHTunnel.PortForwardingMonitorTask monitor = tunnel.new PortForwardingMonitorTask();
+        monitor.run();
+        assertThat(tunnel.verifyReverseForwardDelivery()).isFalse();
+
+        // Bring the local proxy up on the port the reverse forward delivers to.
+        try (ServerSocket recovered = new ServerSocket(app.getJettyPort(), 50,
+                InetAddress.getLoopbackAddress())) {
+            assertThat(tunnel.verifyReverseForwardDelivery()).isTrue();
+            monitor.run();
+
+            assertThat(SSHTunnel.localForwardingActive(
+                    tunnel.getSession().getPortForwardingL(), app.getSSHPort())).isTrue();
+        }
+    }
+
+    @Test
+    void theConnectionMonitorNoticesTheServerGoingAway() throws Exception {
+        // The path that triggers a reconnect: session gone, and not a deliberate shutdown.
+        App app = app();
+        tunnel = connect(app, "127.0.0.1");
+        sshd.stop(true);
+        for (int i = 0; i < 100 && tunnel.isAuthenticated(); i++) {
+            Thread.sleep(50);
+        }
+
+        assertThatCode(() -> tunnel.new ConnectionMonitorTask().run()).doesNotThrowAnyException();
+
+        assertThat(tunnel.isShuttingDown()).isFalse();
+    }
+
     @Test
     void losingTheServerIsVisibleAsLostAuthentication() throws Exception {
         App app = app();

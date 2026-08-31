@@ -1013,6 +1013,14 @@ public class App {
         return httpProxy;
     }
 
+    /**
+     * Public because the reconnect adapter's test lives in the ssh package. startProxies() owns
+     * this in production; nothing else should be assigning it.
+     */
+    public void setHttpProxy(HttpProxy httpProxy) {
+        this.httpProxy = httpProxy;
+    }
+
     public int getTunnelID() {
         return tunnelID;
     }
