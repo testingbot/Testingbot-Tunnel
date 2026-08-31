@@ -120,6 +120,26 @@ public class CustomConnectHandler extends ConnectHandler {
         return super.newConnectAddress(dialHost, dialPort);
     }
 
+    /**
+     * Jetty's {@link ConnectHandler#doStart()} calls {@code addBean(newSelectorManager())} on
+     * every start and never removes it, while ContainerLifeCycle.doStop() only stops beans. The
+     * SSH reconnect restarts this server in place, so each cycle left another live
+     * SelectorManager behind, each holding a pool thread parked in select() forever.
+     *
+     * <p>Measured before this override: every stop/start added two selectors and two permanently
+     * busy threads, and after 88 reconnects the proxy could not start at all --
+     * "Insufficient configured threads: required=201 < max=200". A tunnel on a flaky network
+     * reaches that in a day.
+     */
+    @Override
+    protected void doStop() throws Exception {
+        super.doStop();
+        for (org.eclipse.jetty.io.SelectorManager selector
+                : getBeans(org.eclipse.jetty.io.SelectorManager.class)) {
+            removeBean(selector);
+        }
+    }
+
     public void setPacPolicy(com.testingbot.tunnel.pac.PacPolicy pacPolicy) {
         this.pacPolicy = pacPolicy;
     }
