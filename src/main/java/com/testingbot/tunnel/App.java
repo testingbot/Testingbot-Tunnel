@@ -67,6 +67,7 @@ public class App {
     private String proxyAuth;
     private String[] basicAuth;
     private String pac = null;
+    private com.testingbot.tunnel.proxy.CaCertificates caCertificates = null;
     private String controlProxy = null;
     private String controlProxyAuth = null;
     private String dnsServer = null;
@@ -298,6 +299,14 @@ public class App {
         Option extraHeaders = new Option(null, "extra-headers", true, "Inject extra headers in the requests the tunnel makes.");
         extraHeaders.setArgName("JSON Map with Header Key and Value");
         options.addOption(extraHeaders);
+
+        Option caCert = new Option(null, "cacert-file", true,
+            "Trust an additional certificate authority, as a PEM file. Repeatable. For networks "
+            + "where a proxy intercepts TLS and re-signs it with an internal CA, which the JVM "
+            + "would otherwise reject. Added to the platform's trust store, not replacing it.");
+        caCert.setArgName("FILE");
+        caCert.setArgs(Option.UNLIMITED_VALUES);
+        options.addOption(caCert);
 
         Option controlProxy = new Option(null, "proxy-testingbot", true,
             "Upstream proxy for reaching TestingBot itself -- the API and the SSH control "
@@ -602,30 +611,6 @@ public class App {
             if ((app.hubPort != 80) && (app.hubPort != 4444)) {
                 throw new ParseException("The hub port must either be 80 or 4444");
             }
-        }
-
-        if (commandLine.hasOption("proxy-testingbot")) {
-            String value = commandLine.getOptionValue("proxy-testingbot").trim();
-            if (com.testingbot.tunnel.proxy.ProxySpec.parse(value) == null) {
-                throw new ParseException("Invalid --proxy-testingbot '" + value
-                        + "'; expected host:port, http://host:port or socks5://host:port");
-            }
-            app.setControlProxy(value);
-            Logger.getLogger(App.class.getName()).log(Level.INFO,
-                    "TestingBot API and SSH will use the upstream proxy {0}", value);
-        }
-        if (commandLine.hasOption("proxy-testingbot-userpwd")) {
-            String value = commandLine.getOptionValue("proxy-testingbot-userpwd");
-            if (value == null || !value.contains(":")) {
-                throw new ParseException(
-                        "--proxy-testingbot-userpwd must be in the form user:password");
-            }
-            app.setControlProxyAuth(value);
-        }
-        if (!commandLine.hasOption("proxy-testingbot")
-                && commandLine.hasOption("proxy-testingbot-userpwd")) {
-            Logger.getLogger(App.class.getName()).log(Level.WARNING,
-                    "--proxy-testingbot-userpwd has no effect without --proxy-testingbot.");
         }
 
         if (commandLine.hasOption("dns")) {
@@ -1088,6 +1073,47 @@ public class App {
      * where they sit in the argument handling below.
      */
     static void applyUpstreamProxyOptions(App app, CommandLine commandLine) throws ParseException {
+        // Parsed here rather than with the rest of the options because --doctor calls this
+        // method directly and nothing else: a diagnostic that could not see the control proxy
+        // or the extra authorities would report on a configuration the user is not running.
+        if (commandLine.hasOption("cacert-file")) {
+            try {
+                app.setCaCertificates(com.testingbot.tunnel.proxy.CaCertificates.load(
+                        commandLine.getOptionValues("cacert-file")));
+            } catch (IllegalArgumentException invalid) {
+                throw new ParseException(invalid.getMessage());
+            }
+            if (app.getCaCertificates() != null) {
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "Trusting {0} additional certificate authority/authorities",
+                        app.getCaCertificates().size());
+            }
+        }
+
+        if (commandLine.hasOption("proxy-testingbot")) {
+            String controlValue = commandLine.getOptionValue("proxy-testingbot").trim();
+            if (com.testingbot.tunnel.proxy.ProxySpec.parse(controlValue) == null) {
+                throw new ParseException("Invalid --proxy-testingbot '" + controlValue
+                        + "'; expected host:port, http://host:port or socks5://host:port");
+            }
+            app.setControlProxy(controlValue);
+            Logger.getLogger(App.class.getName()).log(Level.INFO,
+                    "TestingBot API and SSH will use the upstream proxy {0}", controlValue);
+        }
+        if (commandLine.hasOption("proxy-testingbot-userpwd")) {
+            String controlAuth = commandLine.getOptionValue("proxy-testingbot-userpwd");
+            if (controlAuth == null || !controlAuth.contains(":")) {
+                throw new ParseException(
+                        "--proxy-testingbot-userpwd must be in the form user:password");
+            }
+            app.setControlProxyAuth(controlAuth);
+        }
+        if (!commandLine.hasOption("proxy-testingbot")
+                && commandLine.hasOption("proxy-testingbot-userpwd")) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "--proxy-testingbot-userpwd has no effect without --proxy-testingbot.");
+        }
+
         if (commandLine.hasOption("proxy")) {
             app.setProxy(commandLine.getOptionValue("proxy"));
         }
@@ -1460,6 +1486,16 @@ public class App {
 
     public void setDnsServer(String dnsServer) {
         this.dnsServer = dnsServer;
+    }
+
+    /** Extra certificate authorities from {@code --cacert-file}, or null when none. */
+    public com.testingbot.tunnel.proxy.CaCertificates getCaCertificates() {
+        return caCertificates;
+    }
+
+    /** For embedding and tests. */
+    public void setCaCertificates(com.testingbot.tunnel.proxy.CaCertificates caCertificates) {
+        this.caCertificates = caCertificates;
     }
 
     /**

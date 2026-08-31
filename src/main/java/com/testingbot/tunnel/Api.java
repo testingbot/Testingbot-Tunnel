@@ -5,11 +5,14 @@ import java.net.Authenticator;
 import java.net.InetSocketAddress;
 import java.net.PasswordAuthentication;
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import org.apache.hc.client5.http.auth.AuthScope;
 import org.apache.hc.client5.http.auth.UsernamePasswordCredentials;
@@ -22,6 +25,7 @@ import org.apache.hc.client5.http.impl.auth.BasicCredentialsProvider;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClientBuilder;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy;
 import org.apache.hc.core5.http.HttpHost;
 import org.apache.hc.core5.http.NameValuePair;
 import org.apache.hc.core5.http.io.SocketConfig;
@@ -39,6 +43,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  * @author TestingBot
  */
 public class Api {
+
+    private static final Logger LOG = Logger.getLogger(Api.class.getName());
 
     private final String clientKey;
     private final String clientSecret;
@@ -92,6 +98,7 @@ public class Api {
         builder.setDefaultRequestConfig(defaultRequestConfig());
         ProxySpec spec = ProxySpec.parse(app.getControlProxy());
         if (spec == null) {
+            applyCaCertificates(builder, null);
             return builder;
         }
         String[] credentials = splitCredentials(app.getControlProxyAuth());
@@ -107,8 +114,46 @@ public class Api {
                 builder.setDefaultCredentialsProvider(credsProvider);
             }
             builder.setProxy(new HttpHost("http", spec.getHost(), spec.getPort()));
+            applyCaCertificates(builder, null);
         }
         return builder;
+    }
+
+    /**
+     * Trusts the authorities from {@code --cacert-file} in addition to the platform's.
+     *
+     * <p>This is the connection that fails first on a network with TLS interception: the tunnel
+     * cannot register itself, so it never starts, and the error names a certificate rather than
+     * the proxy that replaced it.
+     *
+     * @param socksAddress the SOCKS proxy to keep configured, or null when there is not one --
+     *                     setting a connection manager here would otherwise discard the one
+     *                     {@link #configureSocksProxy} built
+     */
+    private void applyCaCertificates(HttpClientBuilder builder, InetSocketAddress socksAddress) {
+        com.testingbot.tunnel.proxy.CaCertificates authorities = app.getCaCertificates();
+        if (authorities == null) {
+            return;
+        }
+        try {
+            PoolingHttpClientConnectionManagerBuilder manager =
+                    PoolingHttpClientConnectionManagerBuilder.create()
+                            .setTlsSocketStrategy(new DefaultClientTlsStrategy(
+                                    authorities.sslContext()));
+            if (socksAddress != null) {
+                manager.setDefaultSocketConfig(SocketConfig.custom()
+                        .setSocksProxyAddress(socksAddress)
+                        .setSoTimeout(responseTimeout)
+                        .build());
+            }
+            builder.setConnectionManager(manager.build());
+        } catch (GeneralSecurityException unusable) {
+            // Better to carry on with the platform's trust store than to refuse to start: the
+            // connection may well succeed, and if it does not the TLS error says why.
+            LOG.log(Level.WARNING,
+                    "Could not apply --cacert-file, continuing with the default trust store: {0}",
+                    unusable.getMessage());
+        }
     }
 
     /**
@@ -126,12 +171,20 @@ public class Api {
      */
     private void configureSocksProxy(HttpClientBuilder builder, ProxySpec spec,
                                      String[] credentials) {
-        builder.setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
-            .setDefaultSocketConfig(SocketConfig.custom()
-                .setSocksProxyAddress(new InetSocketAddress(spec.getHost(), spec.getPort()))
-                .setSoTimeout(responseTimeout)
-                .build())
-            .build());
+        InetSocketAddress socksAddress =
+                new InetSocketAddress(spec.getHost(), spec.getPort());
+        if (app.getCaCertificates() != null) {
+            // One connection manager carries both; building them separately would mean the
+            // second silently replaced the first.
+            applyCaCertificates(builder, socksAddress);
+        } else {
+            builder.setConnectionManager(PoolingHttpClientConnectionManagerBuilder.create()
+                .setDefaultSocketConfig(SocketConfig.custom()
+                    .setSocksProxyAddress(socksAddress)
+                    .setSoTimeout(responseTimeout)
+                    .build())
+                .build());
+        }
 
         if (credentials != null) {
             Authenticator.setDefault(new Authenticator() {

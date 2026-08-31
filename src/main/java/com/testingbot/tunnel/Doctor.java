@@ -69,7 +69,28 @@ public final class Doctor {
         }
 
         checkOpenPorts();
+        checkCaCertificates();
         checkKerberos();
+    }
+
+    /**
+     * What {@code --cacert-file} actually loaded.
+     *
+     * <p>A file that parsed but was the wrong certificate -- an intermediate rather than the
+     * root, say -- fails later as an ordinary handshake error naming nothing the operator
+     * supplied. Showing the subjects turns that into an obvious mismatch.
+     */
+    public void checkCaCertificates() {
+        com.testingbot.tunnel.proxy.CaCertificates authorities = app.getCaCertificates();
+        if (authorities == null) {
+            return;
+        }
+        Logger.getLogger(Doctor.class.getName()).log(Level.INFO,
+                "OK - trusting {0} additional certificate authority/authorities from --cacert-file",
+                authorities.size());
+        for (String subject : authorities.subjects()) {
+            Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "     {0}", subject);
+        }
     }
 
     /**

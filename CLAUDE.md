@@ -86,6 +86,10 @@ java -jar testingbot-tunnel.jar --doctor
 - `--auth`: Basic authentication for specific hosts
 - `--proxy`: Upstream proxy for test traffic, and for reaching TestingBot unless
   `--proxy-testingbot` is given
+- `--cacert-file`: Trust an additional certificate authority (PEM). Repeatable. For networks
+  where a proxy intercepts TLS and re-signs with an internal CA -- without it the API
+  connection fails and the tunnel never starts. Added to the platform trust store, not
+  replacing it
 - `--proxy-testingbot`, `--proxy-testingbot-userpwd`: A separate upstream proxy for reaching
   TestingBot itself -- the API and the SSH control connection. For networks where the proxy
   allowed out to the internet is not the one that reaches internal test targets. Credentials are
@@ -187,6 +191,22 @@ Removals are applied before sets, so `-X` and `X: 1` together always mean "repla
 independent of argument order. Rules run after `--extra-headers` and after the `X-Forwarded-*`
 headers are generated, so they can override either.
 
+### Trusted certificate authorities
+
+`--cacert-file` exists for TLS-intercepting proxies: they re-sign every certificate with an
+internal CA the JVM has never seen, so the API call fails and the tunnel cannot register. The
+error names a certificate rather than the proxy that replaced it, which is why `--doctor` prints
+the subjects of whatever was loaded.
+
+`CaCertificates` composes two trust managers -- the platform's and one built from the supplied
+PEMs -- rather than merging key stores, so it does not depend on where `cacerts` lives or what
+its password is. The platform is consulted first and the extras only on failure, with the
+original rejection kept as a suppressed exception so a chain neither trusts still explains
+itself.
+
+Applied to the API client. The jetty-client used for plain-HTTP proxying does no TLS worth
+covering: proxied HTTPS arrives as a CONNECT and is relayed as opaque bytes.
+
 ### SSL bumping
 
 Bumping happens on TestingBot's Squid, not here. This client only relays the decision when the
@@ -231,7 +251,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 716 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 722 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy
