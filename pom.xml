@@ -416,6 +416,25 @@
       <version>2.18.0</version>
       <scope>test</scope>
     </dependency>
+
+    <!-- An in-process KDC, so the SPNEGO/Kerberos path added in TB-321 can be exercised against
+         a real key distribution centre. Without one, none of it runs outside a domain. -->
+    <dependency>
+      <groupId>org.apache.kerby</groupId>
+      <artifactId>kerb-simplekdc</artifactId>
+      <version>2.1.1</version>
+      <scope>test</scope>
+      <exclusions>
+        <!-- kerb-admin drags in the original com.jcraft JSch, which duplicates every class of
+             the maintained fork this project ships. On the test classpath that could shadow the
+             implementation production actually uses, so the tests would not be exercising the
+             same SSH stack. Kerby only needs it for its admin transport, which we do not use. -->
+        <exclusion>
+          <groupId>com.jcraft</groupId>
+          <artifactId>jsch</artifactId>
+        </exclusion>
+      </exclusions>
+    </dependency>
     <!-- Jetty 12 core. ConnectHandler (used for CONNECT tunnelling and the WebSocket
          relay) lives here in jetty-server; the core jetty-proxy artifact only carries
          the Handler-based ProxyHandler, which we do not use. -->
