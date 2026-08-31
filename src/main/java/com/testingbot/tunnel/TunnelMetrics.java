@@ -201,7 +201,17 @@ public final class TunnelMetrics {
         // no-op
     }
 
+    /**
+     * Publishes the active tunnel's identity as a single series.
+     *
+     * <p>tunnel_id is a label, so a rebuild -- which the reconnect monitor performs after enough
+     * failures, and which allocates a new id -- used to add another series that stayed at 1
+     * forever. A long session then reported several tunnels as simultaneously active, and the
+     * label set grew without bound.
+     */
     public static void setTunnelInfo(float version, int tunnelId, String identifier) {
+        // Only ever one active tunnel per process.
+        TUNNEL_INFO.clear();
         TUNNEL_INFO.labels(
                 Float.toString(version),
                 Integer.toString(tunnelId),
