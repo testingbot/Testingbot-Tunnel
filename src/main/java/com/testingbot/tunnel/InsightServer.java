@@ -29,11 +29,13 @@ import org.eclipse.jetty.util.Callback;
  */
 public class InsightServer {
 
+    private final Server server;
+
     public InsightServer(App app) {
         // Make sure all collectors are registered before any scrape arrives.
         TunnelMetrics.init();
 
-        Server server = new Server();
+        server = new Server();
         org.eclipse.jetty.server.ServerConnector connector =
                 new org.eclipse.jetty.server.ServerConnector(server);
         connector.setPort(app.getMetricsPort());
@@ -67,6 +69,27 @@ public class InsightServer {
                     + " is available or change with --metrics-port. /metrics (Prometheus) and / (JSON) will be unavailable.",
                 ex);
         }
+    }
+
+    /**
+     * Releases the metrics port.
+     *
+     * <p>Without this the server outlived the App that started it: a tunnel rebuild created a
+     * second one that could not bind, so metrics quietly kept coming from the old instance while
+     * the "metrics" connection listener pointed at the dead one -- and an embedder starting a
+     * tunnel per job leaked a server and a bound port every time.
+     */
+    public void stop() {
+        try {
+            server.stop();
+        } catch (Exception ex) {
+            Logger.getLogger(InsightServer.class.getName())
+                .log(Level.WARNING, "Could not stop the metrics server", ex);
+        }
+    }
+
+    boolean isRunning() {
+        return server.isRunning();
     }
 
     /** Wraps {@code handler} in Basic auth when --metrics-auth was supplied. */

@@ -38,6 +38,7 @@ public class App {
     private String[] fastFail;
     private String[] connectTo;
     private String localhostPolicy;
+    private InsightServer insightServer;
     private String pacLocal;
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private String proxyAuthScheme;
@@ -798,7 +799,17 @@ public class App {
     }
 
     public void startInsightServer() {
-        InsightServer insight = new InsightServer(this);
+        // Replace rather than stack: boot() runs again on a tunnel rebuild, and a second server
+        // on the same port simply fails to bind.
+        stopInsightServer();
+        insightServer = new InsightServer(this);
+    }
+
+    private void stopInsightServer() {
+        if (insightServer != null) {
+            insightServer.stop();
+            insightServer = null;
+        }
     }
 
     public void trackPid() {
@@ -824,6 +835,8 @@ public class App {
             httpProxy.stop();
             httpProxy = null;
         }
+
+        stopInsightServer();
 
         if (poller != null) {
             poller.cancel();
