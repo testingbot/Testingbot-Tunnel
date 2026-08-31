@@ -145,6 +145,48 @@ class ApiTest {
     }
 
     @Test
+    void createTunnel_shouldIncludeNoBumpDomainsWhenConfigured() throws Exception {
+        // Per-host bumping is decided by the tunnel server, so what this side owns is asking
+        // for it. If the parameter is not on the request, nothing downstream can honour it.
+        app.setTunnelIdentifier(null);
+        app.setBumpPolicy(com.testingbot.tunnel.proxy.BumpPolicy.parse(
+                false, "staging.example.com,api.internal"));
+
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"id\":\"101\",\"state\":\"READY\"}")));
+
+        api = createApiWithMockServer();
+        api.createTunnel();
+
+        wireMockServer.verify(postRequestedFor(urlPathEqualTo("/v1/tunnel/create"))
+            .withRequestBody(containing("no_bump_domains=staging.example.com%2Capi.internal")));
+    }
+
+    @Test
+    void createTunnel_shouldNotSendDomainsAlongsideGlobalNoBump() throws Exception {
+        // --nobump is already every host; sending a list too would leave the server choosing.
+        app.setTunnelIdentifier(null);
+        app.setBumpPolicy(com.testingbot.tunnel.proxy.BumpPolicy.parse(true, "staging.example.com"));
+
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"id\":\"101\",\"state\":\"READY\"}")));
+
+        api = createApiWithMockServer();
+        api.createTunnel();
+
+        wireMockServer.verify(postRequestedFor(urlPathEqualTo("/v1/tunnel/create"))
+            .withRequestBody(containing("no_bump=true")));
+        wireMockServer.verify(postRequestedFor(urlPathEqualTo("/v1/tunnel/create"))
+            .withRequestBody(notMatching("(?s).*no_bump_domains.*")));
+    }
+
+    @Test
     void createTunnel_shouldIncludeSharedParameter() throws Exception {
         // Given: App configured with shared tunnel
         app.setTunnelIdentifier(null);

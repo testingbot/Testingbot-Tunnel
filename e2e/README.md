@@ -86,6 +86,7 @@ may hold tunnel slots on the same account.
 | `dns` | 1 | `--dns` against a local server, using a `.invalid` name nothing else can resolve |
 | `websocket` | 1 | `ws://` through both handler paths and a real browser; `wss://` through the CONNECT relay |
 | `protocols` | 1 | which HTTP versions survive the tunnel, and streamed-vs-buffered responses |
+| `sslbump` | 1 | what `--nobump` actually does, measured by which certificate a browser sees |
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |

@@ -59,6 +59,8 @@ public class App {
     private boolean noProxy = false;
     private boolean bypassSquid = false;
     private boolean noBump = false;
+    private com.testingbot.tunnel.proxy.BumpPolicy bumpPolicy =
+            com.testingbot.tunnel.proxy.BumpPolicy.parse(false, null);
     private boolean debugMode = false;
     private HttpProxy httpProxy;
     private String proxy;
@@ -306,6 +308,14 @@ public class App {
         options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087)");
         options.addOption("q", "nocache", false, "Bypass our Caching Proxy running on our tunnel VM.");
         options.addOption("b", "nobump", false, "Do not perform SSL bumping.");
+
+        Option noBumpDomains = new Option(null, "nobump-domains", true,
+            "Do not perform SSL bumping for these hosts, comma separated. Use when one "
+            + "environment behind the tunnel presents a certificate that cannot be re-signed, "
+            + "without turning bumping off everywhere. Ignored when --nobump is given, which "
+            + "already covers every host.");
+        noBumpDomains.setArgName("HOST,HOST");
+        options.addOption(noBumpDomains);
         options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default 8087)");
 
         options.addOption("s", "shared", false, "Share this tunnel among team members.");
@@ -533,6 +543,24 @@ public class App {
         if (commandLine.hasOption("nobump")) {
             Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable SSL bumping. SSL certificates will not be rewritten.");
             app.noBump = true;
+        }
+
+        // Parsed together so the two options cannot disagree about what was asked for.
+        try {
+            app.bumpPolicy = com.testingbot.tunnel.proxy.BumpPolicy.parse(
+                    app.noBump, commandLine.getOptionValue("nobump-domains"));
+        } catch (IllegalArgumentException invalid) {
+            // The convention here is a readable message, not a stack trace out of a
+            // constructor: this is a path users reach by mistyping a flag.
+            throw new ParseException(invalid.getMessage());
+        }
+        if (app.noBump && commandLine.hasOption("nobump-domains")) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "--nobump-domains is ignored because --nobump already disables SSL bumping "
+                    + "for every host.");
+        } else if (!app.bumpPolicy.domains().isEmpty()) {
+            Logger.getLogger(App.class.getName()).log(Level.INFO,
+                    "SSL bumping disabled for: {0}", app.bumpPolicy.toString());
         }
 
         if (commandLine.hasOption("shared")) {
@@ -1281,6 +1309,18 @@ public class App {
 
     public boolean isNoBump() {
         return noBump;
+    }
+
+    /** Which hosts should not be bumped; see {@link com.testingbot.tunnel.proxy.BumpPolicy}. */
+    public com.testingbot.tunnel.proxy.BumpPolicy getBumpPolicy() {
+        return bumpPolicy;
+    }
+
+    /** For embedding and tests: set the policy without going through the command line. */
+    public void setBumpPolicy(com.testingbot.tunnel.proxy.BumpPolicy bumpPolicy) {
+        this.bumpPolicy = bumpPolicy == null
+                ? com.testingbot.tunnel.proxy.BumpPolicy.parse(false, null) : bumpPolicy;
+        this.noBump = this.bumpPolicy.isAllDomains();
     }
 
     /**

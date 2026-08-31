@@ -93,7 +93,10 @@ java -jar testingbot-tunnel.jar --doctor
 - `--header` / `--response-header`: Edit request/response headers. Repeatable. Grammar:
   `name: value` sets, `name;` sets empty, `-name` removes, `-name*` removes by prefix
 - `--tunnel-identifier`: Multiple tunnel support
-- `--nobump`: Disable SSL certificate rewriting
+- `--nobump`: Disable SSL certificate rewriting for every host
+- `--nobump-domains`: Disable it for named hosts only, comma separated. For a tunnel reaching
+  several environments where one presents a certificate Squid cannot re-sign. Ignored when
+  `--nobump` is given, which already covers everything
 - `--nocache`: Bypass TestingBot caching layer
 - `--connect-to`: Dial `HOST2:PORT2` for requests naming `HOST1:PORT1`, leaving the URL, Host
   header and TLS SNI untouched (`HOST1:PORT1:HOST2:PORT2`, comma separated)
@@ -172,6 +175,21 @@ Removals are applied before sets, so `-X` and `X: 1` together always mean "repla
 independent of argument order. Rules run after `--extra-headers` and after the `X-Forwarded-*`
 headers are generated, so they can override either.
 
+### SSL bumping
+
+Bumping happens on TestingBot's Squid, not here. This client only relays the decision when the
+tunnel is created -- `no_bump` for the whole tunnel, `no_bump_domains` for named hosts -- so
+`com.testingbot.tunnel.proxy.BumpPolicy` owns deciding what to ask for and refusing to ask for
+something meaningless. An entry that is a URL or carries a port would match nothing on the
+server, and the tunnel would bump the very host the user was exempting.
+
+**Measured caveat:** `--nobump` has no observable effect on tunnelled HTTPS to an origin
+presenting a certificate Squid cannot chain. The e2e `sslbump` scenario drives a browser at a
+self-signed origin with `acceptInsecureCerts` agreed, and it fails identically with and without
+the flag -- so Squid is not splicing. `ApiTest` asserts the parameter does leave this side, so
+the gap is server-side. The scenario reports it as a skip and turns into a pass once the server
+honours the flag.
+
 ### Configuration sources
 
 Every option can come from three places. Precedence is command line, then `--config` file, then
@@ -200,7 +218,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 681 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 695 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

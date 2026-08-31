@@ -384,4 +384,31 @@ class OptionHandlingTest {
         // tracks maven.compiler.release rather than the old 11.
         assertThat(App.checkJavaVersion()).isTrue();
     }
+
+    /* ----------------------------------------------------------- --nobump-domains */
+
+    @Test
+    void nobumpDomainsIsAcceptedAsACommaSeparatedList() throws Exception {
+        CommandLine line = parse("--nobump-domains", "staging.example.com,api.internal");
+
+        assertThat(line.getOptionValue("nobump-domains"))
+                .isEqualTo("staging.example.com,api.internal");
+    }
+
+    @Test
+    void nobumpDomainsAndNobumpCanBothBeGiven() throws Exception {
+        // Accepted at the parser and resolved afterwards, so the combination produces a warning
+        // rather than an argument error the user has to decode.
+        CommandLine line = parse("--nobump", "--nobump-domains", "staging.example.com");
+
+        assertThat(line.hasOption("nobump")).isTrue();
+        assertThat(line.hasOption("nobump-domains")).isTrue();
+    }
+
+    @Test
+    void nobumpDomainsHasAnEnvironmentAlias() {
+        // Containers are configured with variables, not argv; every long option gets one.
+        assertThat(EnvOptions.variableName("nobump-domains"))
+                .isEqualTo("TESTINGBOT_NOBUMP_DOMAINS");
+    }
 }

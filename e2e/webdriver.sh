@@ -27,6 +27,28 @@ except Exception:
 print(v.get("sessionId") or "")'
 }
 
+# The capabilities the remote end actually agreed to, which is not always what was asked for.
+# A capability silently dropped looks exactly like the feature not working.
+wd_capabilities() {  # $1 se-port, $2 test name, $3 "insecure" -> "sessionId|acceptInsecureCerts"
+  local port="$1" name="$2" insecure="${3:-}" extra=""
+  [ "$insecure" = "insecure" ] && extra="\"acceptInsecureCerts\":true,"
+  curl -s --max-time 300 -X POST "http://127.0.0.1:${port}/wd/hub/session" \
+    -H 'Content-Type: application/json' \
+    -d "{\"capabilities\":{\"alwaysMatch\":{
+          \"browserName\":\"${E2E_BROWSER:-chrome}\",
+          \"browserVersion\":\"${E2E_BROWSER_VERSION:-150}\",
+          \"platformName\":\"${E2E_PLATFORM:-LINUX}\",
+          ${extra}
+          \"tb:options\":{\"name\":\"${name}\",\"build\":\"${E2E_BUILD:-tunnel-e2e}\"}}}}" \
+  | python3 -c 'import json,sys
+try:
+    v = json.load(sys.stdin).get("value", {})
+except Exception:
+    print("|"); sys.exit(0)
+caps = v.get("capabilities", v)
+print((v.get("sessionId") or "") + "|" + str(caps.get("acceptInsecureCerts")))'
+}
+
 wd_goto() {          # $1 se-port, $2 session, $3 url
   curl -s --max-time 180 -o /dev/null -w '%{http_code}' \
     -X POST "http://127.0.0.1:$1/wd/hub/session/$2/url" \

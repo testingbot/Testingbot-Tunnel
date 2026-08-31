@@ -192,6 +192,12 @@ public class Api {
             if (app.isNoBump()) {
                 nameValuePairs.add(new BasicNameValuePair("no_bump", String.valueOf(app.isNoBump())));
             }
+            // Per-host bumping. Only sent when --nobump is absent: that already covers every
+            // host, and sending both would leave the server to decide which was meant.
+            String noBumpDomains = app.getBumpPolicy().apiValue();
+            if (noBumpDomains != null) {
+                nameValuePairs.add(new BasicNameValuePair("no_bump_domains", noBumpDomains));
+            }
             nameValuePairs.add(new BasicNameValuePair("shared", String.valueOf(app.isShared())));
             return this._post(apiScheme + "://" + apiHost + "/v1/tunnel/create", nameValuePairs);
         }
