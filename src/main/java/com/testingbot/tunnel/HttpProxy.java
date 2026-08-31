@@ -66,6 +66,9 @@ public final class HttpProxy {
     static final long STOP_TIMEOUT_MS = 5_000L;
     /** Idle timeout for the proxy's outbound HTTP client. */
     static final long PROXY_IDLE_TIMEOUT_MS = 120_000L;
+
+    /** Header allowance in both directions, matching the outbound client's buffer size. */
+    static final int PROXY_HEADER_SIZE = 32 * 1024;
     /** Under --debug, how long a handler may hold its callback before being reported. */
     static final long HANDLER_CALLBACK_TIMEOUT_MS = 60_000L;
 
@@ -95,6 +98,12 @@ public final class HttpProxy {
         // Don't advertise "Server: Jetty(<version>)" to every client; the exact version
         // is of no use to callers and only helps someone matching known CVEs.
         http_config.setSendServerVersion(false);
+        // Match the outbound client's 32 KiB buffers. Jetty defaults both of these to 8 KiB, so
+        // the proxy refused with 431 requests it was perfectly capable of forwarding -- long
+        // session cookies and large bearer tokens clear 8 KiB routinely in enterprise setups,
+        // and the client on the far side would have carried them.
+        http_config.setRequestHeaderSize(PROXY_HEADER_SIZE);
+        http_config.setResponseHeaderSize(PROXY_HEADER_SIZE);
 
         ServerConnector proxyConnector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
