@@ -188,7 +188,8 @@ presenting a certificate Squid cannot chain. The e2e `sslbump` scenario drives a
 self-signed origin with `acceptInsecureCerts` agreed, and it fails identically with and without
 the flag -- so Squid is not splicing. `ApiTest` asserts the parameter does leave this side, so
 the gap is server-side. The scenario reports it as a skip and turns into a pass once the server
-honours the flag.
+honours the flag. Tracked as TB-352, which also covers accepting
+`no_bump_domains`.
 
 ### Configuration sources
 

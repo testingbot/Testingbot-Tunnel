@@ -805,7 +805,7 @@ scenario_sslbump() {
     # as a skip so the suite stays honest without going red over something no change in this
     # repository can fix; it becomes a pass the moment the server honours the flag.
     skip "TLS is passed through for an unbumped tunnel" \
-      "server did not splice: $(printf '%.90s' "${nav#*|}")"
+      "TB-352: server did not splice: $(printf '%.70s' "${nav#*|}")"
   fi
   wd_delete 4445 "$sid"
 
