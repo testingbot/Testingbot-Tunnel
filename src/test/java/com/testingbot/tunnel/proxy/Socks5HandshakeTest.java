@@ -11,6 +11,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.atomic.AtomicReference;
@@ -19,10 +20,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
- * Drives Socks5Client against a hand-rolled SOCKS5 server so the wire format is checked
+ * Drives Socks5Handshake against a hand-rolled SOCKS5 server so the wire format is checked
  * byte for byte, including the RFC 1929 username/password sub-negotiation.
+ *
+ * <p>The handshake does no I/O of its own -- in production Jetty's selector feeds it. {@link
+ * #pump} is the blocking equivalent, so these tests exercise the same state machine over a
+ * real socket without a selector in the way.
  */
-class Socks5ClientTest {
+class Socks5HandshakeTest {
 
     private ServerSocket server;
     private Thread serverThread;
@@ -123,7 +128,7 @@ class Socks5ClientTest {
         AtomicReference<String> observed = runServer((byte) 0x00, null, (byte) 0x00);
 
         try (SocketChannel channel = connectToServer()) {
-            Socks5Client.connect(channel, "target.example.com", 443, null, null);
+            pump(channel, "target.example.com", 443, null, null);
 
             // Stream must now be positioned at tunnelled payload, not handshake leftovers.
             channel.socket().getOutputStream().write('X');
@@ -138,7 +143,7 @@ class Socks5ClientTest {
         AtomicReference<String> observed = runServer((byte) 0x02, (byte) 0x00, (byte) 0x00);
 
         try (SocketChannel channel = connectToServer()) {
-            Socks5Client.connect(channel, "target.example.com", 8080, "alice", "s3cr:et");
+            pump(channel, "target.example.com", 8080, "alice", "s3cr:et");
         }
 
         assertThat(observed.get()).contains("auth alice:s3cr:et");
@@ -150,7 +155,7 @@ class Socks5ClientTest {
         runServer((byte) 0x02, (byte) 0x01, (byte) 0x00);
 
         try (SocketChannel channel = connectToServer()) {
-            assertThatThrownBy(() -> Socks5Client.connect(channel, "h", 80, "bob", "wrong"))
+            assertThatThrownBy(() -> pump(channel, "h", 80, "bob", "wrong"))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("rejected the supplied credentials");
         }
@@ -161,7 +166,7 @@ class Socks5ClientTest {
         runServer((byte) 0x02, null, (byte) 0x00);
 
         try (SocketChannel channel = connectToServer()) {
-            assertThatThrownBy(() -> Socks5Client.connect(channel, "h", 80, null, null))
+            assertThatThrownBy(() -> pump(channel, "h", 80, null, null))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("--proxy-userpwd");
         }
@@ -172,7 +177,7 @@ class Socks5ClientTest {
         runServer((byte) 0xFF, null, (byte) 0x00);
 
         try (SocketChannel channel = connectToServer()) {
-            assertThatThrownBy(() -> Socks5Client.connect(channel, "h", 80, null, null))
+            assertThatThrownBy(() -> pump(channel, "h", 80, null, null))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("rejected all offered authentication methods");
         }
@@ -183,7 +188,7 @@ class Socks5ClientTest {
         runServer((byte) 0x00, null, (byte) 0x05);
 
         try (SocketChannel channel = connectToServer()) {
-            assertThatThrownBy(() -> Socks5Client.connect(channel, "blocked.example", 443, null, null))
+            assertThatThrownBy(() -> pump(channel, "blocked.example", 443, null, null))
                     .isInstanceOf(IOException.class)
                     .hasMessageContaining("connection refused")
                     .hasMessageContaining("blocked.example:443");
@@ -192,38 +197,43 @@ class Socks5ClientTest {
 
     @Test
     void replyMessage_mapsKnownCodes() {
-        assertThat(Socks5Client.replyMessage((byte) 0x02)).isEqualTo("connection not allowed by ruleset");
-        assertThat(Socks5Client.replyMessage((byte) 0x04)).isEqualTo("host unreachable");
-        assertThat(Socks5Client.replyMessage((byte) 0x7F)).contains("reply code");
+        assertThat(Socks5Handshake.replyMessage((byte) 0x02)).isEqualTo("connection not allowed by ruleset");
+        assertThat(Socks5Handshake.replyMessage((byte) 0x04)).isEqualTo("host unreachable");
+        assertThat(Socks5Handshake.replyMessage((byte) 0x7F)).contains("reply code");
     }
 
-    @Test
-    void silentProxy_failsWithinTheSocketTimeoutInsteadOfHanging() throws Exception {
-        // A SOCKS proxy that accepts the TCP connection and then says nothing. The handshake
-        // reads must honour SO_TIMEOUT -- SocketChannel.read() ignores it, so this used to
-        // block a pool thread forever and the CONNECT never completed either way.
-        server = new ServerSocket(0, 1, InetAddress.getLoopbackAddress());
-        serverThread = new Thread(() -> {
-            try (Socket accepted = server.accept()) {
-                Thread.sleep(30_000);      // accept, then stay silent
-            } catch (Exception ignored) {
-                // test finished
+    /**
+     * Drives the handshake to completion over a blocking socket, one exact-sized read per step,
+     * the way the selector-driven connection does it asynchronously.
+     */
+    private static void pump(SocketChannel channel, String host, int port,
+                             String user, String password) throws IOException {
+        Socks5Handshake handshake = new Socks5Handshake(host, port, user, password);
+        OutputStream out = channel.socket().getOutputStream();
+        InputStream in = channel.socket().getInputStream();
+        writeAll(out, handshake.greeting());
+
+        while (!handshake.isDone()) {
+            byte[] bytes = new byte[handshake.bytesNeeded()];
+            int off = 0;
+            while (off < bytes.length) {
+                int n = in.read(bytes, off, bytes.length - off);
+                if (n < 0) {
+                    throw new IOException("proxy closed the connection during the handshake");
+                }
+                off += n;
             }
-        });
-        serverThread.setDaemon(true);
-        serverThread.start();
-
-        try (SocketChannel channel = connectToServer()) {
-            channel.socket().setSoTimeout(750);
-
-            long startedAt = System.nanoTime();
-            assertThatThrownBy(() -> Socks5Client.connect(channel, "target.example.com", 443, null, null))
-                    .isInstanceOf(IOException.class);
-            long elapsedMs = (System.nanoTime() - startedAt) / 1_000_000;
-
-            assertThat(elapsedMs)
-                    .as("must give up on the socket timeout, not block indefinitely")
-                    .isLessThan(10_000L);
+            ByteBuffer reply = handshake.accept(ByteBuffer.wrap(bytes));
+            if (reply != null) {
+                writeAll(out, reply);
+            }
         }
+    }
+
+    private static void writeAll(OutputStream out, ByteBuffer buffer) throws IOException {
+        byte[] bytes = new byte[buffer.remaining()];
+        buffer.get(bytes);
+        out.write(bytes);
+        out.flush();
     }
 }

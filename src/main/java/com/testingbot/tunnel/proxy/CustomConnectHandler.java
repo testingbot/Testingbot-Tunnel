@@ -309,23 +309,21 @@ public class CustomConnectHandler extends ConnectHandler {
             super.connectToServer(request, host, port, promise);
             return;
         }
-        if (upstream.isSocks5()) {
-            connectViaSocks5(upstream, host, port,
-                    TunnelMetrics.timedDial("connect", promise));
-            return;
-        }
-
         // Dial the proxy the same way Jetty dials a direct target: open the channel, start a
         // non-blocking connect and hand it back. Jetty's selector takes it from there, and the
-        // CONNECT exchange runs in ProxyHandshakeConnection when the socket comes up.
+        // handshake -- CONNECT or SOCKS5, whichever this proxy speaks -- runs in the
+        // HandshakeConnection that newUpstreamConnection picks when the socket comes up.
         //
         // This replaced a private Selector and a select loop that ran inline on the Jetty request
-        // thread for up to fifteen seconds. With a slow upstream proxy, enough concurrent
-        // CONNECTs would occupy the whole pool and stall unrelated requests.
+        // thread for up to fifteen seconds, and a SOCKS5 handshake that occupied an executor
+        // thread for as long as the proxy took to answer.
         //
-        // The outcome is counted in ProxyHandshakeConnection, which is where it is known: a TCP
-        // connection to the proxy is not a usable tunnel until the proxy has agreed to it.
+        // The outcome is counted in the handshake connection, which is where it is known: a TCP
+        // connection to the proxy is not a usable tunnel until the proxy has agreed to it. The
+        // clock covers the dial as well as the handshake, so it starts here.
         request.setAttribute(ATTR_PROXY_TARGET_REQUEST, new ProxyTarget(upstream, host, port));
+        request.setAttribute(ATTR_DIAL_TIMER,
+                TunnelMetrics.DIAL_DURATION_SECONDS.labels("connect").startTimer());
         SocketChannel channel = null;
         try {
             channel = SocketChannel.open();
@@ -338,6 +336,7 @@ public class CustomConnectHandler extends ConnectHandler {
             LOG.error("Could not dial upstream proxy {}:{}: {}",
                     upstream.getHost(), upstream.getPort(), x.getMessage());
             TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
+            observeDial(request);
             promise.failed(x);
         }
     }
@@ -353,113 +352,138 @@ public class CustomConnectHandler extends ConnectHandler {
     }
 
     /**
-     * Opens the tunnel through a SOCKS5 upstream proxy. The handshake is short and blocking,
-     * so it runs on the executor rather than being woven into the selector loop the HTTP
-     * CONNECT path uses; the channel is switched back to non-blocking before Jetty gets it.
-     */
-    private void connectViaSocks5(ProxySpec upstream, String host, int port,
-                                  Promise<SocketChannel> promise) {
-        getExecutor().execute(() -> {
-            SocketChannel channel = null;
-            SocketChannel prepared;
-            try {
-                channel = SocketChannel.open();
-                channel.socket().setTcpNoDelay(true);
-                channel.socket().connect(newConnectAddress(upstream.getHost(), upstream.getPort()), (int) getConnectTimeout());
-                // Bounds the handshake reads too, not just the TCP connect: without this a
-                // SOCKS proxy that stalls mid-handshake pins this thread and the CONNECT
-                // callback is never completed, so the client request hangs forever.
-                channel.socket().setSoTimeout((int) getConnectTimeout());
-
-                String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
-                Socks5Client.connect(channel, host, port,
-                        credentials == null ? null : credentials[0],
-                        credentials == null ? null : credentials[1]);
-
-                channel.configureBlocking(false);
-                if (debugMode) {
-                    LOG.info("Established SOCKS5 tunnel through {}:{} to {}:{}",
-                            upstream.getHost(), upstream.getPort(), host, port);
-                }
-                prepared = channel;
-            } catch (Throwable x) {
-                LOG.error("Failed to establish SOCKS5 tunnel through {}:{} to {}:{}: {}",
-                        upstream.getHost(), upstream.getPort(), host, port, x.getMessage());
-                if (channel != null) {
-                    try {
-                        channel.close();
-                    } catch (IOException ignored) {
-                        // already failing; nothing useful to do
-                    }
-                }
-                promise.failed(x);
-            }
-        });
-    }
-
-
-    /**
-     * The CONNECT request sent to an upstream HTTP proxy.
-     *
-     * <p>Client headers are replayed except hop-by-hop ones, which belong to our hop rather than
-     * the proxy's, and any value containing CR or LF, which would let a client inject headers
-     * into a request we are making on its behalf.
-     */
-    /**
-     * Carries the destination for a dial that has to traverse an upstream HTTP proxy, so the
+     * Carries the destination for a dial that has to traverse an upstream proxy, so the
      * handshake connection knows what to ask for once the socket is up.
      */
     private static final String ATTR_PROXY_TARGET_REQUEST =
             CustomConnectHandler.class.getName() + ".proxyTarget";
 
-    /** What the CONNECT to the upstream proxy must ask for. */
+    /** What the handshake with the upstream proxy must ask for. */
     private record ProxyTarget(ProxySpec upstream, String host, int port) {
     }
 
     /**
-     * Performs the upstream proxy's CONNECT exchange on Jetty's selector rather than on a thread.
+     * The part of an upstream-proxy handshake that does not depend on which protocol the proxy
+     * speaks: it runs on Jetty's selector, it holds the tunnel back until the proxy has agreed
+     * to it, and it reports the outcome exactly once.
      *
-     * <p>The previous implementation opened its own Selector and ran a select loop inline on the
-     * Jetty request thread for up to fifteen seconds. With an upstream proxy that is slow to
-     * answer, enough concurrent CONNECTs would occupy the whole pool and stall unrelated
-     * requests.
-     *
-     * <p>The tunnel is only published to the client once the proxy has agreed to it:
-     * {@code super.onOpen()} is what calls {@code onConnectSuccess}, so it is deliberately
-     * deferred until the handshake completes. AbstractConnection.onOpen only notifies listeners,
-     * so delaying it is safe.
+     * <p>{@code super.onOpen()} is what calls {@code onConnectSuccess} and so publishes the
+     * tunnel to the client, which is why it is deliberately deferred until the handshake
+     * finishes. AbstractConnection.onOpen only notifies listeners, so delaying it is safe.
      */
-    private class ProxyHandshakeConnection extends UpstreamConnection {
+    private abstract class HandshakeConnection extends UpstreamConnection {
 
-        private final ConnectContext context;
-        private final ProxyTarget target;
-        private final StringBuilder response = new StringBuilder();
-        // Jetty's fill() appends to a buffer in flush mode and takes its space from limit to
-        // capacity. A ByteBuffer.allocate() is in fill mode, where limit == capacity, so fill()
-        // sees no room and reads nothing -- which spins the selector rather than failing.
-        private final ByteBuffer readBuffer = org.eclipse.jetty.util.BufferUtil.allocate(1);
-        private boolean handshakeDone;
+        protected final ConnectContext context;
+        protected final ProxyTarget target;
+        private boolean settled;
 
-        ProxyHandshakeConnection(EndPoint endPoint, ConnectContext context, ProxyTarget target) {
+        HandshakeConnection(EndPoint endPoint, ConnectContext context, ProxyTarget target) {
             super(endPoint, CustomConnectHandler.this.getExecutor(),
                     CustomConnectHandler.this.getByteBufferPool(), context);
             this.context = context;
             this.target = target;
         }
 
+        /** How this proxy is named in log messages: "CONNECT" or "SOCKS5". */
+        protected abstract String protocolName();
+
+        /** Sends whatever opens the handshake. Called once the socket is up. */
+        protected abstract void begin() throws IOException;
+
         @Override
         public void onOpen() {
             // The endpoint was created with the tunnel's idle timeout, which is long by design.
             // The handshake gets its own, shorter one, restored once the tunnel is up.
             getEndPoint().setIdleTimeout(HANDSHAKE_TIMEOUT_MS);
-            String request = connectRequest(target.upstream(), context.getRequest(),
-                    target.host(), target.port());
-            ByteBuffer buffer = ByteBuffer.wrap(request.getBytes(StandardCharsets.US_ASCII));
-            getEndPoint().write(Callback.from(this::readMore, this::handshakeFailed), buffer);
+            try {
+                begin();
+            } catch (Throwable failure) {
+                handshakeFailed(failure);
+            }
         }
 
-        private void readMore() {
-            getEndPoint().fillInterested(Callback.from(this::onResponseBytes, this::handshakeFailed));
+        /** Re-arms for the next readable event. */
+        protected void readMore(Runnable onReadable) {
+            getEndPoint().fillInterested(Callback.from(onReadable, this::handshakeFailed));
+        }
+
+        /** Writes {@code buffer}, then waits to be read again. */
+        protected void writeThen(ByteBuffer buffer, Runnable next) {
+            getEndPoint().write(Callback.from(next, this::handshakeFailed), buffer);
+        }
+
+        protected void handshakeSucceeded() {
+            settled = true;
+            getEndPoint().setIdleTimeout(getIdleTimeout());
+            TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
+            observeDial(context.getRequest());
+            if (debugMode) {
+                LOG.info("Established {} tunnel through upstream proxy {}:{} to {}:{}",
+                        protocolName(), target.upstream().getHost(), target.upstream().getPort(),
+                        target.host(), target.port());
+            }
+            super.onOpen();
+        }
+
+        protected void handshakeFailed(Throwable failure) {
+            if (settled) {
+                // Past the hand-off; the tunnel owns its own failures now.
+                return;
+            }
+            settled = true;
+            TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
+            observeDial(context.getRequest());
+            LOG.error("Failed to establish {} tunnel through upstream proxy {}:{} to {}:{}: {}",
+                    protocolName(), target.upstream().getHost(), target.upstream().getPort(),
+                    target.host(), target.port(), failure.getMessage());
+            onConnectFailure(context.getRequest(), context.getResponse(), context.getCallback(),
+                    failure);
+            getEndPoint().close();
+        }
+
+        @Override
+        public boolean onIdleExpired(java.util.concurrent.TimeoutException timeout) {
+            if (!settled) {
+                handshakeFailed(new IOException("Timed out waiting for upstream proxy "
+                        + target.upstream().getHost() + ":" + target.upstream().getPort()
+                        + " to complete the " + protocolName() + " handshake"));
+                return false;
+            }
+            return super.onIdleExpired(timeout);
+        }
+    }
+
+    /**
+     * The HTTP CONNECT exchange with an upstream proxy.
+     *
+     * <p>This replaced an implementation that opened its own Selector and ran a select loop
+     * inline on the Jetty request thread for up to fifteen seconds. With an upstream proxy slow
+     * to answer, enough concurrent CONNECTs would occupy the whole pool and stall unrelated
+     * requests.
+     */
+    private class ProxyHandshakeConnection extends HandshakeConnection {
+
+        private final StringBuilder response = new StringBuilder();
+        // Jetty's fill() appends to a buffer in flush mode and takes its space from limit to
+        // capacity. A ByteBuffer.allocate() is in fill mode, where limit == capacity, so fill()
+        // sees no room and reads nothing -- which spins the selector rather than failing.
+        private final ByteBuffer readBuffer = org.eclipse.jetty.util.BufferUtil.allocate(1);
+
+        ProxyHandshakeConnection(EndPoint endPoint, ConnectContext context, ProxyTarget target) {
+            super(endPoint, context, target);
+        }
+
+        @Override
+        protected String protocolName() {
+            return "CONNECT";
+        }
+
+        @Override
+        protected void begin() {
+            String request = connectRequest(target.upstream(), context.getRequest(),
+                    target.host(), target.port());
+            writeThen(ByteBuffer.wrap(request.getBytes(StandardCharsets.US_ASCII)),
+                    () -> readMore(this::onResponseBytes));
         }
 
         /**
@@ -480,7 +504,7 @@ public class CustomConnectHandler extends ConnectHandler {
                                 + " closed the connection before answering CONNECT");
                     }
                     if (read == 0) {
-                        readMore();
+                        readMore(this::onResponseBytes);
                         return;
                     }
                     response.append((char) (readBuffer.get() & 0xFF));
@@ -497,62 +521,114 @@ public class CustomConnectHandler extends ConnectHandler {
                             target.upstream().getHost(), target.upstream().getPort(),
                             target.host(), target.port(), statusLine));
                 }
-
-                if (debugMode) {
-                    LOG.info("Established CONNECT tunnel through upstream proxy {}:{} to {}:{}",
-                            target.upstream().getHost(), target.upstream().getPort(),
-                            target.host(), target.port());
-                }
-                handshakeDone = true;
-                getEndPoint().setIdleTimeout(getIdleTimeout());
-                TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
-                // Publishes the tunnel: this is what calls onConnectSuccess.
-                super.onOpen();
+                handshakeSucceeded();
             } catch (Throwable failure) {
                 handshakeFailed(failure);
             }
         }
+    }
 
-        private void handshakeFailed(Throwable failure) {
-            if (handshakeDone) {
-                // Past the hand-off; the tunnel owns its own failures now.
-                return;
-            }
-            handshakeDone = true;
-            TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
-            LOG.error("Failed to establish CONNECT tunnel through upstream proxy {}:{} to {}:{}: {}",
-                    target.upstream().getHost(), target.upstream().getPort(),
-                    target.host(), target.port(), failure.getMessage());
-            onConnectFailure(context.getRequest(), context.getResponse(), context.getCallback(),
-                    failure);
-            getEndPoint().close();
+    /**
+     * The SOCKS5 handshake with an upstream proxy.
+     *
+     * <p>Previously this ran on an executor thread with a blocking socket and an SO_TIMEOUT: a
+     * proxy that accepted the connection and then went quiet held that thread for the whole
+     * connect timeout, and enough of them at once would exhaust the pool.
+     *
+     * <p>{@link Socks5Handshake} states exactly how many bytes each step wants, and the read
+     * buffer is sized to that, so a step can never take a byte of the tunnelled stream that
+     * follows the reply.
+     */
+    private class Socks5HandshakeConnection extends HandshakeConnection {
+
+        private final Socks5Handshake handshake;
+        private ByteBuffer readBuffer;
+
+        Socks5HandshakeConnection(EndPoint endPoint, ConnectContext context, ProxyTarget target) {
+            super(endPoint, context, target);
+            String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
+            this.handshake = new Socks5Handshake(target.host(), target.port(),
+                    credentials == null ? null : credentials[0],
+                    credentials == null ? null : credentials[1]);
         }
 
         @Override
-        public boolean onIdleExpired(java.util.concurrent.TimeoutException timeout) {
-            if (!handshakeDone) {
-                handshakeFailed(new IOException("Timed out waiting for upstream proxy "
-                        + target.upstream().getHost() + ":" + target.upstream().getPort()
-                        + " to answer CONNECT"));
-                return false;
+        protected String protocolName() {
+            return "SOCKS5";
+        }
+
+        @Override
+        protected void begin() {
+            send(handshake.greeting());
+        }
+
+        private void send(ByteBuffer buffer) {
+            writeThen(buffer, this::awaitStep);
+        }
+
+        private void awaitStep() {
+            readBuffer = org.eclipse.jetty.util.BufferUtil.allocate(handshake.bytesNeeded());
+            readMore(this::onStepBytes);
+        }
+
+        private void onStepBytes() {
+            try {
+                while (true) {
+                    int wanted = handshake.bytesNeeded();
+                    while (org.eclipse.jetty.util.BufferUtil.length(readBuffer) < wanted) {
+                        int read = getEndPoint().fill(readBuffer);
+                        if (read < 0) {
+                            throw new IOException("Upstream SOCKS proxy "
+                                    + target.upstream().getHost() + ":"
+                                    + target.upstream().getPort()
+                                    + " closed the connection during the handshake");
+                        }
+                        if (read == 0) {
+                            readMore(this::onStepBytes);
+                            return;
+                        }
+                    }
+
+                    ByteBuffer reply = handshake.accept(readBuffer);
+                    if (handshake.isDone()) {
+                        handshakeSucceeded();
+                        return;
+                    }
+                    if (reply != null) {
+                        send(reply);
+                        return;
+                    }
+                    // A step that only reads; take the next one from what is already buffered.
+                    readBuffer = org.eclipse.jetty.util.BufferUtil.allocate(handshake.bytesNeeded());
+                }
+            } catch (Throwable failure) {
+                handshakeFailed(failure);
             }
-            return super.onIdleExpired(timeout);
         }
     }
 
     /**
-     * Returns the handshake connection when the dial has to traverse an upstream HTTP proxy, and
-     * Jetty's ordinary one otherwise.
+     * Returns the handshake the upstream proxy speaks when the dial has to traverse one, and
+     * Jetty's ordinary connection otherwise.
      */
     @Override
     protected UpstreamConnection newUpstreamConnection(EndPoint endPoint, ConnectContext context) {
         Object target = context.getRequest().getAttribute(ATTR_PROXY_TARGET_REQUEST);
         if (target instanceof ProxyTarget proxyTarget) {
-            return new ProxyHandshakeConnection(endPoint, context, proxyTarget);
+            return proxyTarget.upstream().isSocks5()
+                    ? new Socks5HandshakeConnection(endPoint, context, proxyTarget)
+                    : new ProxyHandshakeConnection(endPoint, context, proxyTarget);
         }
         return super.newUpstreamConnection(endPoint, context);
     }
 
+    /**
+     * The CONNECT request sent to an upstream HTTP proxy.
+     *
+     * <p>Client headers are replayed except hop-by-hop ones, which belong to our hop rather than
+     * the proxy's, and any value containing CR or LF, which would let a client inject headers
+     * into a request we are making on its behalf.
+     */
     String connectRequest(ProxySpec upstream, Request request, String host, int port) {
         final StringBuilder connect = new StringBuilder();
         connect.append("CONNECT ").append(host).append(':').append(port)
