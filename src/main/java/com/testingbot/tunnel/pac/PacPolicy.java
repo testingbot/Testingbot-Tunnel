@@ -46,6 +46,13 @@ public final class PacPolicy {
 
     private static final int FETCH_TIMEOUT_MS = 15_000;
 
+    /**
+     * A PAC file is a few kilobytes of JavaScript. Reading an unbounded response into memory on
+     * the strength of a URL the user supplied -- which may be a corporate endpoint having a bad
+     * day, or simply the wrong address -- is not something to do on startup.
+     */
+    static final int MAX_PAC_BYTES = 1024 * 1024;
+
     /** A decision and when it was made. */
     private record CachedResult(PacResult result, long decidedAtMs) {
     }
@@ -97,7 +104,13 @@ public final class PacPolicy {
                     throw new PacException("Could not fetch PAC file " + location
                             + ": HTTP " + status);
                 }
-                return new String(connection.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+                byte[] body = connection.getInputStream()
+                        .readNBytes(MAX_PAC_BYTES + 1);
+                if (body.length > MAX_PAC_BYTES) {
+                    throw new PacException("PAC file " + location + " is larger than "
+                            + MAX_PAC_BYTES + " bytes; refusing to load it");
+                }
+                return new String(body, StandardCharsets.UTF_8);
             } catch (IOException unreachable) {
                 throw new PacException("Could not fetch PAC file " + location + ": "
                         + unreachable.getMessage(), unreachable);

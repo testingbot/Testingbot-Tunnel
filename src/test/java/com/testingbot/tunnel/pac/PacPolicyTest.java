@@ -95,6 +95,37 @@ class PacPolicyTest {
     }
 
     @Test
+    void anAbsurdlyLargePacFileIsRefusedRatherThanBuffered() throws Exception {
+        // The URL comes from the user, and a corporate endpoint having a bad day can answer with
+        // anything. A PAC file is a few kilobytes; reading an unbounded body into memory is not
+        // a reasonable thing to do on startup.
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/huge.pac", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            byte[] chunk = new byte[64 * 1024];
+            java.util.Arrays.fill(chunk, (byte) 'x');
+            try {
+                for (int i = 0; i < (PacPolicy.MAX_PAC_BYTES / chunk.length) + 4; i++) {
+                    exchange.getResponseBody().write(chunk);
+                }
+            } catch (Exception clientGaveUp) {
+                // expected once the read is cut short
+            }
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/huge.pac";
+
+            assertThatThrownBy(() -> PacPolicy.load(url))
+                    .isInstanceOf(PacException.class)
+                    .hasMessageContaining("larger than");
+        } finally {
+            server.stop(0);
+        }
+    }
+
+    @Test
     void aMissingFileIsNamed(@TempDir Path tmp) {
         assertThatThrownBy(() -> PacPolicy.load(tmp.resolve("absent.pac").toString()))
                 .isInstanceOf(PacException.class)
