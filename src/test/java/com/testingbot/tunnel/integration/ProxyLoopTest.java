@@ -65,6 +65,13 @@ class ProxyLoopTest {
         throw new IllegalStateException("Proxy did not start on port " + port);
     }
 
+    /** The status line only. Matching anywhere in the response is unsafe: an error page quotes
+     *  the target port, and a randomly chosen free port can contain the status digits. */
+    private String statusOf(String response) {
+        int eol = response.indexOf("\r\n");
+        return eol < 0 ? response : response.substring(0, eol);
+    }
+
     private String send(String request) throws Exception {
         try (Socket socket = new Socket("127.0.0.1", proxyPort)) {
             socket.setSoTimeout(20_000);
@@ -79,7 +86,7 @@ class ProxyLoopTest {
         String response = send("GET http://127.0.0.1:" + proxyPort + "/ HTTP/1.1\r\n"
                 + "Host: 127.0.0.1:" + proxyPort + "\r\nConnection: close\r\n\r\n");
 
-        assertThat(response).contains("508");
+        assertThat(statusOf(response)).contains("508");
         assertThat(response).contains("loop-detected");
         Thread.sleep(300);
         assertThat(Statistics.getNumberOfRequests())
@@ -93,7 +100,7 @@ class ProxyLoopTest {
         String response = send("GET http://localhost:" + proxyPort + "/ HTTP/1.1\r\n"
                 + "Host: localhost:" + proxyPort + "\r\nConnection: close\r\n\r\n");
 
-        assertThat(response).contains("508");
+        assertThat(statusOf(response)).contains("508");
     }
 
     @Test
@@ -105,7 +112,7 @@ class ProxyLoopTest {
                 + "Host: example.invalid\r\n"
                 + "Via: 1.1 " + viaHost + "\r\nConnection: close\r\n\r\n");
 
-        assertThat(response).contains("508");
+        assertThat(statusOf(response)).contains("508");
     }
 
     @Test
@@ -116,7 +123,7 @@ class ProxyLoopTest {
         String response = send("GET http://127.0.0.1:" + otherPort + "/ HTTP/1.1\r\n"
                 + "Host: 127.0.0.1:" + otherPort + "\r\nConnection: close\r\n\r\n");
 
-        assertThat(response).doesNotContain("508");
+        assertThat(statusOf(response)).doesNotContain("508");
     }
 
     @Test
@@ -124,6 +131,6 @@ class ProxyLoopTest {
         String response = send("GET http://example.invalid/ HTTP/1.1\r\n"
                 + "Host: example.invalid\r\nConnection: close\r\n\r\n");
 
-        assertThat(response).doesNotContain("508");
+        assertThat(statusOf(response)).doesNotContain("508");
     }
 }
