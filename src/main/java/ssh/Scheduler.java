@@ -1,6 +1,8 @@
 package ssh;
 
 import java.util.Timer;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import java.util.TimerTask;
 
 /**
@@ -49,11 +51,29 @@ public interface Scheduler {
             timer = new Timer(name);
         }
 
+        /**
+         * Runs {@code task}, absorbing anything it throws.
+         *
+         * <p>An uncaught throwable from a TimerTask terminates the Timer thread and cancels
+         * everything still scheduled on it. For the reconnect path that is terminal: the retry
+         * flag stays set, so every later connection-lost report is dropped as "already
+         * retrying", and the tunnel stays down for the rest of the session with an ordinary
+         * reconnect message as the last thing in the log.
+         *
+         * <p>Throwable rather than Exception on purpose -- the cases that kill a Timer are the
+         * ones that are not Exceptions: OutOfMemoryError, NoClassDefFoundError from a class
+         * loaded lazily on the failure path, StackOverflowError.
+         */
         private static TimerTask wrap(Runnable task) {
             return new TimerTask() {
                 @Override
                 public void run() {
-                    task.run();
+                    try {
+                        task.run();
+                    } catch (Throwable failure) {
+                        Logger.getLogger(Scheduler.class.getName()).log(Level.SEVERE,
+                                "Scheduled task failed; the scheduler stays alive", failure);
+                    }
                 }
             };
         }
