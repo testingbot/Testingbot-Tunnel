@@ -183,6 +183,199 @@ class OptionHandlingTest {
                 .hasMessageContaining("Invalid --metrics-port");
     }
 
+    /* ----------------------------------------------------------------- applyOptions */
+
+    private static App withOptions(String... args) throws Exception {
+        App app = new App();
+        App.applyOptions(app, parse(args));
+        return app;
+    }
+
+    @Test
+    void logHttpIsValidatedAgainstTheModes() throws Exception {
+        assertThat(withOptions("--log-http", "headers").getLogHttp()).isEqualTo("headers");
+
+        assertThatThrownBy(() -> withOptions("--log-http", "verbose"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("none, url, headers or errors");
+    }
+
+    @Test
+    void requestIdHeaderMustBeAValidHeaderName() throws Exception {
+        assertThat(withOptions("--request-id-header", "X-Trace").getRequestIdHeader())
+                .isEqualTo("X-Trace");
+
+        assertThatThrownBy(() -> withOptions("--request-id-header", "not a token"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("Invalid header name");
+    }
+
+    @Test
+    void localhostPolicyAcceptsOnlyAllowOrDeny() throws Exception {
+        assertThat(withOptions("--localhost-policy", "deny").getLocalhostPolicy())
+                .isEqualTo("deny");
+        assertThat(withOptions("--localhost-policy", "ALLOW").getLocalhostPolicy())
+                .isEqualTo("ALLOW");
+
+        assertThatThrownBy(() -> withOptions("--localhost-policy", "maybe"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("Expected allow or deny");
+    }
+
+    @Test
+    void connectToAndFastFailAreSplitOnCommas() throws Exception {
+        assertThat(withOptions("--connect-to", "a:1:b:2,c:3:d:4").getConnectTo())
+                .containsExactly("a:1:b:2", "c:3:d:4");
+        assertThat(withOptions("--fast-fail-regexps", "a\\.com,b\\.com").getFastFail())
+                .containsExactly("a\\.com", "b\\.com");
+    }
+
+    @Test
+    void headerRulesReachTheApp() throws Exception {
+        App app = withOptions("--header", "X-A: 1", "--header", "-X-B",
+                "--response-header", "-Server");
+
+        assertThat(app.getHeaderRules()).containsExactly("X-A: 1", "-X-B");
+        assertThat(app.getResponseHeaderRules()).containsExactly("-Server");
+    }
+
+    @Test
+    void extraHeadersAreParsedFromJsonAndValidated() throws Exception {
+        App app = withOptions("--extra-headers", "{\"X-Tenant\":\"acme\"}");
+
+        assertThat(app.getCustomHeaders()).containsEntry("X-Tenant", "acme");
+
+        // A CRLF in a value would inject further headers into every request.
+        assertThatThrownBy(() -> withOptions("--extra-headers", "{\"X-A\":\"a\\r\\nX-B: c\"}"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("CR or LF");
+    }
+
+    @Test
+    void metricsAuthMustBeUserColonPassword() throws Exception {
+        assertThat(withOptions("--metrics-auth", "user:pass").getMetricsAuth())
+                .isEqualTo("user:pass");
+
+        assertThatThrownBy(() -> withOptions("--metrics-auth", "nopassword"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("user:password");
+        assertThatThrownBy(() -> withOptions("--metrics-auth", ":onlypassword"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("user:password");
+    }
+
+    @Test
+    void metricsPortIsApplied() throws Exception {
+        assertThat(withOptions("--metrics-port", "9123").getMetricsPort()).isEqualTo(9123);
+    }
+
+    /* ------------------------------------------------------------------ credentials */
+
+    @Test
+    void credentialsComeFromThePositionalArguments() throws Exception {
+        App app = new App();
+        App.applyCredentials(app, parse("MYKEY", "MYSECRET"));
+
+        assertThat(app.getClientKey()).isEqualTo("MYKEY");
+        assertThat(app.getClientSecret()).isEqualTo("MYSECRET");
+    }
+
+    @Test
+    void surroundingWhitespaceOnCredentialsIsTrimmed() throws Exception {
+        // Copy-paste from a web page routinely brings a trailing space, and the API rejects it
+        // with a 401 that looks like wrong credentials.
+        App app = new App();
+        App.applyCredentials(app, parse("  MYKEY  ", "  MYSECRET  "));
+
+        assertThat(app.getClientKey()).isEqualTo("MYKEY");
+        assertThat(app.getClientSecret()).isEqualTo("MYSECRET");
+    }
+
+    @Test
+    void missingCredentialsSayWhichOnesAndWhereToGetThem() {
+        App app = new App() {
+            @Override
+            public String[] getUserData() {
+                return new String[0];   // no ~/.testingbot on this machine
+            }
+        };
+
+        assertThatThrownBy(() -> App.applyCredentials(app, parse()))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("API_KEY API_SECRET")
+                .hasMessageContaining("testingbot.com/members/user/edit");
+
+        assertThatThrownBy(() -> App.applyCredentials(app, parse("ONLYKEY")))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("Missing required argument API_SECRET");
+    }
+
+    @Test
+    void theDotfileIsUsedWhenNoCredentialsAreGiven() throws Exception {
+        App app = new App() {
+            @Override
+            public String[] getUserData() {
+                return new String[]{"FILEKEY", "FILESECRET"};
+            }
+        };
+
+        App.applyCredentials(app, parse());
+
+        assertThat(app.getClientKey()).isEqualTo("FILEKEY");
+        assertThat(app.getClientSecret()).isEqualTo("FILESECRET");
+    }
+
+    @Test
+    void positionalCredentialsWinOverTheDotfile() throws Exception {
+        App app = new App() {
+            @Override
+            public String[] getUserData() {
+                return new String[]{"FILEKEY", "FILESECRET"};
+            }
+        };
+
+        App.applyCredentials(app, parse("CLIKEY", "CLISECRET"));
+
+        assertThat(app.getClientKey()).isEqualTo("CLIKEY");
+        assertThat(app.getClientSecret()).isEqualTo("CLISECRET");
+    }
+
+    /* -------------------------------------------------------------------- log level */
+
+    @Test
+    void logLevelMapsOntoAllThreeLoggingSystems() throws Exception {
+        assertThat(App.resolveLogLevels("error").jetty()).isEqualTo("ERROR");
+        assertThat(App.resolveLogLevels("warn").jetty()).isEqualTo("WARN");
+        assertThat(App.resolveLogLevels("warning").jetty()).isEqualTo("WARN");
+        assertThat(App.resolveLogLevels("info").jetty()).isEqualTo("INFO");
+        assertThat(App.resolveLogLevels("DEBUG").jetty()).isEqualTo("DEBUG");
+        assertThat(App.resolveLogLevels("trace").jetty()).isEqualTo("TRACE");
+    }
+
+    @Test
+    void onlyDebugAndTraceCountAsDebugLike() throws Exception {
+        assertThat(App.resolveLogLevels("info").isDebugLike()).isFalse();
+        assertThat(App.resolveLogLevels("debug").isDebugLike()).isTrue();
+        assertThat(App.resolveLogLevels("trace").isDebugLike()).isTrue();
+    }
+
+    @Test
+    void anUnknownLogLevelListsTheValidOnes() {
+        assertThatThrownBy(() -> App.resolveLogLevels("chatty"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("error, warn, info, debug, trace");
+    }
+
+    @Test
+    void debugIsAnAliasForLogLevelDebug() throws Exception {
+        assertThat(App.requestedLogLevel(parse())).isEqualTo("info");
+        assertThat(App.requestedLogLevel(parse("--debug"))).isEqualTo("debug");
+        assertThat(App.requestedLogLevel(parse("--log-level", "warn"))).isEqualTo("warn");
+        // An explicit --log-level wins over --debug.
+        assertThat(App.requestedLogLevel(parse("--debug", "--log-level", "error")))
+                .isEqualTo("error");
+    }
+
     /* ------------------------------------------------------------------- runtime */
 
     @Test

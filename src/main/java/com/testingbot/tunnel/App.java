@@ -319,6 +319,243 @@ public class App {
         return options;
     }
 
+    /**
+     * Applies every option that configures the tunnel, and validates as it goes.
+     *
+     * <p>Extracted from main so the validation can be exercised without starting a tunnel.
+     * These are the messages a user meets when a flag is slightly wrong, and previously the
+     * only way to reach any of them was to run the process and read stderr.
+     */
+    /**
+     * Resolves the API credentials from the positional arguments, falling back to the dotfile.
+     *
+     * <p>Separated because the three failure messages here are the first thing a new user sees
+     * when they get it wrong, and they were previously unreachable without launching the process.
+     */
+    static void applyCredentials(App app, CommandLine commandLine) throws ParseException {
+        String clientKey = null;
+        String clientSecret = null;
+
+        if (commandLine.getArgs().length < 2) {
+            String[] userdata = app.getUserData();
+            if (userdata.length == 2) {
+                clientKey = userdata[0];
+                clientSecret = userdata[1];
+            }
+        }
+
+        if ((commandLine.getArgs().length == 0) && (clientKey == null)) {
+            throw new ParseException("Missing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit");
+        }
+
+        if ((commandLine.getArgs().length == 1) && (clientKey == null)) {
+            throw new ParseException("Missing required argument API_SECRET\nYou can get this from https://testingbot.com/members/user/edit");
+        }
+
+        if ((clientKey != null) && (clientSecret != null)) {
+            app.clientKey = clientKey;
+            app.clientSecret = clientSecret;
+        } else {
+            app.clientKey = commandLine.getArgs()[0].trim();
+            app.clientSecret = commandLine.getArgs()[1].trim();
+        }
+    }
+
+    /** The three logging levels a --log-level value maps to. */
+    record LogLevels(Level jul, ch.qos.logback.classic.Level logback, String jetty) {
+        boolean isDebugLike() {
+            return logback.toInt() <= ch.qos.logback.classic.Level.DEBUG.toInt();
+        }
+    }
+
+    /**
+     * Maps {@code --log-level} (or {@code --debug}) onto the three logging systems in play.
+     *
+     * <p>Pure, so the mapping and its rejection message can be tested without reconfiguring the
+     * JVM's loggers, which a test cannot undo.
+     */
+    static LogLevels resolveLogLevels(String levelArg) throws ParseException {
+        switch (levelArg.toLowerCase(java.util.Locale.ROOT)) {
+            case "error":
+                return new LogLevels(Level.SEVERE, ch.qos.logback.classic.Level.ERROR, "ERROR");
+            case "warn":
+            case "warning":
+                return new LogLevels(Level.WARNING, ch.qos.logback.classic.Level.WARN, "WARN");
+            case "info":
+                return new LogLevels(Level.INFO, ch.qos.logback.classic.Level.INFO, "INFO");
+            case "debug":
+                return new LogLevels(Level.ALL, ch.qos.logback.classic.Level.DEBUG, "DEBUG");
+            case "trace":
+                return new LogLevels(Level.ALL, ch.qos.logback.classic.Level.TRACE, "TRACE");
+            default:
+                throw new ParseException("Invalid --log-level '" + levelArg
+                        + "'. Use one of: error, warn, info, debug, trace.");
+        }
+    }
+
+    /** The effective level: --log-level, else --debug, else info. */
+    static String requestedLogLevel(CommandLine commandLine) {
+        String levelArg = commandLine.getOptionValue("log-level");
+        if (levelArg == null && commandLine.hasOption("debug")) {
+            levelArg = "debug";
+        }
+        return levelArg == null ? "info" : levelArg;
+    }
+
+    static void applyOptions(App app, CommandLine commandLine) throws Exception {
+        // Parsed here purely to validate: a typo should be a startup error with the usual
+        // CLI wording, not an IllegalArgumentException from inside proxy construction.
+        if (commandLine.hasOption("log-http")) {
+            String value = commandLine.getOptionValue("log-http").trim();
+            try {
+                com.testingbot.tunnel.proxy.HttpLogHandler.Mode.parse(value);
+            } catch (IllegalArgumentException unknown) {
+                throw new ParseException("Invalid --log-http value: " + value
+                        + ". Expected none, url, headers or errors.");
+            }
+            app.setLogHttp(value);
+        }
+        if (commandLine.hasOption("request-id-header")) {
+            String value = commandLine.getOptionValue("request-id-header").trim();
+            validateHeader(value, "");
+            app.setRequestIdHeader(value);
+        }
+
+        if (commandLine.hasOption("header")) {
+            String[] rules = commandLine.getOptionValues("header");
+            validateHeaderRules("--header", rules);
+            app.setHeaderRules(rules);
+        }
+        if (commandLine.hasOption("response-header")) {
+            String[] rules = commandLine.getOptionValues("response-header");
+            validateHeaderRules("--response-header", rules);
+            app.setResponseHeaderRules(rules);
+        }
+
+        if (commandLine.hasOption("localhost-policy")) {
+            String value = commandLine.getOptionValue("localhost-policy").trim();
+            if (!value.equalsIgnoreCase("allow") && !value.equalsIgnoreCase("deny")) {
+                throw new ParseException("Invalid --localhost-policy value: " + value
+                        + ". Expected allow or deny.");
+            }
+            app.setLocalhostPolicy(value);
+        }
+
+        if (commandLine.hasOption("connect-to")) {
+            app.setConnectTo(commandLine.getOptionValue("connect-to").split(","));
+        }
+
+        if (commandLine.hasOption("fast-fail-regexps")) {
+            String line = commandLine.getOptionValue("fast-fail-regexps");
+            app.fastFail = line.split(",");
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "Fast-fail mode set for {0}", line);
+        }
+
+        applyUpstreamProxyOptions(app, commandLine);
+
+        if (commandLine.hasOption("extra-headers")) {
+            String extraHeadersValue = commandLine.getOptionValue("extra-headers");
+            ObjectMapper mapper = new ObjectMapper();
+            JsonNode obj = mapper.readTree(extraHeadersValue);
+
+            Iterator<String> keyIterator = obj.fieldNames();
+            while (keyIterator.hasNext()) {
+                String key = keyIterator.next();
+                String value = obj.get(key).asText();
+                validateHeader(key, value);
+                app.addCustomHeader(key, value);
+            }
+        }
+
+        if (commandLine.hasOption("metrics-port")) {
+            String line = commandLine.getOptionValue("metrics-port");
+            app.setMetricsPort(Integer.parseInt(line));
+        }
+
+        String metricsAuthValue = commandLine.hasOption("metrics-auth")
+                ? commandLine.getOptionValue("metrics-auth")
+                : System.getenv("TESTINGBOT_METRICS_AUTH");
+        if (metricsAuthValue != null && !metricsAuthValue.isEmpty()) {
+            if (!metricsAuthValue.contains(":") || metricsAuthValue.startsWith(":")) {
+                throw new ParseException("--metrics-auth / TESTINGBOT_METRICS_AUTH must be in the form user:password");
+            }
+            app.setMetricsAuth(metricsAuthValue);
+        }
+
+        if (commandLine.hasOption("tunnel-identifier")) {
+            String identifierValue = commandLine.getOptionValue("tunnel-identifier");
+            app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
+        }
+
+        String[] authValues = null;
+        if (commandLine.hasOption("auth")) {
+            authValues = commandLine.getOptionValues("auth");
+        } else {
+            String envAuth = System.getenv("TESTINGBOT_AUTH");
+            if (envAuth != null && !envAuth.isEmpty()) {
+                authValues = envAuth.split(",");
+            }
+        }
+        if (authValues != null) {
+            for (String optionValue : authValues) {
+                if (optionValue.split(":").length < 4) {
+                    throw new ParseException("ERROR: Auth value must contain host:port:user:password value: " + optionValue);
+                }
+            }
+            app.setBasicAuth(authValues);
+        }
+
+        String proxyAuthValue = commandLine.hasOption("proxy-userpwd")
+                ? commandLine.getOptionValue("proxy-userpwd")
+                : System.getenv("TESTINGBOT_PROXY_USERPWD");
+        if (proxyAuthValue != null && !proxyAuthValue.isEmpty()) {
+            app.setProxyAuth(proxyAuthValue);
+        }
+
+        if (commandLine.hasOption("noproxy")) {
+            app.noProxy = true;
+        }
+
+        if (commandLine.hasOption("pac")) {
+            app.pac = commandLine.getOptionValue("pac");
+        }
+
+        if (commandLine.hasOption("readyfile")) {
+            app.readyFile = commandLine.getOptionValue("readyfile").trim();
+        }
+
+        if (commandLine.hasOption("nocache")) {
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable Caching. All requests will go through the tunnel.");
+            app.bypassSquid = true;
+        }
+
+        if (commandLine.hasOption("nobump")) {
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable SSL bumping. SSL certificates will not be rewritten.");
+            app.noBump = true;
+        }
+
+        if (commandLine.hasOption("shared")) {
+            Logger.getLogger(App.class.getName()).log(Level.INFO, "Tunnel will be shared among team members.");
+            app.shared = true;
+        }
+
+        if (commandLine.hasOption("hubport")) {
+            app.hubPort = Integer.parseInt(commandLine.getOptionValue("hubport"));
+            if ((app.hubPort != 80) && (app.hubPort != 4444)) {
+                throw new ParseException("The hub port must either be 80 or 4444");
+            }
+        }
+
+        if (commandLine.hasOption("dns")) {
+            // Note: this used to set sun.net.spi.nameservice.*, the JDK 8 pluggable
+            // nameservice SPI. That SPI was removed in JDK 9, so the option silently did
+            // nothing for years. Resolution now goes through CustomDnsResolver, which the
+            // proxy and CONNECT paths consult when dialling.
+            app.setDnsServer(commandLine.getOptionValue("dns"));
+        }
+
+    }
+
     public static void main(String... args) throws Exception {
         if (!checkJavaVersion()) {
             System.exit(1);
@@ -368,47 +605,10 @@ public class App {
 
             App app = new App();
 
-            String levelArg = commandLine.getOptionValue("log-level");
-            if (levelArg == null && commandLine.hasOption("debug")) {
-                levelArg = "debug";
-            }
-            if (levelArg == null) {
-                levelArg = "info";
-            }
-
-            Level julLevel;
-            ch.qos.logback.classic.Level logbackLevel;
-            String jettyLevel;
-            switch (levelArg.toLowerCase(java.util.Locale.ROOT)) {
-                case "error":
-                    julLevel = Level.SEVERE;
-                    logbackLevel = ch.qos.logback.classic.Level.ERROR;
-                    jettyLevel = "ERROR";
-                    break;
-                case "warn":
-                case "warning":
-                    julLevel = Level.WARNING;
-                    logbackLevel = ch.qos.logback.classic.Level.WARN;
-                    jettyLevel = "WARN";
-                    break;
-                case "info":
-                    julLevel = Level.INFO;
-                    logbackLevel = ch.qos.logback.classic.Level.INFO;
-                    jettyLevel = "INFO";
-                    break;
-                case "debug":
-                    julLevel = Level.ALL;
-                    logbackLevel = ch.qos.logback.classic.Level.DEBUG;
-                    jettyLevel = "DEBUG";
-                    break;
-                case "trace":
-                    julLevel = Level.ALL;
-                    logbackLevel = ch.qos.logback.classic.Level.TRACE;
-                    jettyLevel = "TRACE";
-                    break;
-                default:
-                    throw new ParseException("Invalid --log-level '" + levelArg + "'. Use one of: error, warn, info, debug, trace.");
-            }
+            LogLevels levels = resolveLogLevels(requestedLogLevel(commandLine));
+            Level julLevel = levels.jul();
+            ch.qos.logback.classic.Level logbackLevel = levels.logback();
+            String jettyLevel = levels.jetty();
 
             logger.setLevel(julLevel);
             System.setProperty("org.eclipse.jetty.LEVEL", jettyLevel);
@@ -421,7 +621,7 @@ public class App {
             loggerContext.getLogger("org.apache.hc.client5.http.wire").setLevel(ch.qos.logback.classic.Level.ERROR);
             loggerContext.getLogger("org.apache.hc.client5.http.headers").setLevel(ch.qos.logback.classic.Level.ERROR);
 
-            boolean debugLike = (logbackLevel.toInt() <= ch.qos.logback.classic.Level.DEBUG.toInt());
+            boolean debugLike = levels.isDebugLike();
             if (debugLike) {
                 loggerContext.getLogger("org.eclipse.jetty").setLevel(logbackLevel);
                 loggerContext.getLogger("com.testingbot.tunnel.proxy").setLevel(logbackLevel);
@@ -459,9 +659,6 @@ public class App {
                 }
             }
 
-            String clientKey = null;
-            String clientSecret = null;
-
             if (commandLine.hasOption("se-port")) {
                 app.seleniumPort = Integer.parseInt(commandLine.getOptionValue("se-port"));
             }
@@ -483,180 +680,9 @@ public class App {
             System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
             System.out.println("----------------------------------------------------------------");
 
-            if (commandLine.getArgs().length < 2) {
-                String[] userdata = app.getUserData();
-                if (userdata.length == 2) {
-                    clientKey = userdata[0];
-                    clientSecret = userdata[1];
-                }
-            }
+            applyCredentials(app, commandLine);
 
-            if ((commandLine.getArgs().length == 0) && (clientKey == null)) {
-                throw new ParseException("Missing required arguments API_KEY API_SECRET\nYou can get these two values from https://testingbot.com/members/user/edit");
-            }
-
-            if ((commandLine.getArgs().length == 1) && (clientKey == null)) {
-                throw new ParseException("Missing required argument API_SECRET\nYou can get this from https://testingbot.com/members/user/edit");
-            }
-
-            if ((clientKey != null) && (clientSecret != null)) {
-                app.clientKey = clientKey;
-                app.clientSecret = clientSecret;
-            } else {
-                app.clientKey = commandLine.getArgs()[0].trim();
-                app.clientSecret = commandLine.getArgs()[1].trim();
-            }
-
-            // Parsed here purely to validate: a typo should be a startup error with the usual
-            // CLI wording, not an IllegalArgumentException from inside proxy construction.
-            if (commandLine.hasOption("log-http")) {
-                String value = commandLine.getOptionValue("log-http").trim();
-                try {
-                    com.testingbot.tunnel.proxy.HttpLogHandler.Mode.parse(value);
-                } catch (IllegalArgumentException unknown) {
-                    throw new ParseException("Invalid --log-http value: " + value
-                            + ". Expected none, url, headers or errors.");
-                }
-                app.setLogHttp(value);
-            }
-            if (commandLine.hasOption("request-id-header")) {
-                String value = commandLine.getOptionValue("request-id-header").trim();
-                validateHeader(value, "");
-                app.setRequestIdHeader(value);
-            }
-
-            if (commandLine.hasOption("header")) {
-                String[] rules = commandLine.getOptionValues("header");
-                validateHeaderRules("--header", rules);
-                app.setHeaderRules(rules);
-            }
-            if (commandLine.hasOption("response-header")) {
-                String[] rules = commandLine.getOptionValues("response-header");
-                validateHeaderRules("--response-header", rules);
-                app.setResponseHeaderRules(rules);
-            }
-
-            if (commandLine.hasOption("localhost-policy")) {
-                String value = commandLine.getOptionValue("localhost-policy").trim();
-                if (!value.equalsIgnoreCase("allow") && !value.equalsIgnoreCase("deny")) {
-                    throw new ParseException("Invalid --localhost-policy value: " + value
-                            + ". Expected allow or deny.");
-                }
-                app.setLocalhostPolicy(value);
-            }
-
-            if (commandLine.hasOption("connect-to")) {
-                app.setConnectTo(commandLine.getOptionValue("connect-to").split(","));
-            }
-
-            if (commandLine.hasOption("fast-fail-regexps")) {
-                String line = commandLine.getOptionValue("fast-fail-regexps");
-                app.fastFail = line.split(",");
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Fast-fail mode set for {0}", line);
-            }
-
-            applyUpstreamProxyOptions(app, commandLine);
-
-            if (commandLine.hasOption("extra-headers")) {
-                String extraHeadersValue = commandLine.getOptionValue("extra-headers");
-                ObjectMapper mapper = new ObjectMapper();
-                JsonNode obj = mapper.readTree(extraHeadersValue);
-
-                Iterator<String> keyIterator = obj.fieldNames();
-                while (keyIterator.hasNext()) {
-                    String key = keyIterator.next();
-                    String value = obj.get(key).asText();
-                    validateHeader(key, value);
-                    app.addCustomHeader(key, value);
-                }
-            }
-
-            if (commandLine.hasOption("metrics-port")) {
-                String line = commandLine.getOptionValue("metrics-port");
-                app.setMetricsPort(Integer.parseInt(line));
-            }
-
-            String metricsAuthValue = commandLine.hasOption("metrics-auth")
-                    ? commandLine.getOptionValue("metrics-auth")
-                    : System.getenv("TESTINGBOT_METRICS_AUTH");
-            if (metricsAuthValue != null && !metricsAuthValue.isEmpty()) {
-                if (!metricsAuthValue.contains(":") || metricsAuthValue.startsWith(":")) {
-                    throw new ParseException("--metrics-auth / TESTINGBOT_METRICS_AUTH must be in the form user:password");
-                }
-                app.setMetricsAuth(metricsAuthValue);
-            }
-
-            if (commandLine.hasOption("tunnel-identifier")) {
-                String identifierValue = commandLine.getOptionValue("tunnel-identifier");
-                app.setTunnelIdentifier(identifierValue.substring(0, Math.min(identifierValue.length(), 50)));
-            }
-
-            String[] authValues = null;
-            if (commandLine.hasOption("auth")) {
-                authValues = commandLine.getOptionValues("auth");
-            } else {
-                String envAuth = System.getenv("TESTINGBOT_AUTH");
-                if (envAuth != null && !envAuth.isEmpty()) {
-                    authValues = envAuth.split(",");
-                }
-            }
-            if (authValues != null) {
-                for (String optionValue : authValues) {
-                    if (optionValue.split(":").length < 4) {
-                        throw new ParseException("ERROR: Auth value must contain host:port:user:password value: " + optionValue);
-                    }
-                }
-                app.setBasicAuth(authValues);
-            }
-
-            String proxyAuthValue = commandLine.hasOption("proxy-userpwd")
-                    ? commandLine.getOptionValue("proxy-userpwd")
-                    : System.getenv("TESTINGBOT_PROXY_USERPWD");
-            if (proxyAuthValue != null && !proxyAuthValue.isEmpty()) {
-                app.setProxyAuth(proxyAuthValue);
-            }
-
-            if (commandLine.hasOption("noproxy")) {
-                app.noProxy = true;
-            }
-
-            if (commandLine.hasOption("pac")) {
-                app.pac = commandLine.getOptionValue("pac");
-            }
-
-            if (commandLine.hasOption("readyfile")) {
-                app.readyFile = commandLine.getOptionValue("readyfile").trim();
-            }
-
-            if (commandLine.hasOption("nocache")) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable Caching. All requests will go through the tunnel.");
-                app.bypassSquid = true;
-            }
-
-            if (commandLine.hasOption("nobump")) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Disable SSL bumping. SSL certificates will not be rewritten.");
-                app.noBump = true;
-            }
-
-            if (commandLine.hasOption("shared")) {
-                Logger.getLogger(App.class.getName()).log(Level.INFO, "Tunnel will be shared among team members.");
-                app.shared = true;
-            }
-
-            if (commandLine.hasOption("hubport")) {
-                app.hubPort = Integer.parseInt(commandLine.getOptionValue("hubport"));
-                if ((app.hubPort != 80) && (app.hubPort != 4444)) {
-                    throw new ParseException("The hub port must either be 80 or 4444");
-                }
-            }
-
-            if (commandLine.hasOption("dns")) {
-                // Note: this used to set sun.net.spi.nameservice.*, the JDK 8 pluggable
-                // nameservice SPI. That SPI was removed in JDK 9, so the option silently did
-                // nothing for years. Resolution now goes through CustomDnsResolver, which the
-                // proxy and CONNECT paths consult when dialling.
-                app.setDnsServer(commandLine.getOptionValue("dns"));
-            }
+            applyOptions(app, commandLine);
 
             if (commandLine.hasOption("web")) {
                 new LocalWebServer(commandLine.getOptionValue("web"));
@@ -680,7 +706,8 @@ public class App {
     private HttpForwarder httpForwarder;
     private Thread cleanupThread;
 
-    private String[] getUserData() {
+    /** Package-private so a test can stand in for the ~/.testingbot dotfile. */
+    String[] getUserData() {
         if (System.getenv("TESTINGBOT_KEY") != null && System.getenv("TESTINGBOT_SECRET") != null) {
           return new String[] { System.getenv("TESTINGBOT_KEY"), System.getenv("TESTINGBOT_SECRET") };
         }
