@@ -816,6 +816,15 @@ public class App {
             httpForwarder.stop();
         }
 
+        // The local proxy has to go too, and after the tunnel that feeds it. Leaving it running
+        // kept its port bound, so the reconnect monitor's last resort -- stop() then boot() after
+        // the retry limit -- could not rebind and the tunnel died instead of recovering. It also
+        // leaked a Jetty server per App for anything embedding this.
+        if (httpProxy != null) {
+            httpProxy.stop();
+            httpProxy = null;
+        }
+
         if (poller != null) {
             poller.cancel();
         }

@@ -179,6 +179,71 @@ class PacPolicyTest {
     }
 
     @Test
+    void aTimeDependentDecisionIsNotFrozenForTheLifeOfTheTunnel() {
+        // PAC files route by time of day, and tunnels run for hours. Caching without expiry
+        // meant a session started before 09:00 kept the out-of-hours route all day.
+        long[] now = {0L};
+        boolean[] businessHours = {false};
+        String script = """
+                function FindProxyForURL(url, host) {
+                    if (timeRange(9, 17)) return "PROXY office:8080";
+                    return "DIRECT";
+                }
+                """;
+        PacInterpreter interpreter = new PacInterpreter(script, new PacInterpreter.PacEnvironment() {
+            @Override
+            public String resolve(String host) {
+                return null;
+            }
+
+            @Override
+            public String myIpAddress() {
+                return "10.0.0.1";
+            }
+
+            @Override
+            public boolean weekdayRange(java.util.List<String> args) {
+                return false;
+            }
+
+            @Override
+            public boolean dateRange(java.util.List<String> args) {
+                return false;
+            }
+
+            @Override
+            public boolean timeRange(java.util.List<String> args) {
+                return businessHours[0];
+            }
+        });
+        PacPolicy policy = new PacPolicy(interpreter, "inline", () -> now[0]);
+
+        assertThat(policy.resolve("http://a.com/", "a.com").isDirect()).isTrue();
+
+        // Business hours start; within the TTL the old answer still stands.
+        businessHours[0] = true;
+        now[0] += PacPolicy.CACHE_TTL_MS / 2;
+        assertThat(policy.resolve("http://a.com/", "a.com").isDirect()).isTrue();
+
+        // Past the TTL it is re-evaluated.
+        now[0] += PacPolicy.CACHE_TTL_MS;
+        assertThat(policy.resolve("http://a.com/", "a.com").first().getHost()).isEqualTo("office");
+    }
+
+    @Test
+    void withinTheTtlARepeatedHostIsAnsweredFromTheCache() {
+        // The TTL must not turn every request into a fresh evaluation.
+        long[] now = {0L};
+        PacPolicy policy = new PacPolicy(new PacInterpreter(SIMPLE), "inline", () -> now[0]);
+
+        assertThat(policy.resolve("http://a.corp/", "a.corp").isDirect()).isTrue();
+        now[0] += PacPolicy.CACHE_TTL_MS / 2;
+        assertThat(policy.resolve("http://a.corp/", "a.corp").isDirect()).isTrue();
+
+        assertThat(policy.cacheSize()).isEqualTo(1);
+    }
+
+    @Test
     void aNullHostIsDirectAndNotAnError() {
         assertThat(PacPolicy.of(SIMPLE, "inline").resolve("http://x/", null).isDirect()).isTrue();
     }

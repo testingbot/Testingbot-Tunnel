@@ -30,15 +30,39 @@ public final class PacPolicy {
     /** Enough for any realistic test run; beyond this the cache is cleared rather than grown. */
     static final int MAX_CACHE_ENTRIES = 4096;
 
+    /**
+     * How long a decision is reused.
+     *
+     * <p>PAC files can route by time of day -- {@code timeRange(9, 17)} and
+     * {@code weekdayRange("MON", "FRI")} are in the standard function set -- so a decision cached
+     * without expiry freezes the first answer for the life of the tunnel. A session started at
+     * 08:50 would keep using the out-of-hours route all day, which is precisely the kind of fault
+     * nobody traces back to a cache.
+     *
+     * <p>A minute is short enough that a time-based rule takes effect promptly and long enough
+     * that a burst of requests to one host costs a single evaluation.
+     */
+    static final long CACHE_TTL_MS = 60_000;
+
     private static final int FETCH_TIMEOUT_MS = 15_000;
+
+    /** A decision and when it was made. */
+    private record CachedResult(PacResult result, long decidedAtMs) {
+    }
 
     private final PacInterpreter interpreter;
     private final String source;
-    private final Map<String, PacResult> cache = new ConcurrentHashMap<>();
+    private final Map<String, CachedResult> cache = new ConcurrentHashMap<>();
+    private final java.util.function.LongSupplier clock;
 
     PacPolicy(PacInterpreter interpreter, String source) {
+        this(interpreter, source, System::currentTimeMillis);
+    }
+
+    PacPolicy(PacInterpreter interpreter, String source, java.util.function.LongSupplier clock) {
         this.interpreter = interpreter;
         this.source = source;
+        this.clock = clock;
     }
 
     /**
@@ -101,9 +125,10 @@ public final class PacPolicy {
         if (host == null) {
             return PacResult.direct();
         }
-        PacResult cached = cache.get(host);
-        if (cached != null) {
-            return cached;
+        long now = clock.getAsLong();
+        CachedResult cached = cache.get(host);
+        if (cached != null && now - cached.decidedAtMs() < CACHE_TTL_MS) {
+            return cached.result();
         }
         PacResult result;
         try {
@@ -116,7 +141,7 @@ public final class PacPolicy {
         if (cache.size() >= MAX_CACHE_ENTRIES) {
             cache.clear();
         }
-        cache.put(host, result);
+        cache.put(host, new CachedResult(result, now));
         return result;
     }
 

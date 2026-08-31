@@ -53,6 +53,8 @@ public final class HttpProxy {
     private final Server httpProxy;
     private final int randomNumber = (int )(Math.random() * 50 + 1);
     private final Thread shutDownHook;
+    private boolean shutdownHookRegistered;
+
     /** This connector's own statistics; Jetty resets them whenever it restarts. */
     private ConnectionStatistics proxyConnectionStats;
 
@@ -198,11 +200,10 @@ public final class HttpProxy {
             httpProxy.setHandler(gracefulHandler);
         }
 
-        start();
-
+        // Built before start(), which now registers it: the field must exist by then.
         shutDownHook = new Thread(new ShutDownHook(httpProxy));
 
-        Runtime.getRuntime().addShutdownHook(shutDownHook);
+        start();
     }
 
     /**
@@ -217,7 +218,7 @@ public final class HttpProxy {
     }
 
     public void stop() {
-        Runtime.getRuntime().removeShutdownHook(shutDownHook);
+        removeShutdownHook();
 
         try {
             httpProxy.stop();
@@ -240,11 +241,38 @@ public final class HttpProxy {
     public void start() {
         try {
             httpProxy.start();
+            // Re-armed on every start. stop() removes it, so without this the proxy lost its
+            // shutdown hook at the first SSH reconnect and was never drained on JVM exit again.
+            addShutdownHook();
         } catch (Exception ex) {
             throw new HttpProxyStartException(
                 "Could not set up local http proxy. Please make sure this program can open port "
                         + app.getJettyPort() + " on this computer.", ex);
         }
+    }
+
+    private void addShutdownHook() {
+        if (shutdownHookRegistered) {
+            return;
+        }
+        try {
+            Runtime.getRuntime().addShutdownHook(shutDownHook);
+            shutdownHookRegistered = true;
+        } catch (IllegalStateException alreadyShuttingDown) {
+            // The JVM is on its way down; there is nothing left to register for.
+        }
+    }
+
+    private void removeShutdownHook() {
+        if (!shutdownHookRegistered) {
+            return;
+        }
+        try {
+            Runtime.getRuntime().removeShutdownHook(shutDownHook);
+        } catch (IllegalStateException alreadyShuttingDown) {
+            // Shutdown is already running and will invoke the hook itself.
+        }
+        shutdownHookRegistered = false;
     }
 
     public static final class HttpProxyStartException extends RuntimeException {
