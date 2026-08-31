@@ -316,6 +316,21 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         String method = methodLabel(request.getMethod());
 
         String targetHost = Request.getServerName(request);
+
+        if (isLoop(request, targetHost)) {
+            // One such request otherwise re-enters this handler until the accumulated
+            // Via/X-Forwarded-* headers overflow the buffer -- measured at 35 invocations and 34
+            // sockets left open, from a single request. A port scanner or a health check aimed
+            // at the proxy port is enough to trigger it.
+            LOG.log(Level.WARNING, "Refusing request that targets the proxy itself: {0}",
+                    request.getHttpURI());
+            TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "508").inc();
+            TunnelMetrics.ERRORS_TOTAL.labels("loop_detected").inc();
+            Statistics.addRequest();
+            ProxyErrors.write(request, response, callback, ProxyErrors.Reason.LOOP_DETECTED);
+            return true;
+        }
+
         if (localhostPolicy.blocks(targetHost)) {
             LOG.log(Level.INFO, "Localhost policy: rejecting {0}", targetHost);
             TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
@@ -442,6 +457,31 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             proxyRequest.path(absoluteForm(newHttpURI.getScheme(), newHttpURI.getHost(), port, pathQuery));
         }
         return proxyRequest;
+    }
+
+    /**
+     * True when forwarding this request would send it straight back to this proxy.
+     *
+     * <p>Two independent checks. The destination matching the address the request arrived on
+     * catches it on the first hop; a Via header already naming us catches anything that reaches
+     * us by another route, which is what RFC 9110 defines Via for.
+     */
+    private boolean isLoop(Request request, String targetHost) {
+        for (String via : request.getHeaders().getValuesList(HttpHeader.VIA)) {
+            if (via != null && via.contains(getViaHost())) {
+                return true;
+            }
+        }
+
+        int targetPort = request.getHttpURI().getPort();
+        if (targetPort <= 0) {
+            targetPort = HttpScheme.HTTPS.is(request.getHttpURI().getScheme()) ? 443 : 80;
+        }
+        if (targetPort != Request.getLocalPort(request)) {
+            return false;
+        }
+        // Same port as ours: only a loop if it also names this machine.
+        return LocalhostPolicy.DENY.blocks(targetHost);
     }
 
     /** True when traffic leaves through an HTTP forward proxy. SOCKS5 is transparent at TCP level. */

@@ -58,6 +58,8 @@ public final class ProxyErrors {
         DENIED_LOCALHOST("denied-localhost", HttpStatus.FORBIDDEN_403,
                 "Blocked by --localhost-policy deny: the tunnel may not reach this machine's "
                 + "loopback interface."),
+        LOOP_DETECTED("loop-detected", HttpStatus.LOOP_DETECTED_508,
+                "The request targets this proxy itself, which would forward it back to itself."),
         TUNNEL_ERROR("tunnel-error", HttpStatus.BAD_GATEWAY_502,
                 "The tunnel could not complete the request.");
 
