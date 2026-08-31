@@ -145,7 +145,8 @@ public final class HttpProxy {
 
         // One resolver shared by all three dial paths, so --dns applies to plain HTTP,
         // HTTPS CONNECT and the WebSocket relay alike. Null when --dns was not given.
-        CustomDnsResolver dnsResolver = CustomDnsResolver.create(app.getDnsServer());
+        CustomDnsResolver dnsResolver = CustomDnsResolver.create(
+                app.getDnsServer(), app.getDnsTimeout(), app.isDnsRoundRobin());
         // Likewise shared, so a --connect-to rule means the same thing on every path.
         ConnectToMap connectTo = ConnectToMap.parse(app.getConnectTo());
         LocalhostPolicy localhostPolicy = LocalhostPolicy.parse(app.getLocalhostPolicy());

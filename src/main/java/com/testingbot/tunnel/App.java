@@ -68,6 +68,9 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private String dnsServer = null;
+    private java.time.Duration dnsTimeout =
+            com.testingbot.tunnel.proxy.CustomDnsResolver.DEFAULT_QUERY_TIMEOUT;
+    private boolean dnsRoundRobin = false;
     static final int DEFAULT_METRICS_PORT = 8003;
     private int metricsPort = DEFAULT_METRICS_PORT;
     private String metricsAuth;
@@ -295,11 +298,22 @@ public class App {
         options.addOption(extraHeaders);
 
         Option dns = new Option("dns", "dns", true,
-            "Resolve hostnames with a specific DNS server instead of the system resolver."
-            + " Accepts host or host:port, e.g. 8.8.8.8 or 10.0.0.53:5353."
-            + " Falls back to the system resolver if the server cannot answer.");
-        dns.setArgName("server");
+            "Resolve hostnames with specific DNS servers instead of the system resolver."
+            + " Accepts host or host:port, comma separated, e.g. 8.8.8.8 or"
+            + " 10.0.0.53:5353,10.0.0.54. The first is primary and the rest are tried in order"
+            + " when it does not answer. Falls back to the system resolver if none can.");
+        dns.setArgName("server[,server]");
         options.addOption(dns);
+
+        Option dnsTimeout = new Option(null, "dns-timeout", true,
+            "How long to wait for each DNS server, in seconds (default 5). Only applies to"
+            + " servers given with --dns.");
+        dnsTimeout.setArgName("seconds");
+        options.addOption(dnsTimeout);
+
+        options.addOption(null, "dns-round-robin", false,
+            "Spread queries across the --dns servers instead of treating the first as primary."
+            + " For a pool whose members are equal, so one being slow does not slow everything.");
 
         Option localweb = new Option("w", "web", true, "Point to a directory for testing. Creates a local webserver.");
         localweb.setArgName("directory");
@@ -581,6 +595,25 @@ public class App {
             // nothing for years. Resolution now goes through CustomDnsResolver, which the
             // proxy and CONNECT paths consult when dialling.
             app.setDnsServer(commandLine.getOptionValue("dns"));
+        }
+
+        if (commandLine.hasOption("dns-timeout")) {
+            String value = commandLine.getOptionValue("dns-timeout").trim();
+            try {
+                long seconds = Long.parseLong(value);
+                if (seconds <= 0) {
+                    throw new NumberFormatException(value);
+                }
+                app.setDnsTimeout(java.time.Duration.ofSeconds(seconds));
+            } catch (NumberFormatException invalid) {
+                throw new ParseException("Invalid --dns-timeout '" + value
+                        + "': give a whole number of seconds greater than zero.");
+            }
+        }
+        app.setDnsRoundRobin(commandLine.hasOption("dns-round-robin"));
+        if (app.isDnsRoundRobin() && app.getDnsServer() == null) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "--dns-round-robin has no effect without --dns.");
         }
 
     }
@@ -1388,6 +1421,25 @@ public class App {
 
     public void setDnsServer(String dnsServer) {
         this.dnsServer = dnsServer;
+    }
+
+    /** Per-query timeout for the {@code --dns} servers. */
+    public java.time.Duration getDnsTimeout() {
+        return dnsTimeout;
+    }
+
+    public void setDnsTimeout(java.time.Duration dnsTimeout) {
+        this.dnsTimeout = dnsTimeout == null
+                ? com.testingbot.tunnel.proxy.CustomDnsResolver.DEFAULT_QUERY_TIMEOUT : dnsTimeout;
+    }
+
+    /** True when queries should be spread across the {@code --dns} servers. */
+    public boolean isDnsRoundRobin() {
+        return dnsRoundRobin;
+    }
+
+    public void setDnsRoundRobin(boolean dnsRoundRobin) {
+        this.dnsRoundRobin = dnsRoundRobin;
     }
 
     public String getPac() {

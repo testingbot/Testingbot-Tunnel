@@ -924,12 +924,22 @@ scenario_websocket() {
 # properties that had no effect on any supported JDK -- and only a name that cannot resolve any
 # other way can tell the difference. Hence .invalid, which is reserved never to resolve.
 scenario_dns() {
-  local dport; dport="$(free_port)"
+  local dport dport2; dport="$(free_port)"; dport2="$(free_port)"
   python3 "$HERE/dns_server.py" "$dport" "dns-e2e.invalid=127.0.0.1" \
     > "$WORK/dns.log" 2>&1 &
   local dns=$!
+  # A second server that knows a different name, so which one answered is visible in the result
+  # rather than only in the logs.
+  python3 "$HERE/dns_server.py" "$dport2" "dns-standby.invalid=127.0.0.1" \
+    > "$WORK/dns2.log" 2>&1 &
+  local dns2=$!
   sleep 1
-  start_tunnel --dns "127.0.0.1:$dport" || { kill $dns 2>/dev/null; return 1; }
+  # A dead port first: --dns takes a list, and the tunnel has to fall through to a live server
+  # rather than treating the first entry as the only one.
+  local deadport; deadport="$(free_port)"
+  start_tunnel --dns "127.0.0.1:$deadport,127.0.0.1:$dport,127.0.0.1:$dport2" \
+      --dns-timeout 2 \
+    || { kill $dns $dns2 2>/dev/null; return 1; }
 
   # Plain HTTP: reaching the origin at all proves the custom resolver answered, because
   # nothing else on this machine can turn this name into an address.
@@ -944,6 +954,14 @@ scenario_dns() {
   assert_neq "our dns server was the one asked" \
     "$(grep -c 'query dns-e2e.invalid' "$WORK/dns.log" || true)" "0"
 
+  # The name only the second live server knows: reaching it proves the list is walked past
+  # the first server that cannot answer, not just past one that is unreachable.
+  assert_contains "dns falls through to a later server in the list" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://dns-standby.invalid:$ORIGIN_PORT/")" \
+    "$MARKER"
+  assert_neq "the standby server was actually queried" \
+    "$(grep -c 'query dns-standby.invalid' "$WORK/dns2.log" || true)" "0"
+
   # A name it does not serve must still work: --dns falls back rather than becoming a
   # single point of failure for everything the tests visit.
   check_proxy_http dns
@@ -953,7 +971,7 @@ scenario_dns() {
   check_browser dns
 
   stop_tunnel
-  kill $dns 2>/dev/null
+  kill $dns $dns2 2>/dev/null
 }
 
 # The reconnect path: everything that runs when the SSH connection drops and comes back.

@@ -98,6 +98,11 @@ java -jar testingbot-tunnel.jar --doctor
   several environments where one presents a certificate Squid cannot re-sign. Ignored when
   `--nobump` is given, which already covers everything
 - `--nocache`: Bypass TestingBot caching layer
+- `--dns`: Resolve through specific DNS servers, comma separated. The first is primary and the
+  rest are tried in order when it does not answer; an unusable entry is dropped rather than
+  costing the ones that work. Falls back to the platform resolver when none can answer
+- `--dns-timeout`: Seconds to wait per DNS server (default 5)
+- `--dns-round-robin`: Spread queries across the `--dns` servers instead of preferring the first
 - `--connect-to`: Dial `HOST2:PORT2` for requests naming `HOST1:PORT1`, leaving the URL, Host
   header and TLS SNI untouched (`HOST1:PORT1:HOST2:PORT2`, comma separated)
 - `--localhost-policy`: `allow` (default) or `deny` for tunnel traffic reaching this machine's
@@ -219,7 +224,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 695 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 704 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

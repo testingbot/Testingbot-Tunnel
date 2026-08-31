@@ -83,7 +83,7 @@ may hold tunnel slots on the same account.
 | `tunnel_identifier` | 1 | `--tunnel-identifier` + browser using that identifier |
 | `pac` | 0 | `--pac-local` routing decisions via `--pac-test`, and refusal of unsupported syntax |
 | `localhost_deny` | 1 | `--localhost-policy deny` over CONNECT and plain HTTP |
-| `dns` | 1 | `--dns` against a local server, using a `.invalid` name nothing else can resolve |
+| `dns` | 1 | `--dns` server list against local servers, using `.invalid` names nothing else can resolve, including fall-through past a dead entry |
 | `websocket` | 1 | `ws://` through both handler paths and a real browser; `wss://` through the CONNECT relay |
 | `protocols` | 1 | which HTTP versions survive the tunnel, and streamed-vs-buffered responses |
 | `sslbump` | 1 | what `--nobump` actually does, measured by which certificate a browser sees |

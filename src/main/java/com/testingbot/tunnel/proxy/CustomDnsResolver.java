@@ -25,31 +25,74 @@ import org.xbill.DNS.Type;
  * while this project targets 17. Setting the old {@code sun.net.spi.nameservice.*}
  * properties, as this option used to, has no effect on any JDK we support.
  *
- * <p>Falls back to the platform resolver when the configured server cannot answer, so a
+ * <p>Falls back to the platform resolver when no configured server can answer, so a
  * misconfigured {@code --dns} degrades to normal behaviour instead of taking the tunnel down.
+ *
+ * <p>Several servers may be given. By default the first is primary and the rest are tried in
+ * order when it does not answer, which is what an internal resolver with a standby looks like.
+ * {@code --dns-round-robin} spreads queries across them instead, for a pool where every member
+ * is equal and one of them being slow should not slow everything.
  */
 public final class CustomDnsResolver {
 
     private static final Logger LOG = Logger.getLogger(CustomDnsResolver.class.getName());
-    private static final Duration QUERY_TIMEOUT = Duration.ofSeconds(5);
+    public static final Duration DEFAULT_QUERY_TIMEOUT = Duration.ofSeconds(5);
 
     private final String server;
-    private final Resolver resolver;
+    private final List<Resolver> resolvers;
+    private final boolean roundRobin;
+    /** Only read and incremented under round robin, where exact fairness does not matter. */
+    private final java.util.concurrent.atomic.AtomicInteger next =
+            new java.util.concurrent.atomic.AtomicInteger();
 
-    private CustomDnsResolver(String server, Resolver resolver) {
+    private CustomDnsResolver(String server, List<Resolver> resolvers, boolean roundRobin) {
         this.server = server;
-        this.resolver = resolver;
+        this.resolvers = List.copyOf(resolvers);
+        this.roundRobin = roundRobin;
     }
 
     /**
-     * @param server DNS server as {@code host} or {@code host:port}
-     * @return a resolver, or null if {@code server} is blank or unusable
+     * @param server one or more DNS servers as {@code host} or {@code host:port}, comma separated
+     * @return a resolver, or null if {@code server} is blank or none of the entries are usable
      */
     public static CustomDnsResolver create(String server) {
+        return create(server, DEFAULT_QUERY_TIMEOUT, false);
+    }
+
+    /**
+     * @param server     comma-separated DNS servers, each {@code host} or {@code host:port}
+     * @param timeout    per-query timeout for these servers
+     * @param roundRobin spread queries across them rather than treating the first as primary
+     * @return a resolver, or null if nothing usable was configured -- the caller then keeps the
+     *         platform resolver, which is better than failing every lookup
+     */
+    public static CustomDnsResolver create(String server, Duration timeout, boolean roundRobin) {
         if (server == null || server.trim().isEmpty()) {
             return null;
         }
-        String value = server.trim();
+        List<Resolver> resolvers = new ArrayList<>();
+        List<String> usable = new ArrayList<>();
+        for (String entry : server.split(",")) {
+            String trimmed = entry.trim();
+            if (trimmed.isEmpty()) {
+                continue;
+            }
+            Resolver resolver = build(trimmed, timeout);
+            if (resolver != null) {
+                resolvers.add(resolver);
+                usable.add(trimmed);
+            }
+        }
+        if (resolvers.isEmpty()) {
+            return null;
+        }
+        LOG.log(Level.INFO, "Using custom DNS server(s) {0}{1}",
+                new Object[]{String.join(", ", usable), roundRobin ? " (round robin)" : ""});
+        return new CustomDnsResolver(String.join(",", usable), resolvers, roundRobin);
+    }
+
+    /** One server, or null when it cannot be used; the others still can be. */
+    private static Resolver build(String value, Duration timeout) {
         try {
             // SimpleResolver(String) takes a bare hostname, so host:port has to be split here.
             // An IPv6 literal must be bracketed to be distinguishable from its own colons.
@@ -73,9 +116,8 @@ public final class CustomDnsResolver {
             if (port > 0) {
                 simple.setPort(port);
             }
-            simple.setTimeout(QUERY_TIMEOUT);
-            LOG.log(Level.INFO, "Using custom DNS server {0}", value);
-            return new CustomDnsResolver(value, simple);
+            simple.setTimeout(timeout);
+            return simple;
         } catch (NumberFormatException ex) {
             LOG.log(Level.WARNING,
                 "Invalid port in DNS server ''{0}''; falling back to the system resolver", value);
@@ -88,9 +130,33 @@ public final class CustomDnsResolver {
         }
     }
 
-    /** @return the configured server, for diagnostics */
+    /** @return the configured servers, comma separated, for diagnostics */
     public String getServer() {
         return server;
+    }
+
+    /** How many servers are actually in use; the rest were unusable and dropped. */
+    public int serverCount() {
+        return resolvers.size();
+    }
+
+    /**
+     * The servers to try for one lookup, in the order they should be tried.
+     *
+     * <p>Round robin rotates the starting point rather than picking one and stopping: spreading
+     * load is the goal, but a query still has to fall through to the others when the one it
+     * started on does not answer.
+     */
+    private List<Resolver> attemptOrder() {
+        if (!roundRobin || resolvers.size() == 1) {
+            return resolvers;
+        }
+        int start = Math.floorMod(next.getAndIncrement(), resolvers.size());
+        List<Resolver> ordered = new ArrayList<>(resolvers.size());
+        for (int i = 0; i < resolvers.size(); i++) {
+            ordered.add(resolvers.get((start + i) % resolvers.size()));
+        }
+        return ordered;
     }
 
     /**
@@ -108,9 +174,16 @@ public final class CustomDnsResolver {
         }
 
         List<InetAddress> addresses = new ArrayList<>();
-        lookup(host, Type.A, addresses);
-        if (addresses.isEmpty()) {
-            lookup(host, Type.AAAA, addresses);
+        // Each server is asked for A and then AAAA before moving on, so a name that only has
+        // an AAAA record is not treated as unanswered and chased across every server first.
+        for (Resolver resolver : attemptOrder()) {
+            lookup(resolver, host, Type.A, addresses);
+            if (addresses.isEmpty()) {
+                lookup(resolver, host, Type.AAAA, addresses);
+            }
+            if (!addresses.isEmpty()) {
+                break;
+            }
         }
 
         if (addresses.isEmpty()) {
@@ -121,7 +194,7 @@ public final class CustomDnsResolver {
         return addresses.toArray(new InetAddress[0]);
     }
 
-    private void lookup(String host, int type, List<InetAddress> out) {
+    private void lookup(Resolver resolver, String host, int type, List<InetAddress> out) {
         try {
             Lookup lookup = new Lookup(host, type);
             lookup.setResolver(resolver);
