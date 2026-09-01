@@ -261,4 +261,39 @@ class ApiProxyRoutingTest {
                 .as("an ordinary HTTP challenge is not a SOCKS handshake")
                 .isNull();
     }
+
+    @Test
+    void aPreviouslyInstalledAuthenticatorKeepsWorking() throws Exception {
+        // setDefault is JVM-wide. When the tunnel is embedded rather than run as a CLI, simply
+        // replacing whatever the host application installed would silently break its
+        // authentication -- so anything this one does not recognise is handed back.
+        java.util.List<String> askedOfHost = new java.util.ArrayList<>();
+        Authenticator host = new Authenticator() {
+            @Override
+            protected java.net.PasswordAuthentication getPasswordAuthentication() {
+                askedOfHost.add(getRequestingHost() + ":" + getRequestingPort());
+                return new java.net.PasswordAuthentication("host-user", "host-pass".toCharArray());
+            }
+        };
+        Authenticator.setDefault(host);
+
+        startSocks(true);
+        Api api = apiThroughProxy("socks5://127.0.0.1:" + socks.getLocalPort(), "alice:s3cret");
+        api.createTunnel();
+
+        // Ours still answers for its own proxy.
+        assertThat(socksLog).contains("auth alice:s3cret");
+
+        // And the host's authenticator is still reachable for everything else.
+        java.net.PasswordAuthentication other = Authenticator.requestPasswordAuthentication(
+                "some.other.host", null, 8080, "http", "", null, null,
+                Authenticator.RequestorType.SERVER);
+        assertThat(other).as("the host application's authenticator must still be consulted")
+                .isNotNull();
+        assertThat(other.getUserName()).isEqualTo("host-user");
+        assertThat(askedOfHost).contains("some.other.host:8080");
+        assertThat(new String(other.getPassword()))
+                .as("and it must be the host's answer, not this tunnel's proxy password")
+                .isEqualTo("host-pass");
+    }
 }

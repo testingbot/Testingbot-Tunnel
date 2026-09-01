@@ -145,6 +145,22 @@ The design rule is that unsupported syntax is **refused with its line number**, 
 approximated: a misread PAC file silently routes customer traffic to the wrong place. Object
 literals, regular expressions, `new`, closures and top-level statements are all rejected.
 
+### Global Authenticator state
+
+Two places install a JVM-wide `Authenticator.setDefault`: `App.setProxyAuth` for
+`--proxy-userpwd`, and `Api` for SOCKS5 credentials, because the JDK's SOCKS client offers no
+other hook. Both are scoped and both chain.
+
+`ProxyAuth` used to answer **every** request in the process with the proxy password -- no
+requestor type, host, port or protocol check -- so anything that consulted the default
+authenticator got the customer's credentials, including, when the tunnel is embedded, the host
+application's own traffic. It now answers only a proxy challenge from the configured proxy, and
+delegates everything else to whatever authenticator it replaced.
+
+`Api`'s keeps SOCKS credentials in a registry keyed by host:port rather than closing over the
+first proxy it sees, installs itself only when it is not already the default, and likewise
+delegates what it does not recognise.
+
 ### Upstream proxy authentication
 
 `--proxy-auth-scheme negotiate` authenticates to the upstream proxy with SPNEGO/Kerberos, for
@@ -330,7 +346,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 775 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 782 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

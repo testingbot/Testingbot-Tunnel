@@ -1539,7 +1539,15 @@ public class App {
                 throw new IllegalArgumentException("Invalid proxy auth format. Username cannot be empty");
             }
             this.proxyAuth = trimmed;
-            Authenticator.setDefault(new ProxyAuth(splitted[0], splitted[1]));
+            // Scoped to the proxy when it is known. Before this the authenticator answered
+            // every request in the JVM with these credentials, whoever was asking.
+            com.testingbot.tunnel.proxy.ProxySpec spec =
+                    com.testingbot.tunnel.proxy.ProxySpec.parse(this.proxy);
+            Authenticator previousDefault = Authenticator.getDefault();
+            Authenticator.setDefault(spec == null
+                    ? new ProxyAuth(splitted[0], splitted[1], null, -1, previousDefault)
+                    : new ProxyAuth(splitted[0], splitted[1], spec.getHost(), spec.getPort(),
+                                    previousDefault));
         } else {
             this.proxyAuth = proxyAuth;
         }

@@ -2,14 +2,27 @@ package com.testingbot.tunnel.proxy;
 
 import org.junit.jupiter.api.Test;
 
+import java.net.Authenticator;
 import java.net.PasswordAuthentication;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for ProxyAuth authentication
+ * Tests for ProxyAuth authentication.
+ *
+ * <p>These called {@code getPasswordAuthentication()} directly, which the JDK never does: it
+ * populates the requesting host, port, protocol and requestor type first, and the answer now
+ * depends on them. Asking without that context used to return the password, which was the bug --
+ * the credentials went to anything in the JVM that asked. They now go through the same entry
+ * point the JDK uses, with a proxy challenge from the configured proxy.
  */
 class ProxyAuthTest {
+
+    /** Asks the way the JDK does: a proxy challenge, from the proxy these credentials are for. */
+    private static PasswordAuthentication askAsProxy(ProxyAuth auth) {
+        return Authenticator.requestPasswordAuthentication(auth, "proxy.example", null, 8080,
+                "http", "", null, null, Authenticator.RequestorType.PROXY);
+    }
 
     @Test
     void constructor_withValidCredentials_shouldCreateAuth() {
@@ -32,7 +45,7 @@ class ProxyAuthTest {
         ProxyAuth auth = new ProxyAuth(username, password);
 
         // When: Getting password authentication
-        PasswordAuthentication passwordAuth = auth.getPasswordAuthentication();
+        PasswordAuthentication passwordAuth = askAsProxy(auth);
 
         // Then: Should return correct username
         assertThat(passwordAuth.getUserName()).isEqualTo(username);
@@ -53,7 +66,7 @@ class ProxyAuthTest {
         assertThat(auth).isNotNull();
 
         // And: Should return empty password
-        PasswordAuthentication passwordAuth = auth.getPasswordAuthentication();
+        PasswordAuthentication passwordAuth = askAsProxy(auth);
         assertThat(passwordAuth.getUserName()).isEqualTo(username);
         assertThat(passwordAuth.getPassword()).isEmpty();
     }
@@ -68,7 +81,7 @@ class ProxyAuthTest {
         ProxyAuth auth = new ProxyAuth(username, password);
 
         // Then: Should store empty password
-        PasswordAuthentication passwordAuth = auth.getPasswordAuthentication();
+        PasswordAuthentication passwordAuth = askAsProxy(auth);
         assertThat(passwordAuth.getUserName()).isEqualTo(username);
         assertThat(new String(passwordAuth.getPassword())).isEmpty();
     }
@@ -83,7 +96,7 @@ class ProxyAuthTest {
         ProxyAuth auth = new ProxyAuth(username, password);
 
         // Then: Should handle special characters
-        PasswordAuthentication passwordAuth = auth.getPasswordAuthentication();
+        PasswordAuthentication passwordAuth = askAsProxy(auth);
         assertThat(passwordAuth.getUserName()).isEqualTo(username);
         assertThat(new String(passwordAuth.getPassword())).isEqualTo(password);
     }
@@ -98,7 +111,7 @@ class ProxyAuthTest {
         ProxyAuth auth = new ProxyAuth(username, password);
 
         // Then: Should handle long password
-        PasswordAuthentication passwordAuth = auth.getPasswordAuthentication();
+        PasswordAuthentication passwordAuth = askAsProxy(auth);
         assertThat(passwordAuth.getUserName()).isEqualTo(username);
         assertThat(new String(passwordAuth.getPassword())).hasSize(1000);
     }
@@ -111,8 +124,8 @@ class ProxyAuthTest {
         ProxyAuth auth = new ProxyAuth(username, password);
 
         // When: Calling getPasswordAuthentication multiple times
-        PasswordAuthentication auth1 = auth.getPasswordAuthentication();
-        PasswordAuthentication auth2 = auth.getPasswordAuthentication();
+        PasswordAuthentication auth1 = askAsProxy(auth);
+        PasswordAuthentication auth2 = askAsProxy(auth);
 
         // Then: Should return same credentials
         assertThat(auth1.getUserName()).isEqualTo(auth2.getUserName());
@@ -129,7 +142,7 @@ class ProxyAuthTest {
         ProxyAuth auth = new ProxyAuth(username, password);
 
         // Then: Should handle Unicode correctly
-        PasswordAuthentication passwordAuth = auth.getPasswordAuthentication();
+        PasswordAuthentication passwordAuth = askAsProxy(auth);
         assertThat(new String(passwordAuth.getPassword())).isEqualTo(password);
     }
 }

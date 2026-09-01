@@ -46,6 +46,19 @@ public class Api {
 
     private static final Logger LOG = Logger.getLogger(Api.class.getName());
 
+    /**
+     * SOCKS credentials by {@code host:port}, consulted by the delegating authenticator below.
+     *
+     * <p>A registry rather than one captured pair: Api is constructed per call, and an
+     * authenticator that closed over the first proxy it ever saw would leave every later one
+     * unauthenticated.
+     */
+    private static final java.util.Map<String, String[]> SOCKS_CREDENTIALS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /** The authenticator this class installed, so it can tell its own from someone else's. */
+    private static Authenticator installedAuthenticator;
+
     private final String clientKey;
     private final String clientSecret;
     private String apiHost = "api.testingbot.com";
@@ -193,18 +206,72 @@ public class Api {
         }
 
         if (credentials != null) {
-            Authenticator.setDefault(new Authenticator() {
-                @Override
-                protected PasswordAuthentication getPasswordAuthentication() {
-                    if ("SOCKS5".equalsIgnoreCase(getRequestingProtocol())
-                            && spec.getHost().equals(getRequestingHost())
-                            && spec.getPort() == getRequestingPort()) {
-                        return new PasswordAuthentication(
-                                credentials[0], credentials[1].toCharArray());
+            installSocksAuthenticator(spec, credentials);
+        }
+    }
+
+    /**
+     * Answers the JDK's SOCKS credential request for this proxy, and nothing else.
+     *
+     * <p>{@link Authenticator#setDefault} is JVM-wide, which is the price of the JDK offering no
+     * other hook. Two things keep that from being a hazard when the tunnel is embedded in
+     * someone else's process rather than run as a CLI:
+     *
+     * <ul>
+     *   <li>whatever authenticator was already installed is kept and consulted for everything
+     *       this one does not recognise, so a host application's own credentials keep working;
+     *   </li>
+     *   <li>it is installed once. Api is constructed per call, and replacing the default on
+     *       every construction would eventually stack one delegating authenticator on top of
+     *       another for the lifetime of the process.</li>
+     * </ul>
+     */
+    private static synchronized void installSocksAuthenticator(ProxySpec spec,
+                                                               String[] credentials) {
+        SOCKS_CREDENTIALS.put(key(spec.getHost(), spec.getPort()), credentials);
+        if (Authenticator.getDefault() == installedAuthenticator
+                && installedAuthenticator != null) {
+            return;                       // already ours; the registry above is the update
+        }
+        Authenticator previous = Authenticator.getDefault();
+        installedAuthenticator = new Authenticator() {
+            @Override
+            protected PasswordAuthentication getPasswordAuthentication() {
+                if ("SOCKS5".equalsIgnoreCase(getRequestingProtocol())) {
+                    String[] known =
+                            SOCKS_CREDENTIALS.get(key(getRequestingHost(), getRequestingPort()));
+                    if (known != null) {
+                        return new PasswordAuthentication(known[0], known[1].toCharArray());
                     }
-                    return null;
                 }
-            });
+                // Not ours. Hand back to whoever was here first rather than answering null,
+                // which would silently break their authentication by installing ourselves.
+                return previous == null ? null
+                        : delegate(previous, getRequestingHost(), getRequestingSite(),
+                                   getRequestingPort(), getRequestingProtocol(),
+                                   getRequestingPrompt(), getRequestingScheme(),
+                                   getRequestingURL(), getRequestorType());
+            }
+        };
+        Authenticator.setDefault(installedAuthenticator);
+    }
+
+    private static String key(String host, int port) {
+        return (host == null ? "" : host.toLowerCase(java.util.Locale.ROOT)) + ":" + port;
+    }
+
+    /** Asks a previously installed authenticator, using the public entry point it expects. */
+    private static PasswordAuthentication delegate(
+            Authenticator previous, String host, java.net.InetAddress address, int port,
+            String protocol, String prompt, String scheme, java.net.URL url,
+            Authenticator.RequestorType type) {
+        try {
+            return Authenticator.requestPasswordAuthentication(
+                    previous, host, address, port, protocol, prompt, scheme, url, type);
+        } catch (Throwable unusable) {
+            // A host authenticator that throws is not this tunnel's problem to escalate.
+            LOG.log(Level.FINE, "Delegating to the previous Authenticator failed", unusable);
+            return null;
         }
     }
 

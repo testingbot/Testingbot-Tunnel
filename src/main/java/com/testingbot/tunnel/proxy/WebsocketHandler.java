@@ -130,56 +130,6 @@ public class WebsocketHandler extends ConnectHandler {
         return requestHeaders.toString();
     }
 
-    private Map<String, String> performWebSocketHandshake(Request clientRequest, SocketChannel channel)
-            throws IOException {
-        // Read and write through the socket adaptor rather than the channel: SO_TIMEOUT is
-        // honoured by these streams and ignored by SocketChannel.read(), so the previous code
-        // could block forever on a target that accepted the connection and then said nothing.
-        java.net.Socket socket = channel.socket();
-        socket.setSoTimeout((int) getConnectTimeout());
-        socket.getOutputStream().write(buildUpgradeRequest(clientRequest).getBytes(StandardCharsets.UTF_8));
-        socket.getOutputStream().flush();
-
-        // One byte at a time up to the header terminator. Reading in blocks would consume
-        // bytes belonging to the WebSocket stream itself -- servers that send an opening frame
-        // immediately after the 101 (socket.io and friends do) had that frame silently dropped.
-        java.io.InputStream in = socket.getInputStream();
-        StringBuilder responseSB = new StringBuilder();
-        while (responseSB.indexOf("\r\n\r\n") < 0) {
-            int b = in.read();
-            if (b < 0) {
-                throw new IOException("Connection closed before WebSocket handshake completed");
-            }
-            responseSB.append((char) b);
-            if (responseSB.length() > MAX_HANDSHAKE_BYTES) {
-                throw new IOException("WebSocket handshake response exceeded " + MAX_HANDSHAKE_BYTES + " bytes");
-            }
-        }
-
-        String headerSection = responseSB.substring(0, responseSB.indexOf("\r\n\r\n"));
-        String[] lines = headerSection.split("\r\n");
-
-        // Relaying a non-101 response as if it were a WebSocket stream leaves the client
-        // believing the upgrade succeeded and hides the real reason (auth, redirect, refusal).
-        if (lines.length == 0 || !lines[0].contains("101")) {
-            throw new IOException("Target refused the WebSocket upgrade: "
-                    + (lines.length > 0 ? lines[0] : "empty response"));
-        }
-
-        Map<String, String> wsResponseHeaders = new LinkedHashMap<>();
-        for (int i = 1; i < lines.length; i++) {
-            int colonIndex = lines[i].indexOf(':');
-            if (colonIndex > 0) {
-                wsResponseHeaders.put(lines[i].substring(0, colonIndex).trim(),
-                        lines[i].substring(colonIndex + 1).trim());
-            }
-        }
-
-        LOG.info("WebSocket handshake with target complete, status: {}, headers: {}",
-                lines[0], wsResponseHeaders.size());
-        return wsResponseHeaders;
-    }
-
     @Override
     public boolean handle(Request request, Response response, Callback callback) throws Exception {
         String upgrade = request.getHeaders().get(HttpHeader.UPGRADE);
@@ -202,47 +152,182 @@ public class WebsocketHandler extends ConnectHandler {
         return next != null && next.handle(request, response, callback);
     }
 
+    /** Carries the upgrade target from connectToServer to the handshake connection. */
+    private static final String WS_TARGET_ATTRIBUTE =
+            WebsocketHandler.class.getName() + ".upgradeTarget";
+
     /**
-     * Connects to the target and completes the WebSocket handshake before handing the channel
-     * back to ConnectHandler for relaying. The connect and handshake are blocking, so they run
-     * on the executor rather than on the caller's thread.
+     * Starts a non-blocking connect and hands the channel to Jetty; the upgrade handshake runs
+     * on the selector once the socket is up.
+     *
+     * <p>This used to do the connect and the whole handshake on an executor thread. That was the
+     * last of three dial paths still working that way -- the CONNECT and SOCKS5 paths were moved
+     * to the selector earlier -- and while a bounded connect timeout kept it from being as bad
+     * as the fifteen-second select loop that preceded it, enough concurrent upgrades to a slow
+     * target still tied up pool threads doing nothing but waiting.
      */
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
-        Promise<SocketChannel> timed =
-                com.testingbot.tunnel.TunnelMetrics.timedDial("websocket", promise);
-        getExecutor().execute(() -> {
-            SocketChannel channel = null;
-            SocketChannel prepared;
+        request.setAttribute(WS_TARGET_ATTRIBUTE, Boolean.TRUE);
+        request.setAttribute(WS_DIAL_TIMER_ATTRIBUTE,
+                com.testingbot.tunnel.TunnelMetrics.DIAL_DURATION_SECONDS
+                        .labels("websocket").startTimer());
+        SocketChannel channel = null;
+        try {
+            channel = SocketChannel.open();
+            channel.socket().setTcpNoDelay(true);
+            channel.configureBlocking(false);
+            // newConnectAddress() applies --dns and --connect-to. Dialling an InetSocketAddress
+            // directly here is what once made the custom resolver dead code on this path.
+            channel.connect(newConnectAddress(host, port));
+            promise.succeeded(channel);
+        } catch (Throwable x) {
+            close(channel);
+            LOG.warn("WebSocket connect to {}:{} failed", host, port, x);
+            com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
+            observeWsDial(request);
+            promise.failed(x);
+        }
+    }
+
+    private static final String WS_DIAL_TIMER_ATTRIBUTE =
+            WebsocketHandler.class.getName() + ".dialTimer";
+
+    /** Stops the dial timer once, whichever way the dial resolved. */
+    private static void observeWsDial(Request request) {
+        if (request == null) {
+            return;
+        }
+        Object timer = request.removeAttribute(WS_DIAL_TIMER_ATTRIBUTE);
+        if (timer instanceof io.prometheus.client.Histogram.Timer t) {
+            t.observeDuration();
+        }
+    }
+
+    @Override
+    protected UpstreamConnection newUpstreamConnection(EndPoint endPoint, ConnectContext context) {
+        if (context.getRequest().getAttribute(WS_TARGET_ATTRIBUTE) != null) {
+            return new WebsocketHandshakeConnection(endPoint, context);
+        }
+        return super.newUpstreamConnection(endPoint, context);
+    }
+
+    /**
+     * Replays the upgrade against the target on the selector, and only publishes the tunnel once
+     * the target has answered 101.
+     *
+     * <p>{@code super.onOpen()} is what calls {@code onConnectSuccess}, which answers the client
+     * with 101 and the target's headers -- so it is deliberately deferred until those headers
+     * exist. AbstractConnection.onOpen only notifies listeners, so delaying it is safe.
+     */
+    private class WebsocketHandshakeConnection extends UpstreamConnection {
+
+        private final ConnectContext context;
+        private final StringBuilder response = new StringBuilder();
+        // Jetty's fill() appends to a buffer in flush mode, taking its space from limit to
+        // capacity. A ByteBuffer.allocate() is in fill mode, where limit == capacity, so fill()
+        // would see no room and read nothing -- spinning the selector rather than failing.
+        private final ByteBuffer readBuffer = org.eclipse.jetty.util.BufferUtil.allocate(1);
+        private boolean settled;
+
+        WebsocketHandshakeConnection(EndPoint endPoint, ConnectContext context) {
+            super(endPoint, WebsocketHandler.this.getExecutor(),
+                    WebsocketHandler.this.getByteBufferPool(), context);
+            this.context = context;
+        }
+
+        @Override
+        public void onOpen() {
+            // The endpoint carries the tunnel's idle timeout, which is long by design. The
+            // handshake gets the connect timeout instead, restored once the tunnel is up.
+            getEndPoint().setIdleTimeout(getConnectTimeout());
+            ByteBuffer request = ByteBuffer.wrap(buildUpgradeRequest(context.getRequest())
+                    .getBytes(StandardCharsets.UTF_8));
+            getEndPoint().write(Callback.from(this::readMore, this::handshakeFailed), request);
+        }
+
+        private void readMore() {
+            getEndPoint().fillInterested(Callback.from(this::onResponseBytes, this::handshakeFailed));
+        }
+
+        /**
+         * Reads the reply a byte at a time, stopping at the header terminator.
+         *
+         * <p>Anything the target sends after its 101 is already WebSocket frames. A block read
+         * would take those off the socket and drop them, and socket.io in particular sends its
+         * first frame immediately.
+         */
+        private void onResponseBytes() {
             try {
-                // Connect to the target using blocking I/O for the handshake
-                channel = SocketChannel.open();
-                channel.socket().setTcpNoDelay(true);
-                // newConnectAddress() applies --dns. Dialling InetSocketAddress directly here
-                // is what made the custom resolver dead code on this path despite being wired.
-                // socket().connect(addr, timeout) is also the only form that bounds the connect;
-                // SocketChannel.connect ignores SO_TIMEOUT entirely.
-                channel.socket().connect(newConnectAddress(host, port), (int) getConnectTimeout());
+                while (response.indexOf("\r\n\r\n") < 0) {
+                    org.eclipse.jetty.util.BufferUtil.clear(readBuffer);
+                    int read = getEndPoint().fill(readBuffer);
+                    if (read < 0) {
+                        throw new IOException(
+                                "Connection closed before the WebSocket upgrade was answered");
+                    }
+                    if (read == 0) {
+                        readMore();
+                        return;
+                    }
+                    response.append((char) (readBuffer.get() & 0xFF));
+                    if (response.length() > MAX_HANDSHAKE_BYTES) {
+                        throw new IOException("WebSocket handshake response exceeded "
+                                + MAX_HANDSHAKE_BYTES + " bytes");
+                    }
+                }
 
-                Map<String, String> wsResponseHeaders = performWebSocketHandshake(request, channel);
+                String[] lines = response.substring(0, response.indexOf("\r\n\r\n")).split("\r\n");
+                if (lines.length == 0 || !lines[0].contains("101")) {
+                    throw new IOException("Target refused WebSocket upgrade: "
+                            + (lines.length > 0 ? lines[0] : "empty response"));
+                }
+                Map<String, String> wsResponseHeaders = new LinkedHashMap<>();
+                for (int i = 1; i < lines.length; i++) {
+                    int colonIndex = lines[i].indexOf(':');
+                    if (colonIndex > 0) {
+                        wsResponseHeaders.put(lines[i].substring(0, colonIndex).trim(),
+                                lines[i].substring(colonIndex + 1).trim());
+                    }
+                }
+                context.getRequest().setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
 
-                // Switch to non-blocking for the async relay
-                channel.configureBlocking(false);
-                request.setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
+                settled = true;
+                getEndPoint().setIdleTimeout(getIdleTimeout());
+                com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "success").inc();
+                observeWsDial(context.getRequest());
+                LOG.info("WebSocket handshake with target complete, status: {}, headers: {}",
+                        lines[0], wsResponseHeaders.size());
+                // Publishes the tunnel: this is what calls onConnectSuccess.
+                super.onOpen();
+            } catch (Throwable failure) {
+                handshakeFailed(failure);
+            }
+        }
 
-                prepared = channel;
-            } catch (Throwable x) {
-                close(channel);
-                LOG.warn("WebSocket connect/handshake failed", x);
-                timed.failed(x);
+        private void handshakeFailed(Throwable failure) {
+            if (settled) {
+                // Past the hand-off; the tunnel owns its own failures now.
                 return;
             }
-            // Completed outside the try: succeeded() runs the rest of ConnectHandler's wiring
-            // synchronously, and if that throws -- SelectorManager.accept() NPEs once the
-            // manager has been stopped, which the SSH reconnect does -- the catch above would
-            // complete the same promise a second time.
-            timed.succeeded(prepared);
-        });
+            settled = true;
+            com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
+            observeWsDial(context.getRequest());
+            LOG.warn("WebSocket connect/handshake failed", failure);
+            onConnectFailure(context.getRequest(), context.getResponse(), context.getCallback(),
+                    failure);
+            getEndPoint().close();
+        }
+
+        @Override
+        public boolean onIdleExpired(java.util.concurrent.TimeoutException timeout) {
+            if (!settled) {
+                handshakeFailed(new IOException(
+                        "Timed out waiting for the target to answer the WebSocket upgrade"));
+                return false;
+            }
+            return super.onIdleExpired(timeout);
+        }
     }
 
     /**
