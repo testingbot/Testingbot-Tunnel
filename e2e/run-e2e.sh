@@ -1232,7 +1232,196 @@ scenario_reconnect() {
   kill $up 2>/dev/null
 }
 
-# Costs no tunnel: --doctor runs diagnostics and exits.# Costs no tunnel: --doctor runs diagnostics and exits.
+# ---------------------------------------------------------------- soak
+# Deliberately not in ALL_SCENARIOS: it runs for minutes, so it is opt-in with
+# `run-e2e.sh soak` rather than something --all drags along.
+
+soak_metric() {  # $1 metric line prefix, $2 metrics port -> the value, or empty
+  curl -s --max-time 10 "http://127.0.0.1:$2/metrics" \
+    | awk -v m="$1" 'index($0, m) == 1 { print $NF; exit }'
+}
+
+# Rounds a metric to an integer, and yields 0 for one this JVM does not export.
+soak_int() {
+  awk -v v="$1" 'BEGIN { if (v == "") print 0; else printf "%d\n", v }'
+}
+
+# One unit of load, run in the background by the burst phase.
+soak_worker() {  # $1 kind, $2 origin port
+  case "$1" in
+    http)    curl -s -o /dev/null --max-time 60 -x "127.0.0.1:$PROXY_PORT" \
+               "http://127.0.0.1:$2/" ;;
+    connect) curl -s -o /dev/null --max-time 60 -x "127.0.0.1:$PROXY_PORT" --proxytunnel \
+               "http://127.0.0.1:$2/" ;;
+    slow)    curl -s -o /dev/null --max-time 60 -x "127.0.0.1:$PROXY_PORT" \
+               "http://127.0.0.1:$2/slow" ;;
+    ws)      python3 "$HERE/ws_client.py" "127.0.0.1:$PROXY_PORT" "127.0.0.1:$2" \
+               "soak" >/dev/null 2>&1 ;;
+  esac
+}
+
+# Readiness, retried, distinguishing a dead tunnel from a saturated test host.
+soak_readyz() {  # $1 cycle label, $2 metrics port
+  local code i
+  for i in 1 2 3 4 5; do
+    code="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+              "http://127.0.0.1:$2/readyz" || true)"
+    if [ "$code" = "200" ]; then
+      ok "cycle $1: readyz still 200" "200"
+      return 0
+    fi
+    sleep 3
+  done
+  if [ -n "${TUNNEL_PID:-}" ] && kill -0 "$TUNNEL_PID" 2>/dev/null; then
+    bad "cycle $1: readyz still 200" \
+      "got $code but the process is alive: either the insight server stalled or this host is saturated"
+  else
+    bad "cycle $1: readyz still 200" "got $code and the tunnel process is gone"
+  fi
+  return 1
+}
+
+# Load, quiet, and burst in turn, watching what does not come back down afterwards.
+#
+# Aimed at the failures that only appear over time, all of which were found the hard way here:
+# a SelectorManager leaked per reconnect until the thread pool was exhausted, connections never
+# released, a tunnel reporting ready while unable to forward. None of them show up in a
+# scenario that makes a handful of requests and exits.
+scenario_soak() {
+  local cycles="${E2E_SOAK_CYCLES:-3}"
+  local quiet="${E2E_SOAK_QUIET:-20}"
+  local burst="${E2E_SOAK_BURST:-40}"
+  local bulk_mb="${E2E_SOAK_BULK_MB:-8}"
+  local bulk_reps="${E2E_SOAK_BULK_REPS:-2}"
+  local mport; mport="$(free_port)"
+
+  # Printed up front because this scenario is long enough that an outer `timeout` can cut it
+  # off, and a tunnel killed with its process group looks exactly like one that crashed. The
+  # first runs of this scenario were read as a stability bug for precisely that reason.
+  printf '    plan: %s cycle(s), %sx%sMiB bulk, %s-way burst, %ss quiet -- allow well over %ss\n' \
+    "$cycles" "$bulk_reps" "$bulk_mb" "$burst" "$quiet" \
+    "$(( cycles * (quiet + 60) + 120 ))"
+
+  start_tunnel --metrics-port "$mport" || return 1
+
+  # Baseline after one warm request, so class loading and pool creation are already done and
+  # are not later mistaken for a leak.
+  curl -s -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/"
+  sleep 3
+  local threads0 fds0 conns0
+  threads0="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"
+  fds0="$(soak_int "$(soak_metric 'process_open_fds' "$mport")")"
+  conns0="$(soak_int "$(soak_metric 'testingbot_connections_current{listener="proxy"' "$mport")")"
+  printf '    baseline: %s threads, %s fds, %s open connections\n' "$threads0" "$fds0" "$conns0"
+  if [ "$threads0" -le 0 ]; then
+    bad "soak baseline" "the metrics endpoint on $mport is not answering; nothing to measure"
+    return 1
+  fi
+
+  local peak_threads="$threads0" peak_fds="$fds0" cycle i t f growth
+  for cycle in $(seq 1 "$cycles"); do
+    local phase_start=$SECONDS
+    printf '    cycle %s/%s: bulk' "$cycle" "$cycles"
+    # Bulk: enough bytes to churn buffers, over the proxied and the relayed path alike.
+    for i in $(seq 1 "$bulk_reps"); do
+      curl -s -o /dev/null --max-time 120 -x "127.0.0.1:$PROXY_PORT" \
+        "http://127.0.0.1:$ORIGIN_PORT/large?mb=$bulk_mb"
+      curl -s -o /dev/null --max-time 120 -x "127.0.0.1:$PROXY_PORT" --proxytunnel \
+        "http://127.0.0.1:$ORIGIN_PORT/large?mb=$bulk_mb"
+    done
+    printf '(%ss)' "$((SECONDS-phase_start))"
+
+    phase_start=$SECONDS
+    printf ', burst'
+    # Burst: all at once, mixing handler paths so they compete for the same pools.
+    for i in $(seq 1 "$burst"); do
+      soak_worker http "$ORIGIN_PORT" &
+      soak_worker connect "$ORIGIN_PORT" &
+      if [ $((i % 8)) -eq 0 ]; then soak_worker ws "$ORIGIN_PORT" & fi
+      if [ $((i % 10)) -eq 0 ]; then soak_worker slow "$ORIGIN_PORT" & fi
+    done
+    wait
+    printf '(%ss)' "$((SECONDS-phase_start))"
+
+    t="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"
+    f="$(soak_int "$(soak_metric 'process_open_fds' "$mport")")"
+    if [ "$t" -gt "$peak_threads" ]; then peak_threads="$t"; fi
+    if [ "$f" -gt "$peak_fds" ]; then peak_fds="$f"; fi
+
+    printf ', quiet'
+    # Quiet: the phase that matters. Anything still held here was not released.
+    sleep "$quiet"
+
+    # Health has to hold across every phase, not only at the end.
+    #
+    # Retried, and the process checked separately when it fails. A single timed-out probe
+    # cannot tell "the tunnel stopped answering" from "the machine running this test is
+    # saturated by the burst it just launched", and those want opposite responses.
+    soak_readyz "$cycle" "$mport"
+    printf ' (%s threads, %s fds)\n' "$t" "$f"
+
+    # Stop here if the process has gone. Every reading below comes from the metrics endpoint,
+    # so a dead tunnel reports zero of everything and the leak checks pass triumphantly -- the
+    # first run of this scenario did exactly that, reporting "threads grew by -72".
+    if [ "$t" -le 0 ]; then
+      bad "the tunnel survived cycle $cycle" "process is no longer answering; see the log above"
+      return 1
+    fi
+  done
+
+  # Let anything with a timeout finish expiring before the final reading.
+  sleep 10
+  local threads1 fds1 conns1
+  threads1="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"
+  fds1="$(soak_int "$(soak_metric 'process_open_fds' "$mport")")"
+  conns1="$(soak_int "$(soak_metric 'testingbot_connections_current{listener="proxy"' "$mport")")"
+  printf '    final:    %s threads (peak %s), %s fds (peak %s), %s open connections\n' \
+    "$threads1" "$peak_threads" "$fds1" "$peak_fds" "$conns1"
+
+  # Same guard for the final reading: no numbers are meaningful if nothing is answering.
+  if [ "$threads1" -le 0 ]; then
+    bad "the tunnel is still running at the end of the soak" "metrics endpoint is not answering"
+    return 1
+  fi
+
+  # Threads are the assertion that would have caught the selector leak, which grew the pool
+  # until the proxy could not start at all. A margin, not equality: pools size to load and do
+  # not always shrink back.
+  growth=$((threads1 - threads0))
+  if [ "$growth" -le 25 ]; then
+    ok "threads return to about the baseline" "grew by $growth over $cycles cycles"
+  else
+    bad "threads return to about the baseline" "grew by $growth (from $threads0 to $threads1)"
+  fi
+
+  if [ "$fds0" -gt 0 ]; then
+    growth=$((fds1 - fds0))
+    if [ "$growth" -le 60 ]; then
+      ok "file descriptors return to about the baseline" "grew by $growth"
+    else
+      bad "file descriptors return to about the baseline" "grew by $growth (from $fds0 to $fds1)"
+    fi
+  else
+    skip "file descriptors return to about the baseline" "this JVM exports no process_open_fds"
+  fi
+
+  # Connections are released rather than left to a timeout, so quiet should mean near zero.
+  if [ "$conns1" -le 10 ]; then
+    ok "open connections drain when idle" "$conns1 left open"
+  else
+    bad "open connections drain when idle" "$conns1 still open after ${quiet}s idle"
+  fi
+
+  # And it is still a working tunnel, not merely a live process.
+  check_proxy_http soak
+  check_proxy_connect soak
+  check_websocket soak
+  check_browser soak
+
+  stop_tunnel
+}
+
+# Costs no tunnel: --doctor runs diagnostics and exits.
 scenario_doctor() {
   local out; out="$(java -jar "$JAR" --doctor 2>&1)"
   assert_contains "doctor reaches API"  "$out" "api.testingbot.com"
@@ -1264,6 +1453,7 @@ case "${1:-}" in
     echo; echo "default: ${DEFAULT_SCENARIOS[*]}"
     exit 0;;
   --all) REQUESTED=("${ALL_SCENARIOS[@]}"); shift;;
+  soak)  REQUESTED=(soak); shift;;
   "")    REQUESTED=("${DEFAULT_SCENARIOS[@]}");;
   *)     REQUESTED=("$@");;
 esac

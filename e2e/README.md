@@ -97,6 +97,28 @@ may hold tunnel slots on the same account.
 | `socks5_proxy` | 1 | `--proxy socks5://` chaining through a local SOCKS5 proxy |
 | `socks5_proxy_auth` | 1 | the same, through a SOCKS5 proxy that demands RFC 1929 credentials |
 
+## Soak
+
+`e2e/run-e2e.sh soak` is opt-in and not part of `--all`: it runs for many minutes. It cycles
+bulk transfer, a concurrent burst across all four handler paths, and a quiet period, then checks
+that threads, file descriptors and open connections come back to about the baseline -- the shape
+of the SelectorManager leak that once grew the pool until the proxy could not start.
+
+Two things it now guards against, both learned by getting them wrong:
+
+* **A dead tunnel must not read as a clean result.** Every measurement comes from the metrics
+  endpoint, so a process that has gone reports zero of everything. The first run announced
+  "threads grew by -72" and passed. The scenario now refuses to interpret any reading unless the
+  process is answering, and says whether a failed probe means a dead process or a live one that
+  did not respond.
+* **Give it far more time than you think.** The first two runs were killed by an outer
+  `timeout`, which takes the tunnel down with the process group and looks identical to a crash.
+  The scenario prints its plan and a lower bound for the wall clock before it starts. Tune with
+  `E2E_SOAK_CYCLES`, `E2E_SOAK_QUIET`, `E2E_SOAK_BURST`, `E2E_SOAK_BULK_MB`, `E2E_SOAK_BULK_REPS`.
+
+A clean baseline run has not yet been recorded; the runs so far were cut short by that timeout
+rather than by anything the tunnel did.
+
 ## Files
 
 - `run-e2e.sh` — harness and scenarios
