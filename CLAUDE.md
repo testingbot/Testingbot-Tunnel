@@ -321,11 +321,16 @@ ready and has since lost its connection.
 
 ## Development Notes
 
-- Main class: `com.testingbot.tunnel.App`
+- Main class: `com.testingbot.tunnel.Launcher`, which checks the Java version and then hands over
+  to `com.testingbot.tunnel.App`. The launcher is compiled to Java 8 bytecode by its own
+  `launcher-compat` compiler execution while everything else is 17: it is the only class an old
+  JVM can load, and without it `App.checkJavaVersion()` never runs -- the class fails to load
+  first, and Java 8 reports "A JNI error has occurred, please check your installation", which
+  blames the installation and never mentions Java 17
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 769 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 775 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

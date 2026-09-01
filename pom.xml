@@ -58,6 +58,36 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.15.0</version>
+        <executions>
+          <!-- The launcher is compiled by the execution below instead, at an older release.
+               Excluded here rather than recompiled afterwards: the default compile would write
+               a 17-targeted class first, and the second execution would then see it as newer
+               than the source and skip. -->
+          <execution>
+            <id>default-compile</id>
+            <configuration>
+              <excludes>
+                <exclude>com/testingbot/tunnel/Launcher.java</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+          <!-- Compile only the launcher for an older release, after the main compile has
+               run. It is the Main-Class, so it is the one class an old JVM has
+               to be able to load in order to be told that its Java is too old: the rest of the
+               jar is class file version 61 and fails to load with a JNI error that blames the
+               user's installation. -->
+          <execution>
+            <id>launcher-compat</id>
+            <phase>compile</phase>
+            <goals><goal>compile</goal></goals>
+            <configuration>
+              <release>8</release>
+              <includes>
+                <include>com/testingbot/tunnel/Launcher.java</include>
+              </includes>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -66,7 +96,7 @@
         <configuration>
           <archive>
             <manifest>
-              <mainClass>com.testingbot.tunnel.App</mainClass>
+              <mainClass>com.testingbot.tunnel.Launcher</mainClass>
             </manifest>
           </archive>
         </configuration>

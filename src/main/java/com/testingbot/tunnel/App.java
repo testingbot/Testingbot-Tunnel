@@ -106,7 +106,8 @@ public class App {
     }
 
     /** Matches maven.compiler.release; the jar's class files cannot load below this. */
-    private static final int MINIMUM_JAVA_VERSION = 17;
+    /** Package-visible so LauncherTest can check the launcher’s copy has not drifted. */
+    static final int MINIMUM_JAVA_VERSION = 17;
 
     static boolean checkJavaVersion() {
         int major = getMajorJavaVersion();
@@ -536,7 +537,17 @@ public class App {
         if (commandLine.hasOption("extra-headers")) {
             String extraHeadersValue = commandLine.getOptionValue("extra-headers");
             ObjectMapper mapper = new ObjectMapper();
-            JsonNode obj = mapper.readTree(extraHeadersValue);
+            JsonNode obj;
+            try {
+                obj = mapper.readTree(extraHeadersValue);
+            } catch (com.fasterxml.jackson.core.JacksonException malformed) {
+                throw new ParseException("Invalid --extra-headers: expected a JSON object such as"
+                        + " '{\"X-Header\":\"value\"}'. " + malformed.getOriginalMessage());
+            }
+            if (obj == null || !obj.isObject()) {
+                throw new ParseException("Invalid --extra-headers: expected a JSON object such as"
+                        + " '{\"X-Header\":\"value\"}'.");
+            }
 
             Iterator<String> keyIterator = obj.fieldNames();
             while (keyIterator.hasNext()) {
@@ -548,8 +559,7 @@ public class App {
         }
 
         if (commandLine.hasOption("metrics-port")) {
-            String line = commandLine.getOptionValue("metrics-port");
-            app.setMetricsPort(Integer.parseInt(line));
+            app.setMetricsPort(port(commandLine, "metrics-port"));
         }
 
         String metricsAuthValue = commandLine.hasOption("metrics-auth")
@@ -638,7 +648,7 @@ public class App {
         }
 
         if (commandLine.hasOption("hubport")) {
-            app.hubPort = Integer.parseInt(commandLine.getOptionValue("hubport"));
+            app.hubPort = port(commandLine, "hubport");
             if ((app.hubPort != 80) && (app.hubPort != 4444)) {
                 throw new ParseException("The hub port must either be 80 or 4444");
             }
@@ -780,11 +790,11 @@ public class App {
             }
 
             if (commandLine.hasOption("se-port")) {
-                app.seleniumPort = Integer.parseInt(commandLine.getOptionValue("se-port"));
+                app.seleniumPort = port(commandLine, "se-port");
             }
 
             if (commandLine.hasOption("localproxy")) {
-                app.setJettyPort(Integer.parseInt(commandLine.getOptionValue("localproxy")));
+                app.setJettyPort(port(commandLine, "localproxy"));
             } else {
                 app.setFreeJettyPort();
             }
@@ -813,6 +823,17 @@ public class App {
             // The pid file lets an external supervisor stop this process; it is
             // only meaningful when running as a command line client.
             app.trackPid();
+        } catch (org.apache.commons.cli.MissingArgumentException missingArgument) {
+            // Commons CLI names the *short* option here, so "--proxy" with no value reported
+            // "Missing argument for option: Y" -- a letter the user never typed.
+            org.apache.commons.cli.Option option = missingArgument.getOption();
+            String named = option != null && option.getLongOpt() != null
+                    ? "--" + option.getLongOpt()
+                    : (option != null ? "-" + option.getOpt() : "that option");
+            System.err.println(named + " needs a value"
+                    + (option != null && option.getArgName() != null
+                        ? " (" + option.getArgName() + ")" : "") + ".");
+            System.exit(2);
         } catch (ParseException parseException) {
             System.err.println(parseException.getMessage());
             System.exit(2);
@@ -1548,6 +1569,29 @@ public class App {
 
     public void setDnsServer(String dnsServer) {
         this.dnsServer = dnsServer;
+    }
+
+    /**
+     * A TCP port for {@code option}, validated.
+     *
+     * <p>These used to be a bare {@code Integer.parseInt}, so a typo produced a raw
+     * NumberFormatException stack trace, and a number outside the port range was accepted and
+     * failed much later as a bind error that named nothing the user had typed.
+     */
+    static int port(CommandLine commandLine, String option) throws ParseException {
+        String value = commandLine.getOptionValue(option).trim();
+        int parsed;
+        try {
+            parsed = Integer.parseInt(value);
+        } catch (NumberFormatException notANumber) {
+            throw new ParseException("Invalid --" + option + " '" + value
+                    + "': expected a port number between 1 and 65535.");
+        }
+        if (parsed < 1 || parsed > 65535) {
+            throw new ParseException("Invalid --" + option + " '" + value
+                    + "': a port must be between 1 and 65535.");
+        }
+        return parsed;
     }
 
     /** A whole number of seconds greater than zero, or null when the option is absent. */
