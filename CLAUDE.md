@@ -104,7 +104,8 @@ java -jar testingbot-tunnel.jar --doctor
   deliberately *not* inherited from `--proxy-userpwd`: they belong to a different proxy
 - `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy
 - `--proxy-spn`, `--krb5-keytab`, `--krb5-principal`: Kerberos settings for `negotiate`
-- `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default)
+- `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default).
+  Per module as `proxy:LEVEL` / `forwarder:LEVEL`, comma separated
 - `--request-id-header`: Correlation header name (default `X-Request-Id`)
 - `--extra-headers`: Custom HTTP request headers to add (JSON map)
 - `--header` / `--response-header`: Edit request/response headers. Repeatable. Grammar:
@@ -206,6 +207,17 @@ the proxy chain so plain HTTP, CONNECT and WebSocket upgrades share one switch:
 **This changed the default behaviour**: before TB-319 every request produced an INFO line.
 With `errors`, successful requests log nothing. Use `--log-http url` to get the old volume back.
 
+The value can also be set per module -- `proxy` for browser traffic through the local proxy,
+`forwarder` for the Selenium relay -- as `--log-http proxy:none,forwarder:headers`. A bare level
+still sets everything at once, and a bare level alongside named modules acts as "and everything
+else". An unknown module name is refused rather than ignored, since a typo would otherwise be
+accepted and quietly change nothing.
+
+**Second behaviour change**: the Selenium relay ignored `--log-http` entirely and logged an INFO
+line for every request, including under `--log-http none`. It now honours it, and follows the
+same `errors` default -- so relay lines are silent for successful requests unless asked for with
+`--log-http url` or `--log-http forwarder:url`.
+
 Every request carries a correlation id, logged in `[brackets]` and passed to the target in
 `--request-id-header`. An incoming value is reused so a trace starting in the test framework
 stays joined up. The id is forwarded even when `--log-http none` is set.
@@ -283,7 +295,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 742 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 754 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

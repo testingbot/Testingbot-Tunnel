@@ -90,10 +90,21 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
             }
         });
 
+        // Until this honoured --log-http, every Selenium relay request produced an INFO line
+        // whatever the user asked for -- including --log-http none. The proxy chain was fixed
+        // for that in TB-319 and this path was missed, which is what per-module logging made
+        // visible: --log-http forwarder:none had nothing to switch off.
+        HttpLogHandler.Mode mode = app.getLogHttpPolicy().modeFor(LogHttpPolicy.FORWARDER);
+        if (mode == HttpLogHandler.Mode.NONE || mode == HttpLogHandler.Mode.ERRORS) {
+            // ERRORS logs nothing here; failures are reported by
+            // onServerToProxyResponseFailure, which is where the outcome is known.
+            return;
+        }
+
         JUL.log(Level.INFO, "[{0}] {1}",
                 new Object[]{clientToProxyRequest.getMethod(), clientToProxyRequest.getHttpURI()});
 
-        if (app.isDebugMode()) {
+        if (mode == HttpLogHandler.Mode.HEADERS || app.isDebugMode()) {
             StringBuilder sb = new StringBuilder();
             for (HttpField field : clientToProxyRequest.getHeaders()) {
                 sb.append(field.getName()).append(": ")

@@ -195,7 +195,9 @@ public final class HttpProxy {
         // Outermost of the proxy handlers so plain HTTP, CONNECT and WebSocket upgrades all
         // get the same correlation id and the same --log-http switch.
         HttpLogHandler logHandler = new HttpLogHandler(
-                HttpLogHandler.Mode.parse(app.getLogHttp()), app.getRequestIdHeader());
+                app.getLogHttpPolicy().modeFor(
+                        com.testingbot.tunnel.proxy.LogHttpPolicy.PROXY),
+                app.getRequestIdHeader());
         logHandler.setHandler(websocketHandler);
         proxyHandler.setRequestIdHeader(logHandler.getRequestIdHeader());
 

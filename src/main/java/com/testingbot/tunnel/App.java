@@ -46,6 +46,8 @@ public class App {
     private String krb5KeyTab;
     private String krb5Principal;
     private String logHttp;
+    private com.testingbot.tunnel.proxy.LogHttpPolicy logHttpPolicy =
+            com.testingbot.tunnel.proxy.LogHttpPolicy.defaults();
     private String requestIdHeader;
     private String[] headerRules;
     private String[] responseHeaderRules;
@@ -215,8 +217,10 @@ public class App {
             "How much HTTP traffic detail to log: none, url, headers, or errors (default). "
             + "'errors' logs the request line and headers only for failed or 5xx responses: "
             + "quiet in normal use, self-diagnosing when tests fail. Header values that carry "
-            + "credentials are redacted.");
-        logHttp.setArgName("MODE");
+            + "credentials are redacted. Can be set per module as 'proxy:LEVEL' or "
+            + "'forwarder:LEVEL', comma separated, so browser traffic and the Selenium relay "
+            + "can be turned up independently: --log-http proxy:none,forwarder:headers.");
+        logHttp.setArgName("MODE|MODULE:MODE");
         options.addOption(logHttp);
 
         Option requestIdHeader = new Option(null, "request-id-header", true,
@@ -485,10 +489,9 @@ public class App {
         if (commandLine.hasOption("log-http")) {
             String value = commandLine.getOptionValue("log-http").trim();
             try {
-                com.testingbot.tunnel.proxy.HttpLogHandler.Mode.parse(value);
+                com.testingbot.tunnel.proxy.LogHttpPolicy.parse(value);
             } catch (IllegalArgumentException unknown) {
-                throw new ParseException("Invalid --log-http value: " + value
-                        + ". Expected none, url, headers or errors.");
+                throw new ParseException(unknown.getMessage());
             }
             app.setLogHttp(value);
         }
@@ -1380,6 +1383,17 @@ public class App {
 
     public void setLogHttp(String logHttp) {
         this.logHttp = logHttp;
+        this.logHttpPolicy = com.testingbot.tunnel.proxy.LogHttpPolicy.parse(logHttp);
+    }
+
+    /**
+     * {@code --log-http} resolved per module.
+     *
+     * <p>Held rather than reparsed per request: this is consulted on the request path, and the
+     * value cannot change once the process is running.
+     */
+    public com.testingbot.tunnel.proxy.LogHttpPolicy getLogHttpPolicy() {
+        return logHttpPolicy;
     }
 
     public String getRequestIdHeader() {

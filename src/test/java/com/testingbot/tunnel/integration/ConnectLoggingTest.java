@@ -25,15 +25,27 @@ import static org.assertj.core.api.Assertions.assertThat;
  * <p>CustomConnectHandler logged an INFO line for every CONNECT regardless of the setting, so a
  * user who had explicitly asked for silence still got a line per tunnelled connection -- and the
  * line cost a global logger lookup on the request path to produce.
+ *
+ * <p>This test was itself wrong for a while: it watched CustomConnectHandler, which writes no
+ * per-request line, and matched a "[CONNECT]" prefix that appears nowhere in the source, so it
+ * passed whatever the code did. It now watches HttpLogHandler, which is what emits the line, and
+ * reads the formatted message rather than the unsubstituted pattern.
  */
 class ConnectLoggingTest {
 
     private static final class CapturingHandler extends Handler {
         private final List<String> messages = new ArrayList<>();
 
+        /**
+         * Formatted, not the raw pattern: getMessage() leaves "{0}" unsubstituted, so an
+         * assertion about what was logged would never match whatever the code did.
+         */
+        private final java.util.logging.Formatter formatter =
+                new java.util.logging.SimpleFormatter();
+
         @Override
         public synchronized void publish(LogRecord record) {
-            messages.add(String.valueOf(record.getMessage()));
+            messages.add(formatter.formatMessage(record));
         }
 
         @Override
@@ -70,7 +82,9 @@ class ConnectLoggingTest {
         app.setLogHttp("none");
 
         captured = new CapturingHandler();
-        connectLogger = Logger.getLogger("com.testingbot.tunnel.proxy.CustomConnectHandler");
+        // HttpLogHandler is what writes the per-request line, for CONNECT as for anything
+        // else. This listened to CustomConnectHandler, which never logs one.
+        connectLogger = Logger.getLogger("com.testingbot.tunnel.proxy.HttpLogHandler");
         connectLogger.addHandler(captured);
         connectLogger.setLevel(Level.ALL);
 
@@ -117,6 +131,6 @@ class ConnectLoggingTest {
 
         assertThat(captured.messages())
                 .as("no per-CONNECT line should be emitted under --log-http none")
-                .noneMatch(m -> m.startsWith("[CONNECT]"));
+                .noneMatch(m -> m.contains("CONNECT"));
     }
 }
