@@ -1334,13 +1334,18 @@ scenario_soak() {
     phase_start=$SECONDS
     printf ', burst'
     # Burst: all at once, mixing handler paths so they compete for the same pools.
+    # Wait on these pids specifically, never a bare `wait`: this shell also has the origin
+    # server in the background, and `wait` with no argument waits for that too -- which never
+    # exits. That hung the burst phase forever, and an outer `timeout` then killed the whole
+    # process group, which looked exactly like the tunnel crashing under load.
+    local pids=()
     for i in $(seq 1 "$burst"); do
-      soak_worker http "$ORIGIN_PORT" &
-      soak_worker connect "$ORIGIN_PORT" &
-      if [ $((i % 8)) -eq 0 ]; then soak_worker ws "$ORIGIN_PORT" & fi
-      if [ $((i % 10)) -eq 0 ]; then soak_worker slow "$ORIGIN_PORT" & fi
+      soak_worker http "$ORIGIN_PORT" & pids+=($!)
+      soak_worker connect "$ORIGIN_PORT" & pids+=($!)
+      if [ $((i % 8)) -eq 0 ]; then soak_worker ws "$ORIGIN_PORT" & pids+=($!); fi
+      if [ $((i % 10)) -eq 0 ]; then soak_worker slow "$ORIGIN_PORT" & pids+=($!); fi
     done
-    wait
+    for i in "${pids[@]}"; do wait "$i" 2>/dev/null || true; done
     printf '(%ss)' "$((SECONDS-phase_start))"
 
     t="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"

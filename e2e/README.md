@@ -116,8 +116,23 @@ Two things it now guards against, both learned by getting them wrong:
   The scenario prints its plan and a lower bound for the wall clock before it starts. Tune with
   `E2E_SOAK_CYCLES`, `E2E_SOAK_QUIET`, `E2E_SOAK_BURST`, `E2E_SOAK_BULK_MB`, `E2E_SOAK_BULK_REPS`.
 
-A clean baseline run has not yet been recorded; the runs so far were cut short by that timeout
-rather than by anything the tunnel did.
+Recorded baseline, 12 cycles at 40-way burst (~5 minutes), browser check skipped:
+
+| | baseline | peak | final |
+|---|---|---|---|
+| threads | 72 | 87 | 87 |
+| file descriptors | 106 | 111 | 109 |
+| open connections | 1 | — | 0 |
+
+Growth plateaus rather than accumulating: +9 threads over 3 cycles and +15 over 12, with the
+peak equal to the final, which is pool sizing settling rather than a leak. `readyz` answered 200
+after every cycle, connections drained to zero on every quiet period, and proxied HTTP, CONNECT,
+WebSocket and a real cloud browser all still worked at the end.
+
+A third bug lived here too, and it was the cause of the timeouts above: the burst phase ended in
+a bare `wait`, which waits for every background job of the shell -- including the origin server,
+which never exits. The phase hung forever. It now waits on the worker pids it collected, and a
+cycle takes about twenty seconds instead of never finishing.
 
 ## Files
 
