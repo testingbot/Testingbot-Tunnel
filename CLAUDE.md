@@ -105,7 +105,8 @@ java -jar testingbot-tunnel.jar --doctor
 - `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy
 - `--proxy-spn`, `--krb5-keytab`, `--krb5-principal`: Kerberos settings for `negotiate`
 - `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default).
-  Per module as `proxy:LEVEL` / `forwarder:LEVEL`, comma separated
+  Per module as `proxy:LEVEL` / `forwarder:LEVEL`, comma separated. `body` adds the redacted
+  request body and is available for `forwarder` only
 - `--request-id-header`: Correlation header name (default `X-Request-Id`)
 - `--extra-headers`: Custom HTTP request headers to add (JSON map)
 - `--header` / `--response-header`: Edit request/response headers. Repeatable. Grammar:
@@ -225,6 +226,35 @@ stays joined up. The id is forwarded even when `--log-http none` is set.
 Header values are redacted via `SensitiveHeaders.redactValue`, so `Authorization` and
 TestingBot credentials do not reach whatever collects these logs.
 
+### Body logging and its redaction
+
+`--log-http forwarder:body` adds the request body, and exists only for the Selenium relay.
+`proxy:body` and a bare `body` are **refused**, not downgraded: browser traffic has to stream and
+cannot be buffered for logging, and someone who asked to capture bodies should not be left
+believing they are.
+
+The relay's body is WebDriver capabilities, which routinely carry the customer's own access key,
+so `BodyRedactor` decides what may be written:
+
+1. **Redact by key, not by pattern.** The document is parsed and any value whose key looks like a
+   credential is replaced. Scanning a blob for things resembling secrets fails open.
+2. **Only show what parses.** JSON and form encoding are understood, so they are redacted and
+   shown. Everything else is described by type and length -- a structure that cannot be parsed
+   cannot be redacted.
+3. **Oversized bodies are described, not truncated.** Half a document does not parse, and
+   truncating first would print raw bytes exactly when there are most of them.
+
+The tee copies from a `duplicate()` of each chunk's buffer, so the body reaches the hub
+untouched; `ForwarderBodyLoggingTest` asserts the redaction and the byte-for-byte forwarding on
+the same request, because a tee that read the real buffer would satisfy the first and silently
+break every session.
+
+**Residual risk, stated rather than hidden:** rule 1 is a denylist of key names. A credential
+stored under a name it does not recognise -- `privateData`, say -- would be printed. It covers
+the shapes that actually occur here (`key`, `secret`, `token`, `password`, `apiKey`,
+`accessKey`, `auth`, `session` and spelling variants); it is not a guarantee about arbitrary
+payloads. Rules 2 and 3 fail closed, so an unknown *format* is never shown.
+
 ### Header rules
 
 `--header` and `--response-header` apply to **plain HTTP only**. HTTPS arrives as a CONNECT and
@@ -295,7 +325,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 754 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 769 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

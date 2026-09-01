@@ -40,7 +40,16 @@ public class HttpLogHandler extends Handler.Wrapper {
         /** As {@link #URL}, plus the request headers. */
         HEADERS,
         /** As {@link #HEADERS}, but only for requests that failed or answered 5xx. */
-        ERRORS;
+        ERRORS,
+        /**
+         * As {@link #HEADERS}, plus the request body, redacted by
+         * {@link BodyRedactor}.
+         *
+         * <p>Only meaningful for the Selenium relay, whose bodies are small structured JSON.
+         * {@code LogHttpPolicy} refuses it for browser traffic, which would have to be buffered
+         * to be logged and must stream.
+         */
+        BODY;
 
         public static Mode parse(String value) {
             if (value == null || value.trim().isEmpty()) {
@@ -102,6 +111,8 @@ public class HttpLogHandler extends Handler.Wrapper {
                      Throwable failure) {
         int status = response.getStatus();
         boolean failed = failure != null || status >= 500;
+        // BODY is refused for this module, so it can only arrive here by mistake; treat it as
+        // HEADERS rather than silently logging nothing.
         if (mode == Mode.ERRORS && !failed) {
             return;
         }

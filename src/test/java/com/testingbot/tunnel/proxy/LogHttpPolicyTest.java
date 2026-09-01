@@ -82,9 +82,32 @@ class LogHttpPolicyTest {
     void anUnknownLevelIsRefused() {
         assertThatThrownBy(() -> LogHttpPolicy.parse("proxy:verbose"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("none, url, headers or errors");
+                .hasMessageContaining("none, url, headers, errors or body");
         assertThatThrownBy(() -> LogHttpPolicy.parse("verbose"))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("none, url, headers or errors");
+                .hasMessageContaining("none, url, headers, errors or body");
+    }
+
+    @Test
+    void bodyIsAvailableForTheRelay() {
+        assertThat(LogHttpPolicy.parse("forwarder:body").modeFor(LogHttpPolicy.FORWARDER))
+                .isEqualTo(Mode.BODY);
+    }
+
+    @Test
+    void bodyIsRefusedForBrowserTraffic() {
+        // Refused rather than quietly downgraded: someone who asked to capture bodies should
+        // not be left believing they are.
+        assertThatThrownBy(() -> LogHttpPolicy.parse("proxy:body"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("has to stream")
+                .hasMessageContaining("forwarder");
+    }
+
+    @Test
+    void abareBodyLevelIsRefusedBecauseItWouldCoverBrowserTraffic() {
+        assertThatThrownBy(() -> LogHttpPolicy.parse("body"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("forwarder:body");
     }
 }

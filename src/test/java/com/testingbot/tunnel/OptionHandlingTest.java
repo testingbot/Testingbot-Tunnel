@@ -197,7 +197,7 @@ class OptionHandlingTest {
 
         assertThatThrownBy(() -> withOptions("--log-http", "verbose"))
                 .isInstanceOf(ParseException.class)
-                .hasMessageContaining("none, url, headers or errors");
+                .hasMessageContaining("none, url, headers, errors or body");
     }
 
     @Test

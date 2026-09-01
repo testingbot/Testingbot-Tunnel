@@ -58,7 +58,13 @@ public final class LogHttpPolicy {
             if (colon < 0) {
                 // A bare level. Last one wins rather than being an error: it reads as "and
                 // everything else", which is how the equivalent is written elsewhere.
-                fallback = level(entry);
+                Mode bare = level(entry);
+                if (bare == Mode.BODY) {
+                    throw new IllegalArgumentException("--log-http body would apply to browser"
+                            + " traffic, which has to stream and cannot be buffered for logging."
+                            + " Ask for it by module: --log-http " + FORWARDER + ":body.");
+                }
+                fallback = bare;
                 continue;
             }
             String module = entry.substring(0, colon).trim().toLowerCase(Locale.ROOT);
@@ -66,7 +72,16 @@ public final class LogHttpPolicy {
                 throw new IllegalArgumentException("Unknown --log-http module '" + module
                         + "'. Valid modules are " + String.join(", ", MODULES) + ".");
             }
-            modules.put(module, level(entry.substring(colon + 1)));
+            Mode mode = level(entry.substring(colon + 1));
+            if (mode == Mode.BODY && !FORWARDER.equals(module)) {
+                // Browser traffic is arbitrary and can be gigabytes; logging a body means
+                // buffering it, and this proxy streams on purpose. Refused rather than
+                // quietly downgraded, so nobody believes they are capturing bodies.
+                throw new IllegalArgumentException("--log-http " + module + ":body is not"
+                        + " supported: browser traffic has to stream and cannot be buffered for"
+                        + " logging. 'body' is available for the " + FORWARDER + " module only.");
+            }
+            modules.put(module, mode);
         }
         // No bare level given: modules named are set, everything else keeps the default.
         return new LogHttpPolicy(fallback == null ? Mode.ERRORS : fallback, modules);
@@ -77,7 +92,7 @@ public final class LogHttpPolicy {
             return Mode.parse(value);
         } catch (IllegalArgumentException unknown) {
             throw new IllegalArgumentException("Invalid --log-http value: " + value.trim()
-                    + ". Expected none, url, headers or errors.");
+                    + ". Expected none, url, headers, errors or body.");
         }
     }
 

@@ -115,6 +115,94 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
         }
     }
 
+    /**
+     * Tees the request body so it can be logged, without disturbing what is forwarded.
+     *
+     * <p>Only under {@code forwarder:body}, and only up to the redactor's limit: the bytes are
+     * copied out of a duplicate of each chunk's buffer, so the chunk itself reaches the hub
+     * exactly as it arrived. Beyond the limit the copy stops and the body is described rather
+     * than shown, which is the redactor's rule for anything it cannot parse whole.
+     */
+    @Override
+    protected org.eclipse.jetty.client.Request.Content newProxyToServerRequestContent(
+            Request clientToProxyRequest, org.eclipse.jetty.server.Response proxyToClientResponse,
+            org.eclipse.jetty.client.Request proxyToServerRequest) {
+        org.eclipse.jetty.client.Request.Content content = super.newProxyToServerRequestContent(
+                clientToProxyRequest, proxyToClientResponse, proxyToServerRequest);
+        if (app.getLogHttpPolicy().modeFor(LogHttpPolicy.FORWARDER) != HttpLogHandler.Mode.BODY) {
+            return content;
+        }
+        return new TeedContent(content, clientToProxyRequest);
+    }
+
+    /** Copies what passes through, up to a cap, and logs it when the source is exhausted. */
+    private final class TeedContent implements org.eclipse.jetty.client.Request.Content {
+        private final org.eclipse.jetty.client.Request.Content delegate;
+        private final Request request;
+        private final java.io.ByteArrayOutputStream copy = new java.io.ByteArrayOutputStream();
+        private boolean overflowed;
+        private boolean logged;
+
+        TeedContent(org.eclipse.jetty.client.Request.Content delegate, Request request) {
+            this.delegate = delegate;
+            this.request = request;
+        }
+
+        @Override
+        public String getContentType() {
+            return delegate.getContentType();
+        }
+
+        @Override
+        public org.eclipse.jetty.io.Content.Chunk read() {
+            org.eclipse.jetty.io.Content.Chunk chunk = delegate.read();
+            if (chunk != null && chunk.hasRemaining() && !overflowed) {
+                // duplicate(): reading the real buffer would move its position and the hub
+                // would receive a body with the start missing.
+                java.nio.ByteBuffer peek = chunk.getByteBuffer().duplicate();
+                if (copy.size() + peek.remaining() > BodyRedactor.MAX_BODY_BYTES) {
+                    overflowed = true;
+                    copy.reset();
+                } else {
+                    byte[] bytes = new byte[peek.remaining()];
+                    peek.get(bytes);
+                    copy.writeBytes(bytes);
+                }
+            }
+            if (chunk != null && chunk.isLast()) {
+                logBody();
+            }
+            return chunk;
+        }
+
+        @Override
+        public void demand(Runnable demandCallback) {
+            delegate.demand(demandCallback);
+        }
+
+        @Override
+        public void fail(Throwable failure) {
+            delegate.fail(failure);
+        }
+
+        @Override
+        public long getLength() {
+            return delegate.getLength();
+        }
+
+        private void logBody() {
+            if (logged) {
+                return;
+            }
+            logged = true;
+            String rendered = overflowed
+                    ? "<body larger than " + BodyRedactor.MAX_BODY_BYTES + " bytes, not shown>"
+                    : BodyRedactor.render(getContentType(), copy.toByteArray());
+            JUL.log(Level.INFO, "[{0}] body: {1}",
+                    new Object[]{request.getHttpURI(), rendered});
+        }
+    }
+
     @Override
     protected void onServerToProxyResponseFailure(Request clientToProxyRequest,
                                                   org.eclipse.jetty.client.Request proxyToServerRequest,
