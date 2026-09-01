@@ -92,4 +92,16 @@ class BumpPolicyTest {
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("line breaks");
     }
+
+    @Test
+    void wildcardsAreRefusedRatherThanStoredAsLiterals() {
+        // Found by comparing against Sauce Connect, whose equivalent takes regular expressions.
+        // Ours does not, and a "*.internal" entry was being accepted and logged as though
+        // bumping had been disabled for it -- the silent no-op this whole option exists to
+        // avoid. NegotiateHosts already refused these; this did not.
+        assertThatThrownBy(() -> BumpPolicy.parse(false, "*.internal.example"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("wildcards are not supported")
+                .hasMessageContaining("--nobump");
+    }
 }

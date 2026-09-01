@@ -55,6 +55,15 @@ public final class BumpPolicy {
     }
 
     private static void validate(String domain) {
+        // Refused rather than stored as a literal that the server can never match. Sauce
+        // Connect's equivalent takes regular expressions; ours does not, and accepting one
+        // silently would be the worst of both -- the log would say bumping was disabled for a
+        // host, and it would not be. --nobump already covers "everything".
+        if (domain.indexOf('*') >= 0 || domain.indexOf('?') >= 0) {
+            throw new IllegalArgumentException("Invalid --nobump-domains entry '" + domain
+                    + "': wildcards are not supported. Name each host, or use --nobump to"
+                    + " disable SSL bumping everywhere.");
+        }
         for (int i = 0; i < FORBIDDEN.length(); i++) {
             if (domain.indexOf(FORBIDDEN.charAt(i)) >= 0) {
                 throw new IllegalArgumentException(
