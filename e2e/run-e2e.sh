@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (18 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (21 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -671,6 +671,93 @@ scenario_socks5_proxy() {
   kill $up 2>/dev/null
 }
 
+# --http-idle-timeout and --http-dial-timeout.
+#
+# A timeout is only observable by waiting, so these are the two checks the unit tests cannot
+# make: that an idle tunnel is actually closed at the configured moment, and that a dial to
+# somewhere unreachable gives up when told to rather than on the built-in default.
+scenario_timeouts() {
+  start_tunnel --http-idle-timeout 5 --http-dial-timeout 2 || return 1
+
+  # Normal traffic first: a scenario built on aggressive timeouts has to show it has not simply
+  # broken the proxy.
+  check_proxy_http timeouts
+  check_proxy_connect timeouts
+
+  # Well inside the timeout, the tunnel survives.
+  assert_eq "a tunnel idle for less than the timeout stays open" \
+    "$(python3 "$HERE/idle_probe.py" "127.0.0.1:$PROXY_PORT" "127.0.0.1:$ORIGIN_PORT" 1)" \
+    "open"
+  # Past it, it is closed. The probe proves the tunnel carried a request before going quiet,
+  # so "closed" cannot mean "never worked".
+  assert_eq "a tunnel idle for longer than the timeout is closed" \
+    "$(python3 "$HERE/idle_probe.py" "127.0.0.1:$PROXY_PORT" "127.0.0.1:$ORIGIN_PORT" 9)" \
+    "closed"
+
+  # 192.0.2.0/24 is TEST-NET-1, reserved by RFC 5737 and routed nowhere, so a connection to it
+  # hangs until something gives up. Some networks answer immediately with no-route instead, and
+  # then this proves nothing -- so measure that first and say so rather than passing hollowly.
+  local baseline; baseline="$(curl -s -o /dev/null --connect-timeout 8 \
+      -w '%{time_total}' "http://192.0.2.1/" 2>/dev/null || true)"
+  if python3 -c "import sys; sys.exit(0 if float('${baseline:-0}') < 1 else 1)"; then
+    skip "a dial gives up at --http-dial-timeout" \
+      "this network fails unreachable addresses instantly (${baseline}s), nothing to measure"
+  else
+    local elapsed; elapsed="$(curl -s -o /dev/null --max-time 30 \
+        -x "127.0.0.1:$PROXY_PORT" -w '%{time_total}' "http://192.0.2.1/" 2>/dev/null || true)"
+    # The built-in default is 15s; 2s was asked for. Anything under 10 can only be the option.
+    if python3 -c "import sys; sys.exit(0 if 0 < float('${elapsed:-0}') < 10 else 1)"; then
+      ok "a dial gives up at --http-dial-timeout" "gave up after ${elapsed}s, not the 15s default"
+    else
+      bad "a dial gives up at --http-dial-timeout" "took ${elapsed}s"
+    fi
+  fi
+}
+
+# --krb5-hosts sends Kerberos credentials to sites, not just to the upstream proxy.
+#
+# The positive half needs a KDC and lives in NegotiateOriginTest, which verifies a real ticket
+# against a real acceptor. What belongs here is the half that needs no Kerberos at all: that a
+# host nobody named is never offered a credential, and that a host that was named but for which
+# no ticket can be had degrades to its --auth credential instead of breaking the request.
+scenario_krb5_hosts() {
+  start_tunnel --krb5-hosts "not-this-one.invalid" \
+      --auth "127.0.0.1:$ORIGIN_PORT:e2euser:e2epass" \
+    || return 1
+
+  # /headers echoes what the origin received, so this reads the wire rather than a log line.
+  #
+  # Weaker than it looks, and deliberately kept anyway: with no KDC here, no ticket could have
+  # been minted for any host, so this cannot distinguish "correctly withheld" from "could not
+  # be produced". NegotiateOriginTest makes that distinction against a real KDC, where a listed
+  # host gets a verified ticket in the same run that an unlisted one gets nothing. What this
+  # adds is that the whole path stays intact in a real tunnel.
+  local headers
+  headers="$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" \
+      "http://127.0.0.1:$ORIGIN_PORT/headers")"
+  assert_eq "an unnamed host is offered no Kerberos credential" \
+    "$(printf '%s' "$headers" | grep -ci 'negotiate' || true)" "0"
+
+  # And --auth still applies to it, so listing other hosts has not disturbed anything.
+  assert_contains "an unnamed host still gets its --auth credential" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/protected")" \
+    "protected-ok"
+
+  stop_tunnel
+
+  # A named host with no ticket available: the request must still go out, falling back to the
+  # Basic credential, rather than failing because Kerberos could not be done.
+  start_tunnel --krb5-hosts "127.0.0.1" \
+      --auth "127.0.0.1:$ORIGIN_PORT:e2euser:e2epass" \
+    || return 1
+  assert_contains "a named host with no ticket falls back to --auth" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/protected")" \
+    "protected-ok"
+  assert_eq "and no half-formed Negotiate header is sent" \
+    "$(curl -s --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/headers" \
+        | grep -ci 'negotiate' || true)" "0"
+}
+
 # --cacert-file, against a proxy that really does intercept TLS.
 #
 # A TLS-inspecting proxy re-signs every certificate with its own authority. The JVM has never
@@ -1153,10 +1240,10 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols sslbump reconnect upstream_proxy upstream_proxy_auth split_proxy cacert socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols sslbump timeouts krb5_hosts reconnect upstream_proxy upstream_proxy_auth split_proxy cacert socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
-tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }
+tunnel_cost() { case "$1" in doctor|pac) echo 0;; krb5_hosts) echo 2;; *) echo 1;; esac; }
 
 # ---------------------------------------------------------------------- main
 cleanup() {

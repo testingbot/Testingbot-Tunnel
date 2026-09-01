@@ -92,6 +92,8 @@ may hold tunnel slots on the same account.
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
 | `split_proxy` | 1 | `--proxy` and `--proxy-testingbot` as two different proxies with different credentials, each asserted to see only its own traffic |
 | `cacert` | 1 | `--cacert-file` against a proxy that really intercepts TLS: the tunnel must fail to start without it |
+| `timeouts` | 1 | `--http-idle-timeout` closes an idle tunnel; `--http-dial-timeout` gives up early |
+| `krb5_hosts` | 2 | `--krb5-hosts` withholds credentials and falls back to `--auth` when no ticket can be had |
 | `socks5_proxy` | 1 | `--proxy socks5://` chaining through a local SOCKS5 proxy |
 | `socks5_proxy_auth` | 1 | the same, through a SOCKS5 proxy that demands RFC 1929 credentials |
 
@@ -105,6 +107,7 @@ may hold tunnel slots on the same account.
 - `ws_client.py` — WebSocket client that upgrades through the local proxy
 - `dns_server.py` — minimal authoritative DNS server for `--dns`
 - `mitm_proxy.py` — upstream proxy that intercepts TLS with its own CA, for `--cacert-file`
+- `idle_probe.py` — holds a CONNECT tunnel idle to see whether the idle timeout closes it
 
 ### What is covered by integration tests rather than e2e
 
@@ -116,6 +119,12 @@ them would buy no coverage.
 
 `--nobump-domains` has no behavioural e2e because the server does not read the parameter yet
 (TB-352). The `sslbump` scenario is its acceptance test for when it does.
+
+`--krb5-hosts` has only its negative half in e2e. Minting a ticket needs a KDC, and Kerby is a
+Java test dependency the shaded jar cannot reach, so the positive case -- a listed host receiving
+a ticket an origin verifies with `acceptSecContext` -- lives in `NegotiateOriginTest`. That test
+also makes the distinction the e2e cannot: with no KDC in the harness, an absent `Negotiate`
+header cannot tell "correctly withheld" from "could not be produced".
 
 ### HTTP versions
 
