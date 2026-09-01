@@ -1426,6 +1426,142 @@ scenario_soak() {
   stop_tunnel
 }
 
+# Soak with the connection severed every cycle.
+#
+# The leaks that actually happened here were per-reconnect, not per-request: a SelectorManager
+# added on every start and never removed, port forwards not rebuilt, a bind failure on the
+# second start. A soak that never drops the connection cannot see any of them, and the plain
+# reconnect scenario drops it once, which is too few to tell a leak from a one-off.
+#
+# The assertion is a trend rather than a total. The selector leak added about two threads per
+# reconnect, which four reconnects would hide inside any reasonable absolute margin -- so this
+# compares the reading after the last reconnect against the one after the second, when pools
+# have warmed. Accumulation shows up there; settling does not.
+scenario_soak_reconnect() {
+  local cycles="${E2E_SOAK_RC_CYCLES:-5}"
+  local burst="${E2E_SOAK_BURST:-20}"
+  local uport mport; uport="$(free_port)"; mport="$(free_port)"
+
+  printf '    plan: %s sever/recover cycles -- each waits out a 30s keepalive, so allow 10+ minutes\n' \
+    "$cycles"
+
+  python3 "$HERE/upstream_proxy.py" "$uport" > "$WORK/soak-rc-proxy.log" 2>&1 &
+  local up=$!
+  sleep 1
+  # SSH is forced through a proxy we control, which is what makes severing deterministic.
+  start_tunnel --proxy "127.0.0.1:$uport" --metrics-port "$mport" \
+    || { kill $up 2>/dev/null; return 1; }
+
+  curl -s -o /dev/null --max-time 30 -x "127.0.0.1:$PROXY_PORT" "http://127.0.0.1:$ORIGIN_PORT/"
+  sleep 3
+  local threads0 fds0
+  threads0="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"
+  fds0="$(soak_int "$(soak_metric 'process_open_fds' "$mport")")"
+  if [ "$threads0" -le 0 ]; then
+    bad "soak-reconnect baseline" "metrics endpoint is not answering"
+    kill $up 2>/dev/null; return 1
+  fi
+  printf '    baseline: %s threads, %s fds\n' "$threads0" "$fds0"
+
+  local warm_threads=0 warm_fds=0 cycle i t f pids recovered noticed
+  for cycle in $(seq 1 "$cycles"); do
+    printf '    cycle %s/%s: load' "$cycle" "$cycles"
+    pids=()
+    for i in $(seq 1 "$burst"); do
+      soak_worker http "$ORIGIN_PORT" & pids+=($!)
+      soak_worker connect "$ORIGIN_PORT" & pids+=($!)
+    done
+    for i in "${pids[@]}"; do wait "$i" 2>/dev/null || true; done
+
+    printf ', sever'
+    kill $up 2>/dev/null; wait $up 2>/dev/null
+    python3 "$HERE/upstream_proxy.py" "$uport" >> "$WORK/soak-rc-proxy.log" 2>&1 &
+    up=$!
+
+    # Wait for the tunnel to notice, then to come back. Polling straight after the kill reads a
+    # readiness that is simply stale, which is how the first reconnect scenario fooled itself.
+    noticed=0
+    for i in $(seq 1 45); do
+      if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                "http://127.0.0.1:$mport/readyz")" != "200" ]; then noticed=1; break; fi
+      sleep 2
+    done
+    printf ', %s' "$([ "$noticed" = 1 ] && echo noticed || echo 'never-noticed')"
+
+    recovered=0
+    for i in $(seq 1 90); do
+      if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                "http://127.0.0.1:$mport/readyz")" = "200" ]; then recovered=1; break; fi
+      sleep 2
+    done
+    if [ "$recovered" != "1" ]; then
+      bad "cycle $cycle: tunnel recovered" "readyz never returned to 200"
+      kill $up 2>/dev/null; return 1
+    fi
+
+    sleep 5
+    t="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"
+    f="$(soak_int "$(soak_metric 'process_open_fds' "$mport")")"
+    printf ', recovered (%s threads, %s fds)\n' "$t" "$f"
+    if [ "$t" -le 0 ]; then
+      bad "cycle $cycle: tunnel still running" "metrics endpoint stopped answering"
+      kill $up 2>/dev/null; return 1
+    fi
+
+    # Traffic after every reconnect, not just at the end: a proxy that comes back "ready" but
+    # cannot forward is the exact failure the rebuilt port forwards once produced.
+    assert_eq "cycle $cycle: still proxying after the reconnect" \
+      "$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -x "127.0.0.1:$PROXY_PORT" \
+          "http://127.0.0.1:$ORIGIN_PORT/")" "200"
+
+    # The comparison point: after two reconnects the pools have warmed.
+    if [ "$cycle" -eq 2 ]; then warm_threads="$t"; warm_fds="$f"; fi
+  done
+
+  local threads1 fds1
+  threads1="$(soak_int "$(soak_metric 'jvm_threads_current' "$mport")")"
+  fds1="$(soak_int "$(soak_metric 'process_open_fds' "$mport")")"
+  printf '    final:    %s threads, %s fds after %s reconnects\n' "$threads1" "$fds1" "$cycles"
+
+  # A trend, not a total. Two threads leaked per reconnect would hide inside an absolute
+  # margin; growth between the second reconnect and the last would not.
+  if [ "$warm_threads" -gt 0 ]; then
+    local drift=$((threads1 - warm_threads))
+    if [ "$drift" -le 8 ]; then
+      ok "threads do not accumulate across reconnects" \
+        "$warm_threads after 2 reconnects, $threads1 after $cycles (drift $drift)"
+    else
+      bad "threads do not accumulate across reconnects" \
+        "$warm_threads after 2 reconnects, $threads1 after $cycles (drift $drift)"
+    fi
+  fi
+
+  # Descriptors on the same trend basis, and the sharper of the two signals. Measured with the
+  # SelectorManager leak reinstated, descriptors climbed 119 -> 125 -> 131 across reconnects
+  # while the fixed build sat flat at 101, so a warm-to-final drift of more than a handful is
+  # not noise. The absolute threshold this replaces was 40, which missed that leak entirely
+  # even as the thread check caught it.
+  if [ "$warm_fds" -gt 0 ]; then
+    local fd_drift=$((fds1 - warm_fds))
+    if [ "$fd_drift" -le 6 ]; then
+      ok "file descriptors do not accumulate across reconnects" \
+        "$warm_fds after 2 reconnects, $fds1 after $cycles (drift $fd_drift)"
+    else
+      bad "file descriptors do not accumulate across reconnects" \
+        "$warm_fds after 2 reconnects, $fds1 after $cycles (drift $fd_drift)"
+    fi
+  fi
+
+  check_proxy_http soak-reconnect
+  check_proxy_connect soak-reconnect
+  check_websocket soak-reconnect
+  check_se_status soak-reconnect
+  check_browser soak-reconnect
+
+  stop_tunnel
+  kill $up 2>/dev/null
+}
+
 # Costs no tunnel: --doctor runs diagnostics and exits.
 scenario_doctor() {
   local out; out="$(java -jar "$JAR" --doctor 2>&1)"
@@ -1459,6 +1595,7 @@ case "${1:-}" in
     exit 0;;
   --all) REQUESTED=("${ALL_SCENARIOS[@]}"); shift;;
   soak)  REQUESTED=(soak); shift;;
+  soak_reconnect|soak-reconnect) REQUESTED=(soak_reconnect); shift;;
   "")    REQUESTED=("${DEFAULT_SCENARIOS[@]}");;
   *)     REQUESTED=("$@");;
 esac

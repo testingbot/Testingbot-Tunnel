@@ -134,6 +134,29 @@ a bare `wait`, which waits for every background job of the shell -- including th
 which never exits. The phase hung forever. It now waits on the worker pids it collected, and a
 cycle takes about twenty seconds instead of never finishing.
 
+### Soak with reconnects
+
+`e2e/run-e2e.sh soak_reconnect` severs the SSH connection on every cycle, because the leaks that
+actually happened here were per-reconnect rather than per-request: a SelectorManager added on
+every start and never removed, port forwards not rebuilt, a bind failure on the second start. A
+soak that never drops the connection cannot see any of them, and the plain `reconnect` scenario
+drops it once, which cannot tell a leak from a one-off.
+
+It asserts a **trend**, not a total: the reading after the last reconnect against the one after
+the second, when pools have warmed. That distinction matters — the real leak added about two
+threads per reconnect, which four reconnects hide inside any reasonable absolute margin.
+
+Verified by reinstating the leak rather than by choosing thresholds and hoping:
+
+| | threads (c3 → c5 → final) | descriptors | verdict |
+|---|---|---|---|
+| fixed | 71 → 72 → 77 (drift 3) | 101 flat (drift 0) | passes |
+| leak reinstated | 79 → 83 → 86 (drift 9) | 119 → 131 (drift 12) | **fails** |
+
+That exercise also showed the first version of this scenario was too loose: it caught the leak on
+threads by a margin of one, and missed the descriptor growth completely at an absolute threshold
+of 40. Both checks are now warm-to-final drifts, which separate the two builds cleanly.
+
 ## Files
 
 - `run-e2e.sh` — harness and scenarios
