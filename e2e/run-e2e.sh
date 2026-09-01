@@ -15,7 +15,7 @@
 #
 # Usage:
 #   e2e/run-e2e.sh                      # doctor + combined (2 tunnel starts)
-#   e2e/run-e2e.sh --all                # every scenario, paced (17 starts)
+#   e2e/run-e2e.sh --all                # every scenario, paced (18 starts)
 #   e2e/run-e2e.sh nobump custom_ports  # named scenarios only
 #   e2e/run-e2e.sh --list               # show scenarios and their tunnel cost
 #   E2E_SKIP_BROWSER=1 e2e/run-e2e.sh   # proxy-level checks only, no browser VMs
@@ -671,6 +671,56 @@ scenario_socks5_proxy() {
   kill $up 2>/dev/null
 }
 
+# --cacert-file, against a proxy that really does intercept TLS.
+#
+# A TLS-inspecting proxy re-signs every certificate with its own authority. The JVM has never
+# seen it, so the tunnel cannot reach the API and never starts. That is the whole point of the
+# option, and the only honest way to show it works is a tunnel that fails to start without it
+# and starts with it -- which is also the only thing that exercises the wiring into the API
+# client rather than the SSLContext in isolation.
+scenario_cacert() {
+  if ! command -v openssl >/dev/null 2>&1; then
+    skip "cacert" "openssl not available"
+    return
+  fi
+  local ca="$WORK/mitm-ca.pem" cakey="$WORK/mitm-ca.key"
+  openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj "/CN=E2E Intercepting CA" \
+      -keyout "$cakey" -out "$ca" >/dev/null 2>&1 \
+    || { bad "cacert" "could not generate a CA"; return; }
+
+  local mport; mport="$(free_port)"
+  # Only the API is intercepted; everything else is tunnelled untouched, so a failure here is
+  # about the certificate and not about the proxy breaking something unrelated.
+  python3 "$HERE/mitm_proxy.py" "$mport" "$ca" "$cakey" api.testingbot.com \
+    > "$WORK/mitm.log" 2>&1 &
+  local mitm=$!
+  sleep 1
+
+  # Without the authority the tunnel must not come up. A failed start registers nothing
+  # server-side, so this costs no tunnel against the quota.
+  if start_tunnel --proxy "127.0.0.1:$mport" 2>/dev/null; then
+    bad "an intercepted API connection fails without --cacert-file" "the tunnel started anyway"
+    stop_tunnel
+  else
+    ok "an intercepted API connection fails without --cacert-file" "tunnel did not start"
+  fi
+  assert_neq "the proxy did intercept the API connection" \
+    "$(grep -c 'MITM api.testingbot.com' "$WORK/mitm.log" || true)" "0"
+  assert_neq "and the handshake was rejected for want of the authority" \
+    "$(grep -c 'HANDSHAKE-REJECTED' "$WORK/mitm.log" || true)" "0"
+
+  # With it, the same interception is accepted and everything works.
+  start_tunnel --proxy "127.0.0.1:$mport" --cacert-file "$ca" \
+    || { kill $mitm 2>/dev/null; return 1; }
+  ok "the tunnel starts once the authority is trusted" "ready"
+  check_proxy_http cacert
+  check_proxy_connect cacert
+  check_browser cacert
+
+  stop_tunnel
+  kill $mitm 2>/dev/null
+}
+
 # Test traffic and control traffic through two different proxies.
 #
 # Once egress is filtered by destination, the proxy that may reach the public internet is
@@ -681,12 +731,23 @@ scenario_split_proxy() {
   local tport cport; tport="$(free_port)"; cport="$(free_port)"
   python3 "$HERE/upstream_proxy.py" "$tport" > "$WORK/proxy-test.log" 2>&1 &
   local tproxy=$!
-  python3 "$HERE/upstream_proxy.py" "$cport" > "$WORK/proxy-control.log" 2>&1 &
+  # The control proxy demands credentials and the test-traffic one does not, so the two cannot
+  # be satisfied by the same configuration. That is what makes the credential separation
+  # observable: --proxy-userpwd reaching this proxy would be an AUTH-REJECTED in its log.
+  python3 "$HERE/upstream_proxy.py" "$cport" 'ctl-user:ctl-pass' \
+    > "$WORK/proxy-control.log" 2>&1 &
   local cproxy=$!
   sleep 1
 
-  start_tunnel --proxy "127.0.0.1:$tport" --proxy-testingbot "127.0.0.1:$cport" \
+  start_tunnel --proxy "127.0.0.1:$tport" \
+      --proxy-testingbot "127.0.0.1:$cport" \
+      --proxy-testingbot-userpwd 'ctl-user:ctl-pass' \
     || { kill $tproxy $cproxy 2>/dev/null; return 1; }
+
+  assert_contains "the control proxy accepted its own credentials" \
+    "$(cat "$WORK/proxy-control.log")" "AUTH-OK"
+  assert_eq "nothing reached the control proxy unauthenticated" \
+    "$(grep -c 'AUTH-REJECTED' "$WORK/proxy-control.log" || true)" "0"
 
   assert_contains "the SSH connection uses the control proxy" \
     "$(cat "$TUNNEL_LOG")" "SSH connection will traverse the upstream proxy 127.0.0.1:$cport"
@@ -1092,7 +1153,7 @@ scenario_doctor() {
   case "$out" in *"FAIL"*|*"SEVERE"*) bad "doctor clean" "reported failures";; *) ok "doctor clean" "no failures";; esac
 }
 
-ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols sslbump reconnect upstream_proxy upstream_proxy_auth split_proxy socks5_proxy socks5_proxy_auth)
+ALL_SCENARIOS=(doctor pac combined nobump nocache custom_ports localproxy_only tunnel_identifier localhost_deny dns websocket protocols sslbump reconnect upstream_proxy upstream_proxy_auth split_proxy cacert socks5_proxy socks5_proxy_auth)
 DEFAULT_SCENARIOS=(doctor combined)
 # macOS ships bash 3.2, which has no associative arrays -- use a function.
 tunnel_cost() { case "$1" in doctor|pac) echo 0;; *) echo 1;; esac; }

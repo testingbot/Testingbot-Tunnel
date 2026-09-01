@@ -90,7 +90,8 @@ may hold tunnel slots on the same account.
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
-| `split_proxy` | 1 | `--proxy` and `--proxy-testingbot` as two different proxies, each asserted to see only its own traffic |
+| `split_proxy` | 1 | `--proxy` and `--proxy-testingbot` as two different proxies with different credentials, each asserted to see only its own traffic |
+| `cacert` | 1 | `--cacert-file` against a proxy that really intercepts TLS: the tunnel must fail to start without it |
 | `socks5_proxy` | 1 | `--proxy socks5://` chaining through a local SOCKS5 proxy |
 | `socks5_proxy_auth` | 1 | the same, through a SOCKS5 proxy that demands RFC 1929 credentials |
 
@@ -103,6 +104,18 @@ may hold tunnel slots on the same account.
 - `socks5_proxy.py` — minimal upstream SOCKS5 proxy for `--proxy socks5://`
 - `ws_client.py` — WebSocket client that upgrades through the local proxy
 - `dns_server.py` — minimal authoritative DNS server for `--dns`
+- `mitm_proxy.py` — upstream proxy that intercepts TLS with its own CA, for `--cacert-file`
+
+### What is covered by integration tests rather than e2e
+
+`--dns-round-robin` and `--dns-timeout` select between resolvers inside the client and never
+reach the tunnel, so an e2e run would exercise nothing the unit tests do not.
+`CustomDnsResolverMultiServerTest` drives them against real UDP servers, including ones that
+accept a query and never answer, which is the case that matters. Spending a tunnel start on
+them would buy no coverage.
+
+`--nobump-domains` has no behavioural e2e because the server does not read the parameter yet
+(TB-352). The `sslbump` scenario is its acceptance test for when it does.
 
 ### HTTP versions
 
