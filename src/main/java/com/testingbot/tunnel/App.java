@@ -68,6 +68,9 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private com.testingbot.tunnel.proxy.CaCertificates caCertificates = null;
+    /** Null means "keep the built-in default", so an absent flag changes nothing. */
+    private Integer httpDialTimeoutSeconds = null;
+    private Integer httpIdleTimeoutSeconds = null;
     private String controlProxy = null;
     private String controlProxyAuth = null;
     private String dnsServer = null;
@@ -299,6 +302,20 @@ public class App {
         Option extraHeaders = new Option(null, "extra-headers", true, "Inject extra headers in the requests the tunnel makes.");
         extraHeaders.setArgName("JSON Map with Header Key and Value");
         options.addOption(extraHeaders);
+
+        Option dialTimeout = new Option(null, "http-dial-timeout", true,
+            "Seconds to wait for a TCP connection to a target or upstream proxy before giving "
+            + "up (default 5 for the API, 15 for tunnelled connections). Lower it on a network "
+            + "where unreachable hosts should fail fast.");
+        dialTimeout.setArgName("seconds");
+        options.addOption(dialTimeout);
+
+        Option idleTimeout = new Option(null, "http-idle-timeout", true,
+            "Seconds a connection may sit with no traffic before it is closed (default 120 for "
+            + "proxied HTTP, 300 for CONNECT tunnels). Raise it for long-lived idle "
+            + "connections; this is what bounds a response that trickles forever.");
+        idleTimeout.setArgName("seconds");
+        options.addOption(idleTimeout);
 
         Option caCert = new Option(null, "cacert-file", true,
             "Trust an additional certificate authority, as a PEM file. Repeatable. For networks "
@@ -612,6 +629,9 @@ public class App {
                 throw new ParseException("The hub port must either be 80 or 4444");
             }
         }
+
+        app.httpDialTimeoutSeconds = positiveSeconds(commandLine, "http-dial-timeout");
+        app.httpIdleTimeoutSeconds = positiveSeconds(commandLine, "http-idle-timeout");
 
         if (commandLine.hasOption("dns")) {
             // Note: this used to set sun.net.spi.nameservice.*, the JDK 8 pluggable
@@ -1486,6 +1506,48 @@ public class App {
 
     public void setDnsServer(String dnsServer) {
         this.dnsServer = dnsServer;
+    }
+
+    /** A whole number of seconds greater than zero, or null when the option is absent. */
+    static Integer positiveSeconds(CommandLine commandLine, String option) throws ParseException {
+        if (!commandLine.hasOption(option)) {
+            return null;
+        }
+        String value = commandLine.getOptionValue(option).trim();
+        try {
+            int seconds = Integer.parseInt(value);
+            if (seconds <= 0) {
+                throw new NumberFormatException(value);
+            }
+            return seconds;
+        } catch (NumberFormatException invalid) {
+            throw new ParseException("Invalid --" + option + " '" + value
+                    + "': give a whole number of seconds greater than zero.");
+        }
+    }
+
+    /**
+     * {@code --http-dial-timeout}, or null to keep each path's own default.
+     *
+     * <p>Null rather than a value: the defaults differ by path on purpose -- the API should give
+     * up quickly, a tunnelled connection should not -- and one number for both would be worse
+     * than either.
+     */
+    public Integer getHttpDialTimeoutSeconds() {
+        return httpDialTimeoutSeconds;
+    }
+
+    public void setHttpDialTimeoutSeconds(Integer seconds) {
+        this.httpDialTimeoutSeconds = seconds;
+    }
+
+    /** {@code --http-idle-timeout}, or null to keep each path's own default. */
+    public Integer getHttpIdleTimeoutSeconds() {
+        return httpIdleTimeoutSeconds;
+    }
+
+    public void setHttpIdleTimeoutSeconds(Integer seconds) {
+        this.httpIdleTimeoutSeconds = seconds;
     }
 
     /** Extra certificate authorities from {@code --cacert-file}, or null when none. */

@@ -83,6 +83,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private long idleTimeoutMs = 120_000L;
+    private long connectTimeoutMs = -1;
 
     public void setBlackList(String[] patterns) {
         this.fastFail = FastFailPolicy.compile(patterns);
@@ -236,6 +237,11 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         this.idleTimeoutMs = idleTimeoutMs;
     }
 
+    /** How long to wait for a TCP connection to an origin; null keeps jetty-client's default. */
+    public void setConnectTimeoutMs(long connectTimeoutMs) {
+        this.connectTimeoutMs = connectTimeoutMs;
+    }
+
 
     /** Wires jetty-client's SPNEGO support to the same settings the other paths use. */
     private void configureNegotiate(HttpClient client, ProxySpec spec) {
@@ -286,6 +292,9 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     protected void configureHttpClient(HttpClient client) {
         super.configureHttpClient(client);
         client.setIdleTimeout(idleTimeoutMs);
+        if (connectTimeoutMs > 0) {
+            client.setConnectTimeout(connectTimeoutMs);
+        }
 
         if (dnsResolver != null || !connectTo.isEmpty()) {
             // Resolving is where --connect-to belongs: it changes where we dial without

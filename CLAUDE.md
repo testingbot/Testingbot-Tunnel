@@ -86,6 +86,11 @@ java -jar testingbot-tunnel.jar --doctor
 - `--auth`: Basic authentication for specific hosts
 - `--proxy`: Upstream proxy for test traffic, and for reaching TestingBot unless
   `--proxy-testingbot` is given
+- `--http-dial-timeout`, `--http-idle-timeout`: Seconds for TCP connect and for an idle
+  connection. Absent means each path keeps its own default, which differ deliberately -- the API
+  gives up in 5s, a CONNECT tunnel idles for 300s. There is no total-response timeout: that
+  would abort a healthy large download for taking a while, and stalls are what the idle timeout
+  is for
 - `--cacert-file`: Trust an additional certificate authority (PEM). Repeatable. For networks
   where a proxy intercepts TLS and re-signs with an internal CA -- without it the API
   connection fails and the tunnel never starts. Added to the platform trust store, not
@@ -251,7 +256,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 722 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 732 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

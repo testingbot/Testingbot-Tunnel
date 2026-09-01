@@ -165,7 +165,11 @@ public final class HttpProxy {
         tuneTunnelRelay(websocketHandler);
 
         TunnelProxyHandler proxyHandler = new TunnelProxyHandler();
-        proxyHandler.setIdleTimeoutMs(PROXY_IDLE_TIMEOUT_MS);
+        proxyHandler.setIdleTimeoutMs(
+                seconds(app.getHttpIdleTimeoutSeconds(), PROXY_IDLE_TIMEOUT_MS));
+        if (app.getHttpDialTimeoutSeconds() != null) {
+            proxyHandler.setConnectTimeoutMs(app.getHttpDialTimeoutSeconds() * 1000L);
+        }
         proxyHandler.setBlackList(app.getFastFail());
         proxyHandler.setExtraHeaders(app.getCustomHeaders());
         proxyHandler.setRequestHeaderRules(HeaderRules.parse(app.getHeaderRules()));
@@ -222,9 +226,18 @@ public final class HttpProxy {
      * timeout keeps quiet-but-live tunnels (an open WebSocket, a paused download) from
      * being torn down under the client.
      */
-    private static void tuneTunnelRelay(ConnectHandler handler) {
+    private void tuneTunnelRelay(ConnectHandler handler) {
         handler.setBufferSize(TUNNEL_BUFFER_SIZE);
-        handler.setIdleTimeout(TUNNEL_IDLE_TIMEOUT_MS);
+        handler.setIdleTimeout(seconds(app.getHttpIdleTimeoutSeconds(), TUNNEL_IDLE_TIMEOUT_MS));
+        Integer dial = app.getHttpDialTimeoutSeconds();
+        if (dial != null) {
+            handler.setConnectTimeout(dial * 1000L);
+        }
+    }
+
+    /** The configured seconds as milliseconds, or {@code fallback} when nothing was configured. */
+    private static long seconds(Integer configured, long fallback) {
+        return configured == null ? fallback : configured * 1000L;
     }
 
     public void stop() {

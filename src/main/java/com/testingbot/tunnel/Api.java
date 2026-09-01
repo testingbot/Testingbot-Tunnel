@@ -67,6 +67,12 @@ public class Api {
         this.app = app;
         this.clientKey = app.getClientKey();
         this.clientSecret = app.getClientSecret();
+        // Only the dial is configurable here. The response timeout stays put: it bounds an API
+        // call, which is small and quick, and is nothing to do with how long tunnelled traffic
+        // may take.
+        if (app.getHttpDialTimeoutSeconds() != null) {
+            this.connectTimeout = Timeout.ofSeconds(app.getHttpDialTimeoutSeconds());
+        }
     }
 
     /** For testing: shrink the HTTP timeouts so tests don't have to wait 30s. */
