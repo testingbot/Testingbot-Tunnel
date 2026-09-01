@@ -68,6 +68,8 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private com.testingbot.tunnel.proxy.CaCertificates caCertificates = null;
+    private com.testingbot.tunnel.proxy.NegotiateHosts negotiateHosts =
+            com.testingbot.tunnel.proxy.NegotiateHosts.none();
     /** Null means "keep the built-in default", so an absent flag changes nothing. */
     private Integer httpDialTimeoutSeconds = null;
     private Integer httpIdleTimeoutSeconds = null;
@@ -302,6 +304,15 @@ public class App {
         Option extraHeaders = new Option(null, "extra-headers", true, "Inject extra headers in the requests the tunnel makes.");
         extraHeaders.setArgName("JSON Map with Header Key and Value");
         options.addOption(extraHeaders);
+
+        Option krb5Hosts = new Option(null, "krb5-hosts", true,
+            "Send SPNEGO/Negotiate credentials to these hosts, comma separated, as well as to "
+            + "the upstream proxy. For intranet sites that authenticate with Kerberos. Empty by "
+            + "default and never wildcarded: a service ticket names the user, so every host that "
+            + "may receive one has to be written down. Plain HTTP only -- HTTPS reaches the "
+            + "target as an opaque CONNECT tunnel.");
+        krb5Hosts.setArgName("HOST,HOST");
+        options.addOption(krb5Hosts);
 
         Option dialTimeout = new Option(null, "http-dial-timeout", true,
             "Seconds to wait for a TCP connection to a target or upstream proxy before giving "
@@ -1096,6 +1107,23 @@ public class App {
         // Parsed here rather than with the rest of the options because --doctor calls this
         // method directly and nothing else: a diagnostic that could not see the control proxy
         // or the extra authorities would report on a configuration the user is not running.
+        if (commandLine.hasOption("krb5-hosts")) {
+            try {
+                app.negotiateHosts = com.testingbot.tunnel.proxy.NegotiateHosts.parse(
+                        commandLine.getOptionValue("krb5-hosts"));
+            } catch (IllegalArgumentException invalid) {
+                throw new ParseException(invalid.getMessage());
+            }
+            if (!app.negotiateHosts.isEmpty()) {
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "Kerberos credentials will be sent to: {0}", app.negotiateHosts);
+                if (app.getKrb5KeyTab() == null) {
+                    Logger.getLogger(App.class.getName()).log(Level.INFO,
+                            "No --krb5-keytab given, so the ambient ticket cache will be used.");
+                }
+            }
+        }
+
         if (commandLine.hasOption("cacert-file")) {
             try {
                 app.setCaCertificates(com.testingbot.tunnel.proxy.CaCertificates.load(
@@ -1548,6 +1576,16 @@ public class App {
 
     public void setHttpIdleTimeoutSeconds(Integer seconds) {
         this.httpIdleTimeoutSeconds = seconds;
+    }
+
+    /** Hosts that may receive SPNEGO credentials; empty unless {@code --krb5-hosts} was given. */
+    public com.testingbot.tunnel.proxy.NegotiateHosts getNegotiateHosts() {
+        return negotiateHosts;
+    }
+
+    public void setNegotiateHosts(com.testingbot.tunnel.proxy.NegotiateHosts negotiateHosts) {
+        this.negotiateHosts = negotiateHosts == null
+                ? com.testingbot.tunnel.proxy.NegotiateHosts.none() : negotiateHosts;
     }
 
     /** Extra certificate authorities from {@code --cacert-file}, or null when none. */

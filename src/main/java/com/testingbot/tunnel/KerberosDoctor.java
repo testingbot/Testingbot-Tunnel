@@ -32,8 +32,13 @@ public final class KerberosDoctor {
         this.app = app;
     }
 
-    /** True when the tunnel is configured to use Negotiate against the upstream proxy. */
+    /** True when Kerberos is configured at all: against the upstream proxy, or for origins. */
     public boolean isApplicable() {
+        return usesNegotiateForProxy()
+                || (app.getNegotiateHosts() != null && !app.getNegotiateHosts().isEmpty());
+    }
+
+    private boolean usesNegotiateForProxy() {
         return ProxyAuthenticator.Scheme.parse(app.getProxyAuthScheme())
                 == ProxyAuthenticator.Scheme.NEGOTIATE;
     }
@@ -45,6 +50,15 @@ public final class KerberosDoctor {
     public List<Finding> check() {
         List<Finding> findings = new ArrayList<>();
 
+        // --krb5-hosts works without an upstream proxy at all, so it is reported before the
+        // proxy checks below decide there is nothing to authenticate to.
+        findings.addAll(negotiateHosts());
+
+        if (!usesNegotiateForProxy()) {
+            // --krb5-hosts alone is a complete configuration: it authenticates to sites, and
+            // there may be no upstream proxy in the picture at all.
+            return findings;
+        }
         ProxySpec spec = ProxySpec.parse(app.getProxy());
         if (spec == null) {
             findings.add(new Finding(false,
@@ -82,6 +96,27 @@ public final class KerberosDoctor {
                     "--proxy-testingbot is a different host, so a second service principal is "
                     + "needed: " + controlSpn));
             findings.add(serviceTicket(client, control.getHost(), controlSpn));
+        }
+        return findings;
+    }
+
+    /**
+     * Whether a ticket can actually be had for each {@code --krb5-hosts} entry.
+     *
+     * <p>A host named here but with no principal registered fails as a 401 from the site, which
+     * looks like a site problem rather than a Kerberos one.
+     */
+    private List<Finding> negotiateHosts() {
+        List<Finding> findings = new ArrayList<>();
+        com.testingbot.tunnel.proxy.NegotiateHosts hosts = app.getNegotiateHosts();
+        if (hosts == null || hosts.isEmpty()) {
+            return findings;
+        }
+        SpnegoClient client = new SpnegoClient(null,
+                app.getKrb5KeyTab() == null ? null : Path.of(app.getKrb5KeyTab()),
+                app.getKrb5Principal());
+        for (String host : hosts.hosts()) {
+            findings.add(serviceTicket(client, host, client.servicePrincipalFor(host)));
         }
         return findings;
     }

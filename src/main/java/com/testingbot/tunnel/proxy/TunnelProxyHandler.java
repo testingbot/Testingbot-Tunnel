@@ -67,6 +67,9 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private String negotiateServiceName;
     private java.nio.file.Path krb5KeyTab;
     private String krb5Principal;
+    private NegotiateHosts negotiateHosts = NegotiateHosts.none();
+    /** Built once the host list is known; derives HTTP/<host> per request. */
+    private SpnegoClient originSpnego;
     private String requestIdHeader = "X-Request-Id";
     private HeaderRules requestHeaderRules = HeaderRules.none();
     private HeaderRules responseHeaderRules = HeaderRules.none();
@@ -274,6 +277,45 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     }
 
     /** Kerberos settings jetty-client needs directly; the authenticator covers the other paths. */
+    /**
+     * The hosts that may be sent SPNEGO credentials directly, as opposed to the upstream proxy.
+     *
+     * <p>The SpnegoClient is built with a null service principal so it derives {@code HTTP/host}
+     * per request: one list can cover several hosts, each needing its own ticket.
+     */
+    public void setNegotiateHosts(NegotiateHosts negotiateHosts, java.nio.file.Path keyTab,
+                                  String principal) {
+        this.negotiateHosts = negotiateHosts == null ? NegotiateHosts.none() : negotiateHosts;
+        this.originSpnego = this.negotiateHosts.isEmpty()
+                ? null : new SpnegoClient(null, keyTab, principal);
+    }
+
+    /**
+     * A {@code Negotiate} value for this request's target, or null when the host was not named.
+     *
+     * <p>A fresh token every time: SPNEGO tokens carry a timestamp and a sequence number, and
+     * replaying one is what a service is meant to reject.
+     */
+    private String negotiateCredentialFor(Request clientToProxyRequest) {
+        if (originSpnego == null) {
+            return null;
+        }
+        String host = clientToProxyRequest.getHttpURI().getHost();
+        if (host == null || !negotiateHosts.includes(host)) {
+            return null;
+        }
+        try {
+            return "Negotiate " + originSpnego.initialToken(host);
+        } catch (Exception ex) {
+            // The request still goes out; the host answers 401 and says so. Failing the request
+            // here would turn a credential problem into an unexplained proxy error.
+            LOG.log(Level.WARNING,
+                    "Could not obtain a Kerberos token for {0}: {1}. Run --doctor for details.",
+                    new Object[]{host, ex.getMessage()});
+            return null;
+        }
+    }
+
     public void setKerberos(String serviceName, java.nio.file.Path keyTab, String principal) {
         this.negotiateServiceName = serviceName;
         this.krb5KeyTab = keyTab;
@@ -603,11 +645,17 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             if (upstreamAuthorization != null) {
                 fields.put(HttpHeader.PROXY_AUTHORIZATION, upstreamAuthorization);
             }
-            // --auth, sent pre-emptively. Not put(): a client that supplied its own credentials
-            // meant them, and overwriting them would be a surprising thing for a proxy to do.
-            String siteCredential = siteCredentialFor(clientToProxyRequest);
-            if (siteCredential != null && !fields.contains(HttpHeader.AUTHORIZATION)) {
-                fields.put(HttpHeader.AUTHORIZATION, siteCredential);
+            // Site credentials, sent pre-emptively. Never over one the client supplied: it
+            // meant what it sent, and overwriting it would be a surprising thing for a proxy
+            // to do. Negotiate wins over --auth for a host named in both, because naming a
+            // host under --krb5-hosts is the more specific statement of intent.
+            if (!fields.contains(HttpHeader.AUTHORIZATION)) {
+                String negotiate = negotiateCredentialFor(clientToProxyRequest);
+                String siteCredential = negotiate != null
+                        ? negotiate : siteCredentialFor(clientToProxyRequest);
+                if (siteCredential != null) {
+                    fields.put(HttpHeader.AUTHORIZATION, siteCredential);
+                }
             }
             // Jetty 11's AbstractProxyServlet added these; Jetty 12's ProxyHandler sends only
             // Via and Forwarded, so targets that key off X-Forwarded-* (very common for staging

@@ -177,6 +177,9 @@ public final class HttpProxy {
         proxyHandler.setDebugMode(app.isDebugMode());
         proxyHandler.setUpstreamProxy(app.getProxy(), app.getProxyAuth());
         proxyHandler.setProxyAuthenticator(app.proxyAuthenticator());
+        proxyHandler.setNegotiateHosts(app.getNegotiateHosts(),
+                app.getKrb5KeyTab() == null ? null : java.nio.file.Path.of(app.getKrb5KeyTab()),
+                app.getKrb5Principal());
         proxyHandler.setKerberos(app.getProxySpn(),
                 app.getKrb5KeyTab() == null ? null : java.nio.file.Path.of(app.getKrb5KeyTab()),
                 app.getKrb5Principal());

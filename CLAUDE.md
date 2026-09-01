@@ -86,6 +86,9 @@ java -jar testingbot-tunnel.jar --doctor
 - `--auth`: Basic authentication for specific hosts
 - `--proxy`: Upstream proxy for test traffic, and for reaching TestingBot unless
   `--proxy-testingbot` is given
+- `--krb5-hosts`: Send SPNEGO/Negotiate credentials to these hosts as well as to the upstream
+  proxy, for intranet sites that authenticate with Kerberos. Empty by default, never wildcarded,
+  plain HTTP only
 - `--http-dial-timeout`, `--http-idle-timeout`: Seconds for TCP connect and for an idle
   connection. Absent means each path keeps its own default, which differ deliberately -- the API
   gives up in 5s, a CONNECT tunnel idles for 300s. There is no total-response timeout: that
@@ -163,6 +166,30 @@ configured `SPNEGOAuthentication` could never fire. `--auth` was broken the same
 `--doctor` reports the whole chain -- JGSS availability, krb5 config, ticket cache or keytab,
 the SPN that will be requested, and whether a service ticket can actually be obtained. Every one
 of these otherwise fails as an indistinguishable 407.
+
+### Kerberos to origins
+
+`--proxy-auth-scheme negotiate` authenticates to the *proxy*. `--krb5-hosts` is the other
+direction: SPNEGO sent to the origin itself, for intranet sites that authenticate with Kerberos.
+Same credentials -- ticket cache or `--krb5-keytab` -- and the SPN is derived per host as
+`HTTP/<host>`.
+
+It is an allowlist, empty by default, and wildcards are refused. A service ticket names the user
+and a host that receives one can prove to the KDC that the user talked to it, so a host gets a
+ticket only if it was written down. `NegotiateOriginTest` asserts the negative case directly: an
+unlisted host receives no `Authorization` header at all, not a rejected one.
+
+A fresh token per request, because SPNEGO tokens carry a timestamp and sequence and replaying
+one is what a service is meant to reject. A credential the client supplied itself is never
+overwritten; where a host appears under both `--krb5-hosts` and `--auth`, Negotiate wins as the
+more specific statement of intent.
+
+Plain HTTP only, the same limit `--auth` and `--header` have: HTTPS reaches the target as an
+opaque CONNECT tunnel with nothing local to edit.
+
+`--doctor` now runs its Kerberos checks when `--krb5-hosts` is set even with no upstream proxy,
+and reports whether a ticket can actually be obtained for each host. A host named here with no
+principal registered otherwise fails as a 401 from the site, which reads as a site problem.
 
 ### HTTP logging
 
@@ -256,7 +283,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 732 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 742 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy
