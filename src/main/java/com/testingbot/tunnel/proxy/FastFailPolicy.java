@@ -123,6 +123,12 @@ public final class FastFailPolicy {
                 host = host.substring(0, colon);   // host:port, not a bare IPv6 literal
             }
         }
+        // The root label is legal in a URL and means the same name, so leaving it on let
+        // "example.com." walk past a pattern written for "example.com" -- and be refused by an
+        // --allow-hosts entry that named it. A bare "." is not a name and is left alone.
+        if (host.length() > 1 && host.endsWith(".")) {
+            host = host.substring(0, host.length() - 1);
+        }
         return host.toLowerCase(Locale.ROOT);
     }
 }

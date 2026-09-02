@@ -59,6 +59,17 @@ public final class AllowedHosts {
                 continue;
             }
             validate(entry);
+            // A bracketed literal is how an IPv6 host is written in a URL, but it is not how a
+            // destination arrives here: FastFailPolicy.normalise strips the brackets. Storing the
+            // stripped form is what lets the two meet.
+            if (entry.startsWith("[") && entry.endsWith("]")) {
+                exact.add(entry.substring(1, entry.length() - 1));
+                continue;
+            }
+            if (isIpv6Literal(entry)) {
+                exact.add(entry);
+                continue;
+            }
             if (entry.startsWith("*.")) {
                 suffixes.add(entry.substring(1));       // "*.example.com" -> ".example.com"
             } else if (entry.startsWith(".")) {
@@ -82,7 +93,8 @@ public final class AllowedHosts {
             throw new IllegalArgumentException("Invalid --allow-hosts entry '" + entry
                     + "': give a host such as staging.example.com or *.example.com, not a URL.");
         }
-        if (entry.indexOf(':') >= 0) {
+        if (entry.indexOf(':') >= 0 && !isIpv6Literal(entry)
+                && !(entry.startsWith("[") && entry.endsWith("]"))) {
             throw new IllegalArgumentException("Invalid --allow-hosts entry '" + entry
                     + "': the list is of hosts, so do not include a port.");
         }
@@ -101,6 +113,34 @@ public final class AllowedHosts {
             throw new IllegalArgumentException("Invalid --allow-hosts entry '" + entry
                     + "': only one leading '*.' is supported.");
         }
+    }
+
+    /**
+     * True for {@code ::1} or {@code 2001:db8::1}, false for {@code example.com:8080}.
+     *
+     * <p>Without this every entry holding a colon was refused as "do not include a port", so no
+     * IPv6 host could be named -- and since no entry could hold a colon, no IPv6 destination
+     * could ever match either. Setting any list at all refused IPv6 everywhere, with no way to
+     * write the entry that would have allowed it.
+     */
+    private static boolean isIpv6Literal(String entry) {
+        if (entry.indexOf(':') < 0) {
+            return false;
+        }
+        String candidate = entry.startsWith("[") && entry.endsWith("]")
+                ? entry.substring(1, entry.length() - 1) : entry;
+        // Two colons, or one colon and no digits-only tail, is not a host:port.
+        if (candidate.indexOf(':') == candidate.lastIndexOf(':')) {
+            return false;
+        }
+        for (int i = 0; i < candidate.length(); i++) {
+            char c = candidate.charAt(i);
+            boolean hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+            if (!hex && c != ':' && c != '.' && c != '%') {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** True when no list was configured, so every host is permitted. */

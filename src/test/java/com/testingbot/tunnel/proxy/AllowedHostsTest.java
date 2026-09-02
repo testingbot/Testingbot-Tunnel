@@ -121,4 +121,46 @@ class AllowedHostsTest {
         assertThat(hosts.permits("staging.example.com:8443")).isTrue();
         assertThat(hosts.permits("evil.example.com:8443")).isFalse();
     }
+
+    @Test
+    void anIpv6HostCanBeAllowed() {
+        // Every entry containing a colon used to be refused as "do not include a port", so an
+        // IPv6 host could not be named at all -- and since no entry could hold a colon,
+        // permits() could never match one either. Setting any list refused IPv6 everywhere.
+        AllowedHosts hosts = AllowedHosts.parse("::1,2001:db8::1,example.com");
+
+        assertThat(hosts.permits("::1")).isTrue();
+        assertThat(hosts.permits("[::1]:443")).isTrue();
+        assertThat(hosts.permits("2001:db8::1")).isTrue();
+        assertThat(hosts.permits("[2001:db8::1]:8080")).isTrue();
+        assertThat(hosts.permits("2001:db8::2")).isFalse();
+    }
+
+    @Test
+    void aBracketedIpv6EntryMeansTheSameThing() {
+        // Brackets are how the host is written in a URL; a destination arrives here without them.
+        AllowedHosts hosts = AllowedHosts.parse("[::1]");
+
+        assertThat(hosts.permits("::1")).isTrue();
+        assertThat(hosts.permits("[::1]:443")).isTrue();
+    }
+
+    @Test
+    void aPortIsStillRejected() {
+        // The port check has to survive making room for IPv6.
+        assertThatThrownBy(() -> AllowedHosts.parse("example.com:8080"))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("do not include a port");
+    }
+
+    @Test
+    void aTrailingDotNamesTheSameHost() {
+        // "staging.example.com." is a legal FQDN meaning the same name, and was refused against
+        // a list that named it.
+        AllowedHosts hosts = AllowedHosts.parse("staging.example.com,*.internal.example");
+
+        assertThat(hosts.permits("staging.example.com.")).isTrue();
+        assertThat(hosts.permits("api.internal.example.")).isTrue();
+        assertThat(hosts.permits("other.example.com.")).isFalse();
+    }
 }

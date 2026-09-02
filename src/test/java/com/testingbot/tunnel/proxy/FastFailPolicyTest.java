@@ -122,4 +122,15 @@ class FastFailPolicyTest {
     void bangWithWhitespace_isStillAnException() {
         assertThat(of(".*", " ! ok\\.com ").blocks("ok.com")).isFalse();
     }
+
+    @Test
+    void aTrailingDotDoesNotWalkPastAPattern() {
+        // The root label is legal in a URL and means the same name, so a deny list written for
+        // example.com was bypassed by asking for example.com. instead.
+        FastFailPolicy policy = FastFailPolicy.compile(new String[]{"example\\.com"});
+
+        assertThat(policy.blocks("example.com")).isTrue();
+        assertThat(policy.blocks("example.com.")).isTrue();
+        assertThat(policy.blocks("example.com.:443")).isTrue();
+    }
 }
