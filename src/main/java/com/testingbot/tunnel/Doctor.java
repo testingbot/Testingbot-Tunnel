@@ -39,7 +39,12 @@ public final class Doctor {
 
     public Doctor(App app) {
         this.app = app;
-        app.setFreeJettyPort();
+        if (app.getJettyPort() <= 0) {
+            // Only when none was configured. Overwriting it meant --doctor --localproxy 9999
+            // reported on a random free port, so the one case the check exists for -- the
+            // configured port being taken, or privileged -- was never tested.
+            app.setFreeJettyPort();
+        }
         ArrayList<URI> uris = new ArrayList<>();
         try {
             uris.add(new URI("https://testingbot.com"));
@@ -154,13 +159,44 @@ public final class Doctor {
         }
     }
 
+    /**
+     * Reaches each URL the way the tunnel itself would.
+     *
+     * <p>This used to build a bare client: no proxy, no extra certificate authorities. On the
+     * networks those options exist for -- egress only through a proxy, or TLS intercepted and
+     * re-signed -- --doctor reported "can not be reached" and exited 1 while the real tunnel
+     * started perfectly. It was wrong about exactly the setups it is meant to diagnose.
+     */
     private boolean checkConnection(final URI uri) {
         RequestConfig cfg = RequestConfig.custom()
             .setConnectTimeout(Timeout.of(2, TimeUnit.SECONDS))
             .setResponseTimeout(Timeout.of(3, TimeUnit.SECONDS))
             .build();
 
-        try (CloseableHttpClient client = HttpClients.custom()
+        org.apache.hc.client5.http.impl.classic.HttpClientBuilder builder = HttpClients.custom();
+        com.testingbot.tunnel.proxy.ProxySpec spec =
+                com.testingbot.tunnel.proxy.ProxySpec.parse(app.getControlProxy());
+        if (spec != null && !spec.isSocks5()) {
+            builder.setProxy(new org.apache.hc.core5.http.HttpHost(
+                    "http", spec.getHost(), spec.getPort()));
+        }
+        if (app.getCaCertificates() != null) {
+            try {
+                builder.setConnectionManager(
+                        org.apache.hc.client5.http.impl.io
+                                .PoolingHttpClientConnectionManagerBuilder.create()
+                                .setTlsSocketStrategy(
+                                        new org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy(
+                                                app.getCaCertificates().sslContext()))
+                                .build());
+            } catch (java.security.GeneralSecurityException unusable) {
+                Logger.getLogger(Doctor.class.getName()).log(Level.WARNING,
+                        "Could not apply --cacert-file to the connectivity check: {0}",
+                        unusable.getMessage());
+            }
+        }
+
+        try (CloseableHttpClient client = builder
             .setDefaultRequestConfig(cfg).build()) {
             HttpHead head = new HttpHead(uri);
             return client.execute(head, response -> {

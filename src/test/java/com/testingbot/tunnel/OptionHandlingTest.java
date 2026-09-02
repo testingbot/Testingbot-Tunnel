@@ -46,8 +46,11 @@ class OptionHandlingTest {
 
     @Test
     void invalidProxyIsRejectedWithTheExpectedForms() {
+        // ParseException, not IllegalArgumentException: main catches the former and prints one
+        // line, and does not catch the latter -- so asserting IllegalArgumentException here was
+        // asserting the stack trace users actually got.
         assertThatThrownBy(() -> configured("--proxy", "ftp://x:1"))
-                .isInstanceOf(IllegalArgumentException.class)
+                .isInstanceOf(ParseException.class)
                 .hasMessageContaining("Invalid --proxy value")
                 .hasMessageContaining("socks5://");
     }

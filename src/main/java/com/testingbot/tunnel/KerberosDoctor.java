@@ -49,33 +49,43 @@ public final class KerberosDoctor {
      */
     public List<Finding> check() {
         List<Finding> findings = new ArrayList<>();
+        boolean forProxy = usesNegotiateForProxy();
+        boolean forHosts = app.getNegotiateHosts() != null && !app.getNegotiateHosts().isEmpty();
+        ProxySpec spec = forProxy ? ProxySpec.parse(app.getProxy()) : null;
 
-        // --krb5-hosts works without an upstream proxy at all, so it is reported before the
-        // proxy checks below decide there is nothing to authenticate to.
-        findings.addAll(negotiateHosts());
-
-        if (!usesNegotiateForProxy()) {
-            // --krb5-hosts alone is a complete configuration: it authenticates to sites, and
-            // there may be no upstream proxy in the picture at all.
-            return findings;
-        }
-        ProxySpec spec = ProxySpec.parse(app.getProxy());
-        if (spec == null) {
+        // A contradiction in the proxy configuration is the whole answer when there is nothing
+        // else configured: three lines about the local Kerberos environment would bury the one
+        // sentence that explains why this cannot work.
+        if (forProxy && spec == null) {
             findings.add(new Finding(false,
                     "--proxy-auth-scheme negotiate is set but --proxy is not, so there is no "
                     + "upstream proxy to authenticate to."));
-            return findings;
-        }
-        if (spec.isSocks5()) {
+            if (!forHosts) {
+                return findings;
+            }
+        } else if (forProxy && spec.isSocks5()) {
             findings.add(new Finding(false,
                     "--proxy-auth-scheme negotiate does not apply to a SOCKS5 proxy; SOCKS "
                     + "authenticates inside its own handshake."));
-            return findings;
+            if (!forHosts) {
+                return findings;
+            }
         }
 
+        // These three describe the environment rather than the proxy, so they belong to any
+        // usable Kerberos configuration. Running them only on the proxy path meant a
+        // --krb5-hosts-only setup -- which isApplicable() deliberately admits -- never saw "no
+        // keytab and no ticket cache, run kinit", the most useful thing this can say.
         findings.add(jgssAvailable());
         findings.add(krb5Config());
         findings.add(credentials());
+
+        // --krb5-hosts works without an upstream proxy at all.
+        findings.addAll(negotiateHosts());
+
+        if (!forProxy || spec == null || spec.isSocks5()) {
+            return findings;
+        }
 
         SpnegoClient client = new SpnegoClient(app.getProxySpn(),
                 app.getKrb5KeyTab() == null ? null : Path.of(app.getKrb5KeyTab()),
