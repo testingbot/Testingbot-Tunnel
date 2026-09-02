@@ -328,8 +328,28 @@ public class Api {
             return this._post(apiScheme + "://" + apiHost + "/v1/tunnel/create", nameValuePairs);
         }
         catch (Exception e) {
-            throw new Exception("Could not start tunnel: " + e.getMessage());
+            throw new Exception("Could not start tunnel: " + describe(e));
         }
+    }
+
+    /**
+     * The failure, said in terms of what the user configured.
+     *
+     * <p>A refused connection to the API surfaces as "Connect to http://10.0.0.1:3128 failed",
+     * and on a network where {@code --proxy} is in force that address is the proxy, not
+     * TestingBot -- so the message named a host the user never typed and gave no hint which of
+     * their settings produced it.
+     */
+    private String describe(Exception failure) {
+        String message = failure.getMessage() == null
+                ? failure.toString() : failure.getMessage();
+        ProxySpec spec = ProxySpec.parse(app.getControlProxy());
+        if (spec == null || !message.contains(spec.getHost())) {
+            return message;
+        }
+        String option = app.hasSeparateControlProxy() ? "--proxy-testingbot" : "--proxy";
+        return message + " (this is the upstream proxy from " + option
+                + "; TestingBot itself was never reached)";
     }
 
     public void setTunnelID(int tunnelID) {
