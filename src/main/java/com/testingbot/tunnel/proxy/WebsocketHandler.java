@@ -6,8 +6,6 @@ import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.concurrent.ConcurrentMap;
 import org.eclipse.jetty.http.HttpField;
 import org.eclipse.jetty.http.HttpHeader;
@@ -525,11 +523,15 @@ public class WebsocketHandler extends ConnectHandler {
                     throw new IOException("Target refused WebSocket upgrade: "
                             + (lines.length > 0 ? lines[0] : "empty response"));
                 }
-                Map<String, String> wsResponseHeaders = new LinkedHashMap<>();
+                // add(), not put() into a Map: a 101 carrying two Set-Cookie -- a session and a
+                // load balancer's affinity cookie is ordinary -- reached the client with only
+                // the last of them.
+                org.eclipse.jetty.http.HttpFields.Mutable wsResponseHeaders =
+                        org.eclipse.jetty.http.HttpFields.build();
                 for (int i = 1; i < lines.length; i++) {
                     int colonIndex = lines[i].indexOf(':');
                     if (colonIndex > 0) {
-                        wsResponseHeaders.put(lines[i].substring(0, colonIndex).trim(),
+                        wsResponseHeaders.add(lines[i].substring(0, colonIndex).trim(),
                                 lines[i].substring(colonIndex + 1).trim());
                     }
                 }
@@ -598,12 +600,10 @@ public class WebsocketHandler extends ConnectHandler {
         Response response = connectContext.getResponse();
         Callback callback = connectContext.getCallback();
         try {
-            @SuppressWarnings("unchecked")
-            Map<String, String> wsResponseHeaders =
-                    (Map<String, String>) request.getAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE);
-            if (wsResponseHeaders != null) {
-                for (Map.Entry<String, String> entry : wsResponseHeaders.entrySet()) {
-                    response.getHeaders().put(entry.getKey(), entry.getValue());
+            Object wsResponseHeaders = request.getAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE);
+            if (wsResponseHeaders instanceof org.eclipse.jetty.http.HttpFields fields) {
+                for (HttpField field : fields) {
+                    response.getHeaders().add(field);
                 }
             }
             response.setStatus(HttpStatus.SWITCHING_PROTOCOLS_101);

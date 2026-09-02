@@ -31,6 +31,9 @@ import static org.assertj.core.api.Assertions.assertThat;
  * per-request line, and matched a "[CONNECT]" prefix that appears nowhere in the source, so it
  * passed whatever the code did. It now watches HttpLogHandler, which is what emits the line, and
  * reads the formatted message rather than the unsubstituted pattern.
+ *
+ * <p>{@code --debug} is separate and does come from this handler: it dumps the CONNECT request
+ * headers, redacted.
  */
 class ConnectLoggingTest {
 
@@ -71,6 +74,9 @@ class ConnectLoggingTest {
         return TestPorts.free();
     }
 
+    private Logger debugLogger;
+    private CapturingHandler debugCaptured;
+
     @BeforeEach
     void setUp() throws Exception {
         proxyPort = findFreePort();
@@ -95,6 +101,9 @@ class ConnectLoggingTest {
     void tearDown() {
         if (connectLogger != null && captured != null) {
             connectLogger.removeHandler(captured);
+        }
+        if (debugLogger != null && debugCaptured != null) {
+            debugLogger.removeHandler(debugCaptured);
         }
         if (httpProxy != null) {
             httpProxy.stop();
@@ -131,5 +140,47 @@ class ConnectLoggingTest {
         assertThat(captured.messages())
                 .as("no per-CONNECT line should be emitted under --log-http none")
                 .noneMatch(m -> m.contains("CONNECT"));
+    }
+
+    @Test
+    void debugDumpsTheConnectHeaders() throws Exception {
+        // HttpProxy set six properties on the cast CONNECT handler and not this one, so --debug
+        // dumped nothing for CONNECT -- and never logged the line saying an upstream-proxy
+        // handshake had completed, on the path where that is the thing being debugged.
+        if (httpProxy != null) {
+            httpProxy.stop();
+        }
+        int debugPort = findFreePort();
+        App app = new App();
+        app.setJettyPort(debugPort);
+        app.setClientKey("test_key");
+        app.setClientSecret("test_secret");
+        app.setDebugMode(true);
+
+        debugCaptured = new CapturingHandler();
+        debugLogger = Logger.getLogger("com.testingbot.tunnel.proxy.CustomConnectHandler");
+        debugLogger.addHandler(debugCaptured);
+        debugLogger.setLevel(Level.ALL);
+
+        httpProxy = new HttpProxy(app);
+        waitForPort(debugPort);
+
+        try (Socket socket = new Socket("127.0.0.1", debugPort)) {
+            socket.setSoTimeout(15_000);
+            socket.getOutputStream().write(("CONNECT nowhere.invalid:443 HTTP/1.1\r\n"
+                    + "Host: nowhere.invalid:443\r\nX-Marker: seen\r\n"
+                    + "Proxy-Authorization: Basic c2VjcmV0\r\n\r\n")
+                    .getBytes(StandardCharsets.UTF_8));
+            socket.getOutputStream().flush();
+            socket.getInputStream().read();
+        } catch (IOException expected) {
+            // the destination does not resolve; only the logging matters here
+        }
+        Thread.sleep(300);
+
+        String log = String.join("\n", debugCaptured.messages());
+        assertThat(log).contains("X-Marker: seen");
+        // Redacted on the way out, as everywhere else that prints a header value.
+        assertThat(log).doesNotContain("c2VjcmV0");
     }
 }

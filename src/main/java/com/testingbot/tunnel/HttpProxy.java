@@ -160,6 +160,10 @@ public final class HttpProxy {
         ((CustomConnectHandler) connectHandler).setConnectTo(connectTo);
         ((CustomConnectHandler) connectHandler).setLocalhostPolicy(localhostPolicy);
         ((CustomConnectHandler) connectHandler).setPacPolicy(app.getPacPolicy());
+        // Never set, so --debug dumped no CONNECT headers and never logged the line saying the
+        // upstream-proxy handshake had completed -- on the path where that is the thing being
+        // debugged. The plain-HTTP handler below has always had it.
+        ((CustomConnectHandler) connectHandler).setDebugMode(app.isDebugMode());
         tuneTunnelRelay(connectHandler);
 
         WebsocketHandler websocketHandler = new WebsocketHandler();

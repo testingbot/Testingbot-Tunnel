@@ -58,6 +58,9 @@ class WebsocketThroughProxyTest {
         }
     }
 
+    /** Extra headers the origin adds to its 101, used to prove duplicates survive the relay. */
+    private String extraOriginHeaders = "";
+
     /** An origin that completes one handshake and then echoes whatever it is sent. */
     private void startOrigin() throws Exception {
         originPort = TestPorts.free();
@@ -69,7 +72,8 @@ class WebsocketThroughProxyTest {
                     OutputStream out = client.getOutputStream();
                     out.write(("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
                             + "Connection: Upgrade\r\n"
-                            + "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n")
+                            + "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"
+                            + extraOriginHeaders + "\r\n")
                             .getBytes(StandardCharsets.UTF_8));
                     out.flush();
                     copy(client.getInputStream(), out);
@@ -323,5 +327,22 @@ class WebsocketThroughProxyTest {
         // as a Proxy-Authorization header on the upgrade that follows.
         assertThat(proxyLog).contains("auth alice:s3cret");
         assertThat(proxyLog).contains("connect 127.0.0.1:" + originPort);
+    }
+
+    @Test
+    void duplicateHandshakeResponseHeadersSurviveTheRelay() throws Exception {
+        // The target's headers were collected into a LinkedHashMap<String,String> and replayed
+        // with put(), so a 101 carrying two Set-Cookie -- a session cookie plus a load
+        // balancer's affinity cookie is ordinary -- reached the client with only the last.
+        pool = Executors.newCachedThreadPool();
+        extraOriginHeaders = "Set-Cookie: session=abc\r\nSet-Cookie: affinity=node7\r\n";
+        startOrigin();
+        startTunnel(null, null);
+
+        String response = upgrade();
+
+        assertThat(response).contains("101");
+        assertThat(response).contains("session=abc");
+        assertThat(response).contains("affinity=node7");
     }
 }
