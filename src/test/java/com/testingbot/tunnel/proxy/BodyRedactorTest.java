@@ -118,4 +118,55 @@ class BodyRedactorTest {
         assertThat(BodyRedactor.render("application/json", bytes(body)))
                 .contains("firefox").contains("LINUX").contains("ok");
     }
+
+    @Test
+    void aBodyMislabelledAsFormEncodingIsNotPrinted() {
+        // The leak this class existed to prevent, and did not. form() trusted the declared
+        // content type: a JSON body with no '&' is one segment and with no '=' the whole body
+        // became the "name", which was appended before anything judged it sensitive. That is
+        // what `curl -d @caps.json` sends by default.
+        byte[] caps = bytes("{\"tb:options\":{\"key\":\"REAL-KEY\",\"secret\":\"REAL-SECRET\"}}");
+
+        String rendered = BodyRedactor.render("application/x-www-form-urlencoded", caps);
+
+        assertThat(rendered).doesNotContain("REAL-KEY").doesNotContain("REAL-SECRET");
+        assertThat(rendered).contains("not name=value pairs");
+    }
+
+    @Test
+    void aSegmentWithNoNameIsNotPrintedEither() {
+        assertThat(BodyRedactor.render("application/x-www-form-urlencoded", bytes("=justavalue")))
+                .doesNotContain("justavalue");
+        assertThat(BodyRedactor.render("application/x-www-form-urlencoded", bytes("a=1&leftover")))
+                .doesNotContain("leftover");
+    }
+
+    @Test
+    void aSensitiveFormFieldLosesItsNameAsWellAsItsValue() {
+        // A name long enough to hold a credential frequently is one.
+        String rendered = BodyRedactor.render("application/x-www-form-urlencoded",
+                bytes("user=alice&password=hunter2"));
+
+        assertThat(rendered).doesNotContain("hunter2").contains("alice");
+    }
+
+    @Test
+    void theProjectsOwnNameForTheCredentialIsRedacted() {
+        // HttpProxy sends the credential as client_key / client_secret. Whole-key matching
+        // caught client_secret through the "secret" fragment and missed client_key entirely,
+        // so the secret was hidden and the key beside it was printed.
+        assertThat(BodyRedactor.isSensitiveKey("client_key")).isTrue();
+        assertThat(BodyRedactor.isSensitiveKey("clientKey")).isTrue();
+        assertThat(BodyRedactor.isSensitiveKey("privateKey")).isTrue();
+        assertThat(BodyRedactor.isSensitiveKey("passphrase")).isTrue();
+    }
+
+    @Test
+    void aWordThatMerelyContainsASensitiveWordIsNotRedacted() {
+        // Splitting on camelCase and separators rather than substring-matching keeps "monkey"
+        // from being read as "key"; over-redaction costs debugging.
+        assertThat(BodyRedactor.isSensitiveKey("monkey")).isFalse();
+        assertThat(BodyRedactor.isSensitiveKey("browserName")).isFalse();
+        assertThat(BodyRedactor.isSensitiveKey("passenger")).isFalse();
+    }
 }
