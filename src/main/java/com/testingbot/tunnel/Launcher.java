@@ -47,7 +47,22 @@ public final class Launcher {
         // above has passed.
         Class<?> app = Class.forName("com.testingbot.tunnel.App");
         Method main = app.getMethod("main", String[].class);
-        main.invoke(null, new Object[]{args});
+        try {
+            main.invoke(null, new Object[]{args});
+        } catch (java.lang.reflect.InvocationTargetException wrapped) {
+            // Without this, everything escaping App.main surfaced as an
+            // InvocationTargetException with three frames of reflection plumbing above the
+            // real cause -- so introducing this launcher made every uncaught error harder to
+            // read than it had been.
+            Throwable cause = wrapped.getCause();
+            if (cause instanceof Exception) {
+                throw (Exception) cause;
+            }
+            if (cause instanceof Error) {
+                throw (Error) cause;
+            }
+            throw wrapped;
+        }
     }
 
     /**

@@ -356,7 +356,10 @@ public class App {
             + "where a proxy intercepts TLS and re-signs it with an internal CA, which the JVM "
             + "would otherwise reject. Added to the platform's trust store, not replacing it.");
         caCert.setArgName("FILE");
-        caCert.setArgs(Option.UNLIMITED_VALUES);
+        // Not UNLIMITED_VALUES: that made "--cacert-file ca.pem KEY SECRET" swallow the
+        // positional credentials as extra file names, and the error then quoted the
+        // customer's API key back at them -- the line that gets pasted into a support
+        // ticket. Repeating the option already yields every occurrence.
         options.addOption(caCert);
 
         Option controlProxy = new Option(null, "proxy-testingbot", true,
@@ -656,7 +659,14 @@ public class App {
                 ? commandLine.getOptionValue("proxy-userpwd")
                 : System.getenv("TESTINGBOT_PROXY_USERPWD");
         if (proxyAuthValue != null && !proxyAuthValue.isEmpty()) {
-            app.setProxyAuth(proxyAuthValue);
+            try {
+                app.setProxyAuth(proxyAuthValue);
+            } catch (IllegalArgumentException invalid) {
+                // IllegalArgumentException is not caught by main, so a mistyped
+                // value produced a stack trace where every other option manages a
+                // one-line message.
+                throw new ParseException(invalid.getMessage());
+            }
         }
 
         if (commandLine.hasOption("noproxy")) {
@@ -1269,7 +1279,11 @@ public class App {
         }
 
         if (commandLine.hasOption("proxy")) {
-            app.setProxy(commandLine.getOptionValue("proxy"));
+                try {
+                    app.setProxy(commandLine.getOptionValue("proxy"));
+                } catch (IllegalArgumentException invalid) {
+                    throw new ParseException(invalid.getMessage());
+                }
         }
         if (commandLine.hasOption("pac-local")) {
             app.setPacLocal(commandLine.getOptionValue("pac-local").trim());
