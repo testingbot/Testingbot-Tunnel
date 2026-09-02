@@ -265,7 +265,15 @@ public class WebsocketHandler extends ConnectHandler {
         // capacity. A ByteBuffer.allocate() is in fill mode, where limit == capacity, so fill()
         // would see no room and read nothing -- spinning the selector rather than failing.
         private final ByteBuffer readBuffer = org.eclipse.jetty.util.BufferUtil.allocate(1);
-        private boolean settled;
+        /**
+         * Written on the selector thread, read on the scheduler thread: IdleTimeout schedules
+         * its check on the Scheduler and AbstractEndPoint calls onIdleExpired inline there. A
+         * plain boolean let an idle expiry landing inside the hand-off window count one dial as
+         * both success and failure -- writing a 502 for a tunnel that was granted, or tearing
+         * down one the client had already been told about.
+         */
+        private final java.util.concurrent.atomic.AtomicBoolean settled =
+                new java.util.concurrent.atomic.AtomicBoolean();
 
         WebsocketHandshakeConnection(EndPoint endPoint, ConnectContext context) {
             super(endPoint, WebsocketHandler.this.getExecutor(),
@@ -328,26 +336,31 @@ public class WebsocketHandler extends ConnectHandler {
                     }
                 }
                 context.getRequest().setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
-
-                settled = true;
-                getEndPoint().setIdleTimeout(getIdleTimeout());
-                com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "success").inc();
-                observeWsDial(context.getRequest());
-                LOG.info("WebSocket handshake with target complete, status: {}, headers: {}",
-                        lines[0], wsResponseHeaders.size());
-                // Publishes the tunnel: this is what calls onConnectSuccess.
-                super.onOpen();
+                handshakeSucceeded(lines[0], wsResponseHeaders.size());
             } catch (Throwable failure) {
                 handshakeFailed(failure);
             }
         }
 
-        private void handshakeFailed(Throwable failure) {
-            if (settled) {
-                // Past the hand-off; the tunnel owns its own failures now.
+        /** Named to match CustomConnectHandler's, so the two can be compared side by side. */
+        private void handshakeSucceeded(String statusLine, int headerCount) {
+            if (!settled.compareAndSet(false, true)) {
                 return;
             }
-            settled = true;
+            getEndPoint().setIdleTimeout(getIdleTimeout());
+            com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "success").inc();
+            observeWsDial(context.getRequest());
+            LOG.info("WebSocket handshake with target complete, status: {}, headers: {}",
+                    statusLine, headerCount);
+            // Publishes the tunnel: this is what calls onConnectSuccess.
+            super.onOpen();
+        }
+
+        private void handshakeFailed(Throwable failure) {
+            if (!settled.compareAndSet(false, true)) {
+                // Already settled -- past the hand-off, or a concurrent failure won.
+                return;
+            }
             com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
             observeWsDial(context.getRequest());
             LOG.warn("WebSocket connect/handshake failed", failure);
@@ -358,7 +371,7 @@ public class WebsocketHandler extends ConnectHandler {
 
         @Override
         public boolean onIdleExpired(java.util.concurrent.TimeoutException timeout) {
-            if (!settled) {
+            if (!settled.get()) {
                 handshakeFailed(new IOException(
                         "Timed out waiting for the target to answer the WebSocket upgrade"));
                 return false;

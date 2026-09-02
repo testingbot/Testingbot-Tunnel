@@ -386,7 +386,15 @@ public class CustomConnectHandler extends ConnectHandler {
 
         protected final ConnectContext context;
         protected final ProxyTarget target;
-        private boolean settled;
+        /**
+         * Written on the selector thread, read on the scheduler thread: IdleTimeout schedules
+         * its check on the Scheduler and AbstractEndPoint calls onIdleExpired inline there. A
+         * plain boolean let an idle expiry landing inside the hand-off window count one dial as
+         * both success and failure -- writing a 502 for a tunnel that was granted, or tearing
+         * down one the client had already been told about.
+         */
+        private final java.util.concurrent.atomic.AtomicBoolean settled =
+                new java.util.concurrent.atomic.AtomicBoolean();
 
         HandshakeConnection(EndPoint endPoint, ConnectContext context, ProxyTarget target) {
             super(endPoint, CustomConnectHandler.this.getExecutor(),
@@ -424,7 +432,9 @@ public class CustomConnectHandler extends ConnectHandler {
         }
 
         protected void handshakeSucceeded() {
-            settled = true;
+            if (!settled.compareAndSet(false, true)) {
+                return;
+            }
             getEndPoint().setIdleTimeout(getIdleTimeout());
             TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
             observeDial(context.getRequest());
@@ -437,11 +447,10 @@ public class CustomConnectHandler extends ConnectHandler {
         }
 
         protected void handshakeFailed(Throwable failure) {
-            if (settled) {
-                // Past the hand-off; the tunnel owns its own failures now.
+            if (!settled.compareAndSet(false, true)) {
+                // Already settled -- past the hand-off, or a concurrent failure won.
                 return;
             }
-            settled = true;
             TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
             observeDial(context.getRequest());
             LOG.error("Failed to establish {} tunnel through upstream proxy {}:{} to {}:{}: {}",
@@ -454,7 +463,7 @@ public class CustomConnectHandler extends ConnectHandler {
 
         @Override
         public boolean onIdleExpired(java.util.concurrent.TimeoutException timeout) {
-            if (!settled) {
+            if (!settled.get()) {
                 handshakeFailed(new IOException("Timed out waiting for upstream proxy "
                         + target.upstream().getHost() + ":" + target.upstream().getPort()
                         + " to complete the " + protocolName() + " handshake"));
