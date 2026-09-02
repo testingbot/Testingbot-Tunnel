@@ -163,6 +163,19 @@ every start and never removed, port forwards not rebuilt, a bind failure on the 
 soak that never drops the connection cannot see any of them, and the plain `reconnect` scenario
 drops it once, which cannot tell a leak from a one-off.
 
+**Waiting long enough to have measured anything.** The recovery poll used to run for about
+three minutes and report anything slower as "never recovered". The client retries the server it
+was given `MAX_RETRIES=30` times before giving up and re-registering for a new one; the retry
+delay is 5s, but an attempt against a host that has gone away blocks on the connect first --
+measured at 20s per attempt, so **ten minutes** before the rebuild path is even reached. A
+two-hour run duly failed at 49 minutes on attempt 9 of 30, having proved nothing either way.
+
+The wait is now `E2E_SOAK_RECOVER_SECONDS` (default 780) and reports which of three things
+happened: ready again, the process exited, or still alive and not ready after the deadline --
+the last naming how many reconnect attempts had been logged. A recovery slower than
+`E2E_SOAK_SLOW_RECOVERY` (default 60s) still passes but is printed as `SLOW recovery Ns`,
+because a rebuild is minutes of downtime and should not average quietly into "recovered".
+
 It asserts a **trend**, not a total: the reading after the last reconnect against the one after
 the second, when pools have warmed. That distinction matters — the real leak added about two
 threads per reconnect, which four reconnects hide inside any reasonable absolute margin.

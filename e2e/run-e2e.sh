@@ -1452,8 +1452,17 @@ scenario_soak_reconnect() {
   local burst="${E2E_SOAK_BURST:-20}"
   local uport mport; uport="$(free_port)"; mport="$(free_port)"
 
-  printf '    plan: %s sever/recover cycles -- each waits out a 30s keepalive, so allow 10+ minutes\n' \
-    "$cycles"
+  # Read before the plan is printed: announcing "5 cycles" and then "running to a 120 minute
+  # deadline" two lines later contradicts itself, and this scenario is long enough that the
+  # plan line is what a reader uses to decide whether it has hung.
+  local rc_deadline=0
+  if [ -n "${E2E_SOAK_MINUTES:-}" ]; then
+    printf '    plan: sever/recover cycles to a %s minute deadline -- allow %s+ minutes\n' \
+      "$E2E_SOAK_MINUTES" "$((E2E_SOAK_MINUTES + 5))"
+  else
+    printf '    plan: %s sever/recover cycles -- each waits out a 30s keepalive, so allow 10+ minutes\n' \
+      "$cycles"
+  fi
 
   rm -f "$WORK/soak-rc-freeze"
   python3 "$HERE/upstream_proxy.py" "$uport" --freeze-file "$WORK/soak-rc-freeze" \
@@ -1475,11 +1484,9 @@ scenario_soak_reconnect() {
   fi
   printf '    baseline: %s threads, %s fds\n' "$threads0" "$fds0"
 
-  local rc_deadline=0
   if [ -n "${E2E_SOAK_MINUTES:-}" ]; then
     rc_deadline=$((SECONDS + E2E_SOAK_MINUTES * 60))
     cycles=100000
-    printf '    running to a %s minute deadline rather than a cycle count\n' "$E2E_SOAK_MINUTES"
   fi
 
   local warm_threads=0 warm_fds=0 cycle i t f pids recovered noticed style
@@ -1532,15 +1539,43 @@ scenario_soak_reconnect() {
       printf ', %s NOT noticed' "$style"
     fi
 
+    # Wait for readiness, but long enough to cover the client's own worst case, and say which
+    # of the three outcomes happened.
+    #
+    # This used to poll for about three minutes and report anything slower as "never recovered".
+    # The client retries the server it was given MAX_RETRIES=30 times before giving up and
+    # re-registering for a new one, and while the retry *delay* is 5s, an attempt against a host
+    # that has gone away blocks on the connect first -- measured at 20s per attempt, so ten
+    # minutes before the rebuild path is even reached. A two-hour soak duly failed at 49 minutes
+    # on attempt 9 of 30, having proved nothing about whether the tunnel recovers.
+    local recover_deadline=$((SECONDS + ${E2E_SOAK_RECOVER_SECONDS:-780}))
+    local recover_start=$SECONDS
     recovered=0
-    for i in $(seq 1 90); do
+    while [ "$SECONDS" -lt "$recover_deadline" ]; do
       if [ "$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
                 "http://127.0.0.1:$mport/readyz")" = "200" ]; then recovered=1; break; fi
+      # A process that has exited will never become ready, so stop waiting out the deadline for
+      # it -- and report it as the different thing it is.
+      if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+        bad "cycle $cycle: tunnel recovered" \
+          "the tunnel process exited after $((SECONDS-recover_start))s; it did not just fail to recover"
+        kill $up 2>/dev/null; return 1
+      fi
       sleep 2
     done
     if [ "$recovered" != "1" ]; then
-      bad "cycle $cycle: tunnel recovered" "readyz never returned to 200"
+      # Still alive and still not ready. Name where it had got to, so "never recovers" is
+      # distinguishable from "was still working through its retries".
+      local attempts
+      attempts="$(grep -c 'Attempting to re-establish' "$TUNNEL_LOG" 2>/dev/null || echo 0)"
+      bad "cycle $cycle: tunnel recovered" \
+        "still not ready after $((SECONDS-recover_start))s, process alive, $attempts reconnect attempts logged"
       kill $up 2>/dev/null; return 1
+    fi
+    # A recovery that needed the rebuild path is a pass, but not a quiet one: it is minutes of
+    # downtime and worth seeing in the output rather than averaging into "recovered".
+    if [ "$((SECONDS-recover_start))" -gt "${E2E_SOAK_SLOW_RECOVERY:-60}" ]; then
+      printf ', SLOW recovery %ss' "$((SECONDS-recover_start))"
     fi
 
     sleep 5
