@@ -60,11 +60,18 @@ class LauncherTest {
     }
 
     @Test
-    void theMinimumMatchesTheOneAppEnforces() {
+    void theMinimumMatchesTheOneAppEnforces() throws Exception {
         // Duplicated on purpose -- App cannot be loaded to ask -- so a drift would mean the
         // launcher waves through a JVM that App then rejects with the unreadable error.
-        assertThat(Launcher.class.getDeclaredFields()).isNotEmpty();
-        assertThat(parse("17.0.1")).isGreaterThanOrEqualTo(App.MINIMUM_JAVA_VERSION);
-        assertThat(parse("16.0.1")).isLessThan(App.MINIMUM_JAVA_VERSION);
+        //
+        // This has to read Launcher's own constant. It used to assert only that the class had
+        // fields and that 17 >= App's minimum, so setting Launcher's copy to 11 left it green --
+        // which is precisely the drift it exists to catch, and the reason App's constant was
+        // widened to package-private in the first place.
+        java.lang.reflect.Field launcherMinimum =
+                Launcher.class.getDeclaredField("MINIMUM_JAVA_VERSION");
+        launcherMinimum.setAccessible(true);
+
+        assertThat(launcherMinimum.getInt(null)).isEqualTo(App.MINIMUM_JAVA_VERSION);
     }
 }

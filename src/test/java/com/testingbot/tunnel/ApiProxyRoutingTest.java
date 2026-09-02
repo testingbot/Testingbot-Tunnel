@@ -43,9 +43,11 @@ class ApiProxyRoutingTest {
 
     private WireMockServer wireMock;
     private ServerSocket socks;
+    private ServerSocket httpProxy;
     private ExecutorService pool;
     private Authenticator previousAuthenticator;
     private final List<String> socksLog = new CopyOnWriteArrayList<>();
+    private final List<String> proxyLog = new CopyOnWriteArrayList<>();
 
     @BeforeEach
     void setUp() {
@@ -70,6 +72,9 @@ class ApiProxyRoutingTest {
         }
         if (socks != null && !socks.isClosed()) {
             socks.close();
+        }
+        if (httpProxy != null && !httpProxy.isClosed()) {
+            httpProxy.close();
         }
         if (pool != null) {
             pool.shutdownNow();
@@ -178,6 +183,56 @@ class ApiProxyRoutingTest {
         }
     }
 
+    /**
+     * An HTTP proxy that records the request line and forwards to {@code target}.
+     *
+     * <p>The alternative -- pointing --proxy and the API host at the same WireMock port -- makes
+     * the verify() hold whichever route is taken, so it stayed green with the proxy configuration
+     * removed from Api altogether.
+     *
+     * @return the port it listens on
+     */
+    private int startRecordingHttpProxy(int target) throws IOException {
+        httpProxy = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        pool = pool == null ? Executors.newCachedThreadPool() : pool;
+        ExecutorService running = pool;
+        running.submit(() -> {
+            while (!httpProxy.isClosed()) {
+                Socket accepted;
+                try {
+                    accepted = httpProxy.accept();
+                } catch (IOException closed) {
+                    return;
+                }
+                running.submit(() -> {
+                    try (Socket client = accepted; Socket upstream = new Socket("127.0.0.1", target)) {
+                        InputStream fromClient = client.getInputStream();
+                        OutputStream toUpstream = upstream.getOutputStream();
+
+                        // The request line is all that has to be inspected; everything after it,
+                        // headers and body alike, is copied through untouched.
+                        StringBuilder line = new StringBuilder();
+                        int c;
+                        while ((c = fromClient.read()) >= 0 && c != '\n') {
+                            if (c != '\r') {
+                                line.append((char) c);
+                            }
+                        }
+                        proxyLog.add(line.toString());
+                        toUpstream.write((line + "\r\n").getBytes(StandardCharsets.UTF_8));
+                        toUpstream.flush();
+
+                        running.submit(() -> copy(fromClient, toUpstream));
+                        copy(upstream.getInputStream(), client.getOutputStream());
+                    } catch (IOException ignored) {
+                        // test finished
+                    }
+                });
+            }
+        });
+        return httpProxy.getLocalPort();
+    }
+
     private Api apiThroughProxy(String proxy, String credentials) {
         App app = new App();
         app.setClientKey("test_key");
@@ -221,17 +276,25 @@ class ApiProxyRoutingTest {
     void anHttpProxyGivenWithItsSchemeIsParsedAsAProxy() throws Exception {
         // "http://host:port" split on the first colon into host "http", and Integer.parseInt of
         // the rest threw. The failure looked like a broken proxy rather than a parse error.
+        int proxyPort = startRecordingHttpProxy(wireMock.port());
+
         App app = new App();
         app.setClientKey("test_key");
         app.setClientSecret("test_secret");
-        app.setProxy("http://127.0.0.1:" + wireMock.port());
+        app.setProxy("http://127.0.0.1:" + proxyPort);
         Api api = new Api(app);
         api.setApiScheme("http");
         api.setApiHost("localhost:" + wireMock.port());
 
-        // WireMock answers absolute-URI requests from the same stub, so a request that arrives
-        // proves the proxy host and port were understood.
         assertThatCode(api::createTunnel).doesNotThrowAnyException();
+
+        // The proxy is on its own port, so the call reaching it is what proves the host and port
+        // were understood -- and the absolute-form request line is what proves it was treated as
+        // a proxy rather than dialled as an origin.
+        assertThat(proxyLog)
+                .as("the API call went through --proxy")
+                .containsExactly("POST http://localhost:" + wireMock.port()
+                        + "/v1/tunnel/create HTTP/1.1");
         wireMock.verify(1, WireMock.postRequestedFor(urlPathEqualTo("/v1/tunnel/create")));
     }
 

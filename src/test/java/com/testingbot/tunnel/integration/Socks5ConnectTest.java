@@ -192,7 +192,7 @@ class Socks5ConnectTest {
             }
             head.append((char) b);
         }
-        statusOut.append(head.length() == 0 ? "" : head.toString().split("\r\n")[0]);
+        statusOut.append(head);
         return socket;
     }
 
@@ -246,7 +246,11 @@ class Socks5ConnectTest {
 
         StringBuilder status = new StringBuilder();
         try (Socket ignored = connect(status, 20_000)) {
+            // Not doesNotContain("200") alone: connect() appends nothing when the proxy answers
+            // nothing, so an empty string satisfied that and the test passed with the
+            // classified-error path deleted.
             assertThat(status.toString()).doesNotContain("200");
+            assertThat(status.toString()).contains("502").contains("upstream-proxy-");
         }
     }
 

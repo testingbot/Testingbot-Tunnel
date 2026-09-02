@@ -156,20 +156,26 @@ class CaCertificateTest {
         assumeTrue(pem != null, "keytool is not available in this JDK");
 
         CaCertificates authorities = CaCertificates.load(new String[]{pem.toString()});
-        int accepted = authorities.sslContext().getSocketFactory() == null
-                ? 0 : authorities.subjects().size();
 
-        assertThat(accepted).isEqualTo(1);
         // The platform's roots number in the hundreds; ours adds to them rather than replacing.
         javax.net.ssl.TrustManagerFactory factory = javax.net.ssl.TrustManagerFactory
                 .getInstance(javax.net.ssl.TrustManagerFactory.getDefaultAlgorithm());
         factory.init((KeyStore) null);
-        int platformRoots = ((javax.net.ssl.X509TrustManager) factory.getTrustManagers()[0])
-                .getAcceptedIssuers().length;
+        javax.net.ssl.X509TrustManager platform =
+                (javax.net.ssl.X509TrustManager) factory.getTrustManagers()[0];
+        int platformRoots = platform.getAcceptedIssuers().length;
         assumeTrue(platformRoots > 0, "this JVM has no platform trust store to compare against");
 
-        SSLContext combined = authorities.sslContext();
-        assertThat(combined).isNotNull();
+        // The count is the assertion. This used to end at isNotNull() on a fresh SSLContext,
+        // so dropping the platform trust manager -- which would fail verification for every
+        // public endpoint the tunnel talks to, the API included -- left the test green.
+        javax.net.ssl.X509TrustManager combined = authorities.trustManager();
+
+        assertThat(combined.getAcceptedIssuers()).hasSize(platformRoots + 1);
+        assertThat(combined.getAcceptedIssuers())
+                .as("the platform roots are all still there")
+                .contains(platform.getAcceptedIssuers());
+        assertThat(authorities.subjects()).hasSize(1);
     }
 
     @Test

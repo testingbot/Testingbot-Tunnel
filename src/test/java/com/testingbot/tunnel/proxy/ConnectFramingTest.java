@@ -145,6 +145,20 @@ class ConnectFramingTest {
         throw new IllegalStateException("proxy did not start");
     }
 
+    /**
+     * Asserts the tunnel refused this CONNECT, and said why.
+     *
+     * <p>{@code doesNotContain("200")} on its own is satisfied by an empty string, and
+     * {@code connect()} appends nothing when the proxy answers nothing -- so every refusal test
+     * here passed with the classified-error path deleted entirely. The status and the reason
+     * header have to be positively present.
+     */
+    private static void assertRefused(String status, String response) {
+        assertThat(status).doesNotContain("200");
+        assertThat(response).contains("502");
+        assertThat(response).contains("upstream-proxy-");
+    }
+
     /** Opens a CONNECT through the tunnel and returns the socket, positioned after the headers. */
     private Socket connect(String extraHeaders, StringBuilder statusOut, int timeoutMs)
             throws Exception {
@@ -163,7 +177,7 @@ class ConnectFramingTest {
             }
             head.append((char) b);
         }
-        statusOut.append(head.length() == 0 ? "" : head.toString().split("\r\n")[0]);
+        statusOut.append(head);
         return socket;
     }
 
@@ -195,7 +209,7 @@ class ConnectFramingTest {
 
         StringBuilder status = new StringBuilder();
         try (Socket ignored = connect("", status, 20_000)) {
-            assertThat(status.toString()).doesNotContain("200");
+            assertRefused(status.toString(), status.toString());
         }
     }
 
@@ -208,7 +222,7 @@ class ConnectFramingTest {
 
         StringBuilder status = new StringBuilder();
         try (Socket ignored = connect("", status, 20_000)) {
-            assertThat(status.toString()).doesNotContain("200");
+            assertRefused(status.toString(), status.toString());
         }
     }
 
@@ -224,7 +238,7 @@ class ConnectFramingTest {
         long start = System.currentTimeMillis();
         try (Socket ignored = connect("", status, 90_000)) {
             long elapsed = System.currentTimeMillis() - start;
-            assertThat(status.toString()).doesNotContain("200");
+            assertRefused(status.toString(), status.toString());
             assertThat(elapsed)
                     .as("should give up on the handshake timeout, not the tunnel's idle timeout")
                     .isLessThan(45_000);
@@ -253,7 +267,7 @@ class ConnectFramingTest {
 
         StringBuilder status = new StringBuilder();
         try (Socket ignored = connect("", status, 20_000)) {
-            assertThat(status.toString()).doesNotContain("200");
+            assertRefused(status.toString(), status.toString());
         }
     }
 
@@ -277,7 +291,7 @@ class ConnectFramingTest {
         StringBuilder status = new StringBuilder();
         long start = System.currentTimeMillis();
         try (Socket ignored = connect("", status, 30_000)) {
-            assertThat(status.toString()).doesNotContain("200");
+            assertRefused(status.toString(), status.toString());
             assertThat(System.currentTimeMillis() - start)
                     .as("EOF should fail the handshake at once, not wait for the timeout")
                     .isLessThan(10_000);

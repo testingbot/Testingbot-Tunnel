@@ -16,6 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * {@code --dns} with more than one server, plus {@code --dns-timeout} and
@@ -286,11 +288,25 @@ class CustomDnsResolverMultiServerTest {
         FakeDns only = server("internal.example", "10.6.6.6");
         CustomDnsResolver resolver = CustomDnsResolver.create(spec(only));
 
+        // Some networks answer everything, so this only means anything where the platform itself
+        // says the name does not exist.
+        String bogus = "definitely-not-a-real-host.invalid";
+        assumeTrue(platformRefuses(bogus), "this network resolves names that do not exist");
+
+        // Failure has to be a thrown UnknownHostException, not an empty array and not null: a
+        // caller that gets either of those back dials nothing and reports nothing. The previous
+        // shape -- a try/catch whose catch asserted the caught exception was of the type it was
+        // declared as -- was satisfied by all three.
+        assertThatThrownBy(() -> resolver.resolve(bogus))
+                .isInstanceOf(UnknownHostException.class);
+    }
+
+    private static boolean platformRefuses(String host) {
         try {
-            resolver.resolve("definitely-not-a-real-host.invalid");
-            // Some networks answer everything; only assert when the platform agrees it is bogus.
-        } catch (UnknownHostException expected) {
-            assertThat(expected).isInstanceOf(UnknownHostException.class);
+            InetAddress.getAllByName(host);
+            return false;
+        } catch (UnknownHostException nxdomain) {
+            return true;
         }
     }
 }

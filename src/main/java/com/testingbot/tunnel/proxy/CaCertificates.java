@@ -116,10 +116,23 @@ public final class CaCertificates {
      * where {@code cacerts} lives or what its password is, both of which vary by distribution.
      */
     public SSLContext sslContext() throws GeneralSecurityException {
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, new TrustManager[]{trustManager()}, null);
+        return context;
+    }
+
+    /**
+     * The composite trust manager {@link #sslContext()} installs.
+     *
+     * <p>Exposed so that "adds to the platform roots rather than replacing them" can be asserted
+     * directly. Through the SSLContext alone the only observable is a successful handshake
+     * against a public endpoint, which needs the network.
+     */
+    public X509TrustManager trustManager() throws GeneralSecurityException {
         X509TrustManager platform = trustManagerFor(null);
         X509TrustManager extra = trustManagerFor(keyStoreOf(certificates));
 
-        TrustManager composite = new X509TrustManager() {
+        return new X509TrustManager() {
             @Override
             public void checkServerTrusted(X509Certificate[] chain, String authType)
                     throws CertificateException {
@@ -152,10 +165,6 @@ public final class CaCertificates {
                 return all.toArray(new X509Certificate[0]);
             }
         };
-
-        SSLContext context = SSLContext.getInstance("TLS");
-        context.init(null, new TrustManager[]{composite}, null);
-        return context;
     }
 
     private static KeyStore keyStoreOf(List<X509Certificate> certificates)
