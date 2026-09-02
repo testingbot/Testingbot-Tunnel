@@ -69,9 +69,26 @@ TESTINGBOT_SE_PORT=4446 java -jar testingbot-tunnel.jar
 | `--se-port` | Local Selenium port (default 4445) |
 | `--localproxy` | Local HTTP proxy port (default 8087) |
 | `--tunnel-identifier` | Name this tunnel, so several can run at once |
+| `--allow-hosts` | Reach only these hosts; everything else gets 403 |
 | `--fast-fail-regexps` | Refuse matching hosts. Prefix `!` for an exception: `.*,!ok\.com` blocks everything except `ok.com` |
-| `--proxy` | Upstream proxy for egress — used by browser traffic **and** the tunnel's own SSH connection |
+| `--proxy` | Upstream proxy for egress — browser traffic and, unless `--proxy-testingbot` is set, the tunnel's own connection |
 | `--doctor` | Run diagnostics and exit |
+
+### Restricting what the tunnel can reach
+
+A tunnel can reach whatever the machine running it can reach. `--fast-fail-regexps` names what to
+refuse, which only helps for destinations somebody thought of in advance. `--allow-hosts` is the
+other way round — name what the tunnel is *for*, and everything else is refused:
+
+```bash
+java -jar testingbot-tunnel.jar --allow-hosts 'staging.example.com,*.internal.example'
+```
+
+`*.internal.example` covers subdomains but not `internal.example` itself, so widening to the apex
+has to be written down. Omit the option and any host is reachable, as before.
+
+Both, and `--localhost-policy deny`, are enforced on every way out: plain HTTP, `CONNECT`, and
+WebSocket upgrades.
 
 ### Reaching an upstream proxy
 
@@ -91,6 +108,32 @@ java -jar testingbot-tunnel.jar --proxy proxy.corp:8080 --proxy-auth-scheme nego
 Credentials come from your existing Kerberos ticket cache, or from `--krb5-keytab` with
 `--krb5-principal` where nobody has run `kinit`. `--doctor` reports exactly which step fails,
 which matters because every Negotiate misconfiguration otherwise looks like the same 407.
+
+`--krb5-hosts` sends the same credentials to *sites* rather than to the proxy, for intranets that
+authenticate with Kerberos. It is a list, never a wildcard: a service ticket names the user, so
+every host that may receive one has to be written down.
+
+Where egress is filtered by destination, the proxy allowed out to the internet is often not the
+one that reaches internal test targets. `--proxy-testingbot` gives TestingBot's own traffic — the
+API and the tunnel's connection — a different proxy from the one test traffic uses:
+
+```bash
+java -jar testingbot-tunnel.jar --proxy 10.0.0.9:8080 \
+     --proxy-testingbot corp-egress:3128 --proxy-testingbot-userpwd user:password
+```
+
+Credentials are deliberately not shared between the two: `--proxy-userpwd` belongs to one proxy
+operator and is not sent to another.
+
+If a proxy intercepts TLS and re-signs it with an internal authority, the JVM will not trust it
+and the tunnel cannot even register itself. Point it at the authority:
+
+```bash
+java -jar testingbot-tunnel.jar --proxy proxy.corp:8080 --cacert-file /etc/ssl/corp-ca.pem
+```
+
+It is added to the platform's trust store rather than replacing it, so the public roots keep
+working. `--doctor` prints the subjects it loaded.
 
 ### Choosing egress per destination (PAC)
 
@@ -116,6 +159,10 @@ Check a file before relying on it:
 ```bash
 java -jar testingbot-tunnel.jar --pac-local corp.pac --pac-test https://internal.corp/page
 ```
+
+`--dns` resolves through servers you name rather than the platform resolver, taking a list: the
+first is primary and the rest are tried in order when it does not answer. `--dns-round-robin`
+spreads queries across them instead, and `--dns-timeout` bounds each one.
 
 > `--pac-local` is not the same as `--pac`. `--pac` tells the *remote browser* which PAC URL to
 > use; `--pac-local` decides where *this tunnel* sends its own traffic.
@@ -159,6 +206,22 @@ way to carry credentials, and they disclose nothing beyond up/down.
 which logs only failed or 5xx responses). Every request carries a correlation id, logged in
 brackets and passed to the target in `--request-id-header`. Header values that carry credentials
 are redacted.
+
+Browser traffic and the Selenium relay can be turned up independently, which saves drowning in
+one while debugging the other:
+
+```bash
+java -jar testingbot-tunnel.jar --log-http proxy:none,forwarder:headers
+```
+
+`forwarder:body` adds the relay's request body. That body is WebDriver capabilities, which
+routinely carry your access key, so it is redacted before it is written: values are matched by
+key name, and anything that cannot be parsed — an unknown content type, or a body too large to
+parse whole — is described rather than printed. `proxy:body` is refused, because browser traffic
+has to stream and cannot be buffered for logging.
+
+`--log-format json` writes one JSON object per record, so a collector need not guess where a
+multi-line message or a stack trace ends.
 
 ## Building
 
