@@ -494,10 +494,23 @@ public class App {
     }
 
     /** The effective level: --log-level, else --debug, else info. */
-    /** {@code --log-format} straight off the command line, for use before an App exists. */
-    static String requestedLogFormat(CommandLine commandLine) {
+    /**
+     * {@code --log-format} straight off the command line, for use before an App exists.
+     *
+     * <p>Validated here as well as in applyOptions, because --doctor never reaches applyOptions
+     * and a typo would otherwise fall back to text without a word.
+     */
+    static String requestedLogFormat(CommandLine commandLine) throws ParseException {
         String value = commandLine.getOptionValue("log-format");
-        return value == null ? "text" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (value == null) {
+            return "text";
+        }
+        String normalised = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!normalised.equals("text") && !normalised.equals("json")) {
+            throw new ParseException("Invalid --log-format '" + normalised
+                    + "'. Expected text or json.");
+        }
+        return normalised;
     }
 
     static String requestedLogLevel(CommandLine commandLine) {
@@ -778,6 +791,16 @@ public class App {
             // console handler is installed before anything is parsed into an App.
             handler.setFormatter(logFormatterFor(requestedLogFormat(commandLine)));
             logger.addHandler(handler);
+            if ("json".equalsIgnoreCase(requestedLogFormat(commandLine))) {
+                // Sibling JUL loggers (HttpProxy, Doctor, SSHTunnel, the handlers) publish
+                // through the root handlers. Reformatting only App's left stdout interleaving
+                // JSON objects with SimpleFormatter's two-line text, which a one-object-per-line
+                // collector mis-parses for the majority of records.
+                for (java.util.logging.Handler rootHandler
+                        : Logger.getLogger("").getHandlers()) {
+                    rootHandler.setFormatter(new JsonLogFormatter());
+                }
+            }
 
             App app = new App();
 
@@ -809,22 +832,29 @@ public class App {
                 String logfilePath = commandLine.getOptionValue("logfile");
                 try {
                     FileHandler handlerFile = new FileHandler(logfilePath, true);
-                    handlerFile.setFormatter(logFormatterFor(app.getLogFormat()));
+                    handlerFile.setFormatter(logFormatterFor(requestedLogFormat(commandLine)));
                     handlerFile.setLevel(Level.ALL);
                     // Attach to App's logger (useParentHandlers=false above) AND to the JUL root
                     // so messages from sibling loggers (HttpProxy, SSHTunnel, Doctor, ...) land in the file too.
                     logger.addHandler(handlerFile);
                     Logger.getLogger("").addHandler(handlerFile);
 
-                    ch.qos.logback.classic.encoder.PatternLayoutEncoder encoder = new ch.qos.logback.classic.encoder.PatternLayoutEncoder();
-                    encoder.setContext(loggerContext);
                     // The same file receives records from both logging stacks, so a json run
-                    // must not leave logback emitting text into it.
-                    encoder.setPattern("json".equalsIgnoreCase(app.getLogFormat())
-                            ? "{\"timestamp\":\"%d{ISO8601}\",\"level\":\"%level\","
-                              + "\"logger\":\"%logger\",\"message\":\"%replace(%msg%ex)"
-                              + "{'\"'}{'\\\\\"'}\"}%n"
-                            : "%d{ISO8601} [%thread] %-5level %logger{36} - %msg%n");
+                    // must not leave logback emitting text into it. A real encoder rather than
+                    // a pattern: escaping quotes with %replace silently did not work.
+                    ch.qos.logback.core.encoder.Encoder<ch.qos.logback.classic.spi.ILoggingEvent>
+                            encoder;
+                    if ("json".equalsIgnoreCase(requestedLogFormat(commandLine))) {
+                        JsonLogbackEncoder json = new JsonLogbackEncoder();
+                        json.setContext(loggerContext);
+                        encoder = json;
+                    } else {
+                        ch.qos.logback.classic.encoder.PatternLayoutEncoder pattern =
+                                new ch.qos.logback.classic.encoder.PatternLayoutEncoder();
+                        pattern.setContext(loggerContext);
+                        pattern.setPattern("%d{ISO8601} [%thread] %-5level %logger{36} - %msg%n");
+                        encoder = pattern;
+                    }
                     encoder.start();
                     ch.qos.logback.core.FileAppender<ch.qos.logback.classic.spi.ILoggingEvent> fileAppender = new ch.qos.logback.core.FileAppender<>();
                     fileAppender.setContext(loggerContext);

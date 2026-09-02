@@ -125,4 +125,26 @@ class JsonLogFormatterTest {
         assertThat(App.logFormatterFor("text")).isInstanceOf(LogFormatter.class);
         assertThat(App.logFormatterFor(null)).isInstanceOf(LogFormatter.class);
     }
+
+    @Test
+    void anInvalidLogFormatIsRefusedBeforeAnAppExists() throws Exception {
+        // --doctor never reaches applyOptions, so validating only there let a typo fall back to
+        // text without a word. requestedLogFormat is the path --doctor and the console handler
+        // both take.
+        org.apache.commons.cli.CommandLine line = new org.apache.commons.cli.PosixParser()
+                .parse(App.buildOptions(), new String[]{"--log-format", "xml"});
+
+        org.assertj.core.api.Assertions
+                .assertThatThrownBy(() -> App.requestedLogFormat(line))
+                .isInstanceOf(org.apache.commons.cli.ParseException.class)
+                .hasMessageContaining("Expected text or json");
+    }
+
+    @Test
+    void bothSpellingsAreAcceptedAndDefaultIsText() throws Exception {
+        assertThat(App.requestedLogFormat(new org.apache.commons.cli.PosixParser()
+                .parse(App.buildOptions(), new String[]{"--log-format", "JSON"}))).isEqualTo("json");
+        assertThat(App.requestedLogFormat(new org.apache.commons.cli.PosixParser()
+                .parse(App.buildOptions(), new String[]{}))).isEqualTo("text");
+    }
 }
