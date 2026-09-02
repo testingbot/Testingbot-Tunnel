@@ -51,6 +51,16 @@ public final class ProxyErrors {
                 "Could not reach the upstream proxy configured with --proxy."),
         UPSTREAM_PROXY_AUTH_FAILED("upstream-proxy-auth-failed", HttpStatus.BAD_GATEWAY_502,
                 "The upstream proxy rejected the credentials from --proxy-userpwd."),
+        /**
+         * The proxy answered and said no -- a 403 from its own allow list, or a SOCKS reply
+         * other than success.
+         *
+         * <p>Distinct from UNREACHABLE, which these used to be reported as: an operator told the
+         * proxy could not be reached goes and checks connectivity, when the connection worked
+         * perfectly and the proxy's policy is what refused the destination.
+         */
+        UPSTREAM_PROXY_REFUSED("upstream-proxy-refused", HttpStatus.BAD_GATEWAY_502,
+                "The upstream proxy was reached but refused this destination."),
         MALFORMED_REQUEST_URI("malformed-request-uri", HttpStatus.BAD_REQUEST_400,
                 "The request URI is malformed and was not forwarded."),
         DENIED_BY_FAST_FAIL("denied-by-fast-fail", HttpStatus.FORBIDDEN_403,
@@ -143,6 +153,10 @@ public final class ProxyErrors {
                     || message.contains("authentication") || message.contains("407"))) {
                 return Reason.UPSTREAM_PROXY_AUTH_FAILED;
             }
+            // A refusal is not a connectivity problem, and is checked first: the proxy answered.
+            if (message.contains("rejected connect") || message.contains("refused connect")) {
+                return Reason.UPSTREAM_PROXY_REFUSED;
+            }
             if (message.contains("upstream proxy") || message.contains("socks")) {
                 return Reason.UPSTREAM_PROXY_UNREACHABLE;
             }
@@ -159,8 +173,24 @@ public final class ProxyErrors {
     public static void write(Request request, Response response, Callback callback, Reason reason) {
         TunnelMetrics.PROXY_ERRORS_TOTAL.labels(reason.reason()).inc();
         response.getHeaders().put(ERROR_HEADER, reason.reason());
-        Response.writeError(request, response, callback, reason.status(),
-                reason.reason() + ": " + reason.explanation());
+        String message = reason.reason() + ": " + reason.explanation();
+
+        // Jetty's ErrorHandler only writes a body for GET, POST, HEAD and BAD
+        // (ErrorHandler.ERROR_METHODS), so for a CONNECT the promised one-line explanation
+        // never reached the client: the 502 arrived with the header and an empty body, and a
+        // curl user saw a bare status line. Written here instead.
+        if (org.eclipse.jetty.http.HttpMethod.CONNECT.is(request.getMethod())) {
+            byte[] body = (message + System.lineSeparator())
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            response.setStatus(reason.status());
+            response.getHeaders().put(org.eclipse.jetty.http.HttpHeader.CONTENT_TYPE,
+                    "text/plain;charset=utf-8");
+            response.getHeaders().put(org.eclipse.jetty.http.HttpHeader.CONTENT_LENGTH,
+                    body.length);
+            response.write(true, java.nio.ByteBuffer.wrap(body), callback);
+            return;
+        }
+        Response.writeError(request, response, callback, reason.status(), message);
     }
 
     /** Classifies {@code failure} and writes the resulting response. */

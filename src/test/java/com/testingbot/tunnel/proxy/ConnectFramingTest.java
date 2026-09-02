@@ -210,6 +210,10 @@ class ConnectFramingTest {
         StringBuilder status = new StringBuilder();
         try (Socket ignored = connect("", status, 20_000)) {
             assertRefused(status.toString(), status.toString());
+            // A proxy that answers and says no is not a proxy that could not be reached. Told
+            // "unreachable", an operator goes and checks connectivity that is working
+            // perfectly, when the proxy's own allow list is what refused the destination.
+            assertThat(status.toString()).contains("upstream-proxy-refused");
         }
     }
 
@@ -239,6 +243,9 @@ class ConnectFramingTest {
         try (Socket ignored = connect("", status, 90_000)) {
             long elapsed = System.currentTimeMillis() - start;
             assertRefused(status.toString(), status.toString());
+            assertThat(status.toString())
+                    .as("nothing answered, so this really is unreachable")
+                    .contains("upstream-proxy-unreachable");
             assertThat(elapsed)
                     .as("should give up on the handshake timeout, not the tunnel's idle timeout")
                     .isLessThan(45_000);

@@ -191,4 +191,17 @@ class ProxyErrorResponseTest {
 
         assertThat(response).contains("403");
     }
+
+    @Test
+    void aFailedConnectCarriesTheExplanationInItsBody() throws Exception {
+        // Jetty's ErrorHandler writes a body only for GET, POST, HEAD and BAD, so a CONNECT
+        // failure arrived with the reason header and nothing else -- a curl user saw a bare
+        // status line, and the one-line explanation this class exists to provide was never sent.
+        String response = send("CONNECT 127.0.0.1:" + deadPort + " HTTP/1.1",
+                "127.0.0.1:" + deadPort);
+
+        assertThat(response).contains(ProxyErrors.ERROR_HEADER + ": connection-refused");
+        assertThat(response).contains("connection-refused:");
+        assertThat(response).contains("refused the connection");
+    }
 }
