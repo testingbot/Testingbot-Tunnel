@@ -176,6 +176,20 @@ class ForwarderBodyLoggingTest {
     }
 
     @Test
+    void theBodyLevelAlsoLogsTheHeaders() throws Exception {
+        // BODY is documented as "as HEADERS, plus the request body". The guard compared against
+        // HEADERS by name, so the most verbose level printed strictly less than the one below
+        // it: the body appeared and the headers it belonged to did not.
+        int relayPort = startRelay("forwarder:body");
+
+        post(relayPort, CAPABILITIES);
+
+        String log = String.join("\n", captured.messages());
+        assertThat(log).contains("Content-Type: application/json");
+        assertThat(log).contains("body:");
+    }
+
+    @Test
     void nothingIsLoggedWithoutTheBodyLevel() throws Exception {
         int relayPort = startRelay("forwarder:url");
 

@@ -51,6 +51,17 @@ public class HttpLogHandler extends Handler.Wrapper {
          */
         BODY;
 
+        /**
+         * True when this mode prints the request headers as well as the request line.
+         *
+         * <p>Asked rather than compared against HEADERS by name: BODY is "as HEADERS, plus the
+         * body", so a {@code mode == HEADERS} test made the most verbose level print strictly
+         * less than the one below it.
+         */
+        public boolean includesHeaders() {
+            return this == HEADERS || this == ERRORS || this == BODY;
+        }
+
         public static Mode parse(String value) {
             if (value == null || value.trim().isEmpty()) {
                 return ERRORS;
