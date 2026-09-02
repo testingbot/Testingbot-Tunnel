@@ -62,6 +62,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "TRACE", "CONNECT"));
 
     private FastFailPolicy fastFail = FastFailPolicy.none();
+    private AllowedHosts allowedHosts = AllowedHosts.unrestricted();
     private Map<String, String> extraHeaders = Collections.emptyMap();
     private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
     private String negotiateServiceName;
@@ -87,6 +88,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private long idleTimeoutMs = 120_000L;
     private long connectTimeoutMs = -1;
+
+    public void setAllowedHosts(AllowedHosts allowedHosts) {
+        this.allowedHosts = allowedHosts == null ? AllowedHosts.unrestricted() : allowedHosts;
+    }
 
     public void setBlackList(String[] patterns) {
         this.fastFail = FastFailPolicy.compile(patterns);
@@ -468,6 +473,15 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             TunnelMetrics.ERRORS_TOTAL.labels("denied_localhost").inc();
             Statistics.addRequest();
             ProxyErrors.write(request, response, callback, ProxyErrors.Reason.DENIED_LOCALHOST);
+            return true;
+        }
+
+        if (!allowedHosts.permits(targetHost)) {
+            LOG.log(Level.INFO, "Not in --allow-hosts: rejecting {0}", targetHost);
+            TunnelMetrics.HTTP_REQUESTS_TOTAL.labels(method, "403").inc();
+            TunnelMetrics.ERRORS_TOTAL.labels("not_allowed").inc();
+            Statistics.addRequest();
+            ProxyErrors.write(request, response, callback, ProxyErrors.Reason.NOT_ALLOWED);
             return true;
         }
 

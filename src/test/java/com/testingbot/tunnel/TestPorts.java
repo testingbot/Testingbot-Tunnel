@@ -39,24 +39,46 @@ public final class TestPorts {
      * @throws UncheckedIOException if no such port can be found, which would mean something is
      *         badly wrong rather than merely busy
      */
+    /**
+     * Listen ports are taken from below the ephemeral range rather than from it.
+     *
+     * <p>{@code new ServerSocket(0)} allocates an ephemeral port -- the same pool the operating
+     * system draws from for outbound connections. This suite makes thousands of those, so a port
+     * that was free when probed could be taken by an outgoing socket before the server bound it,
+     * which no amount of bookkeeping inside this class can prevent. Linux hands out 32768 and
+     * above by default and macOS 49152 and above, so this range collides with neither.
+     */
+    private static final int RANGE_START = 20_000;
+    private static final int RANGE_END = 31_999;
+
+    private static final java.util.Random RANDOM = new java.util.Random();
+
+    /**
+     * @return a port no other test in this JVM has been given and nothing is listening on
+     * @throws UncheckedIOException if no such port can be found, which would mean something is
+     *         badly wrong rather than merely busy
+     */
     public static int free() {
-        for (int attempt = 0; attempt < 200; attempt++) {
-            int candidate;
-            try (ServerSocket probe = new ServerSocket(0)) {
-                candidate = probe.getLocalPort();
-            } catch (IOException cannotProbe) {
-                continue;
-            }
+        for (int attempt = 0; attempt < 500; attempt++) {
+            int candidate = RANGE_START + RANDOM.nextInt(RANGE_END - RANGE_START + 1);
             if (!HANDED_OUT.add(candidate)) {
                 continue;                       // already promised to another test
             }
+            // Binding it explicitly is the check: if this succeeds the port is genuinely
+            // available, which probing with port 0 and hoping never established.
+            try (ServerSocket probe = new ServerSocket(candidate, 1,
+                    InetAddress.getLoopbackAddress())) {
+                probe.getLocalPort();
+            } catch (IOException taken) {
+                continue;                       // stays reserved; something else holds it
+            }
             if (inUse(candidate)) {
-                continue;                       // kept reserved: something still holds it
+                continue;
             }
             return candidate;
         }
         throw new UncheckedIOException(
-                new IOException("No free port available after 200 attempts"));
+                new IOException("No free port available after 500 attempts"));
     }
 
     /** True when something accepts a connection here, so the port is not really free. */

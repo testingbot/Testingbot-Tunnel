@@ -152,6 +152,7 @@ public final class HttpProxy {
         LocalhostPolicy localhostPolicy = LocalhostPolicy.parse(app.getLocalhostPolicy());
 
         ConnectHandler connectHandler = new CustomConnectHandler(app);
+        ((CustomConnectHandler) connectHandler).setAllowedHosts(app.getAllowedHosts());
         ((CustomConnectHandler) connectHandler).setBlackList(app.getFastFail());
         ((CustomConnectHandler) connectHandler).setDnsResolver(dnsResolver);
         ((CustomConnectHandler) connectHandler).setConnectTo(connectTo);
@@ -162,6 +163,11 @@ public final class HttpProxy {
         WebsocketHandler websocketHandler = new WebsocketHandler();
         websocketHandler.setDnsResolver(dnsResolver);
         websocketHandler.setConnectTo(connectTo);
+        // The same destination policies the CONNECT and plain-HTTP handlers apply. Without
+        // these a ws:// upgrade reached anything at all, whatever was configured.
+        websocketHandler.setAllowedHosts(app.getAllowedHosts());
+        websocketHandler.setBlackList(app.getFastFail());
+        websocketHandler.setLocalhostPolicy(localhostPolicy);
         tuneTunnelRelay(websocketHandler);
 
         TunnelProxyHandler proxyHandler = new TunnelProxyHandler();
@@ -170,6 +176,7 @@ public final class HttpProxy {
         if (app.getHttpDialTimeoutSeconds() != null) {
             proxyHandler.setConnectTimeoutMs(app.getHttpDialTimeoutSeconds() * 1000L);
         }
+        proxyHandler.setAllowedHosts(app.getAllowedHosts());
         proxyHandler.setBlackList(app.getFastFail());
         proxyHandler.setExtraHeaders(app.getCustomHeaders());
         proxyHandler.setRequestHeaderRules(HeaderRules.parse(app.getHeaderRules()));

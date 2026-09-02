@@ -64,9 +64,14 @@ public class CustomConnectHandler extends ConnectHandler {
     private final String proxyUserPassword;
     private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
     private FastFailPolicy fastFail = FastFailPolicy.none();
+    private AllowedHosts allowedHosts = AllowedHosts.unrestricted();
     private ConnectToMap connectTo = ConnectToMap.none();
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
+
+    public void setAllowedHosts(AllowedHosts allowedHosts) {
+        this.allowedHosts = allowedHosts == null ? AllowedHosts.unrestricted() : allowedHosts;
+    }
 
     public void setBlackList(String[] patterns) {
         this.fastFail = FastFailPolicy.compile(patterns);
@@ -283,6 +288,12 @@ public class CustomConnectHandler extends ConnectHandler {
             JUL.log(Level.INFO, "Localhost policy: rejecting CONNECT to {0}:{1}",
                      new Object[]{host, port});
             TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("denied_localhost").inc();
+            return false;
+        }
+        if (!allowedHosts.permits(host)) {
+            JUL.log(Level.INFO, "Not in --allow-hosts: rejecting CONNECT to {0}:{1}",
+                     new Object[]{host, port});
+            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("not_allowed").inc();
             return false;
         }
         if (fastFail.blocks(host)) {

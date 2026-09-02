@@ -46,6 +46,7 @@ public class App {
     private String krb5KeyTab;
     private String krb5Principal;
     private String logHttp;
+    private String logFormat = "text";
     private com.testingbot.tunnel.proxy.LogHttpPolicy logHttpPolicy =
             com.testingbot.tunnel.proxy.LogHttpPolicy.defaults();
     private String requestIdHeader;
@@ -70,6 +71,8 @@ public class App {
     private String[] basicAuth;
     private String pac = null;
     private com.testingbot.tunnel.proxy.CaCertificates caCertificates = null;
+    private com.testingbot.tunnel.proxy.AllowedHosts allowedHosts =
+            com.testingbot.tunnel.proxy.AllowedHosts.unrestricted();
     private com.testingbot.tunnel.proxy.NegotiateHosts negotiateHosts =
             com.testingbot.tunnel.proxy.NegotiateHosts.none();
     /** Null means "keep the built-in default", so an absent flag changes nothing. */
@@ -214,6 +217,13 @@ public class App {
         krbPrincipal.setArgName("PRINCIPAL");
         options.addOption(krbPrincipal);
 
+        Option logFormat = new Option(null, "log-format", true,
+            "How log lines are written: text (default) or json. JSON emits one object per "
+            + "record, for a collector that would otherwise have to guess where a multi-line "
+            + "message or a stack trace ends.");
+        logFormat.setArgName("text|json");
+        options.addOption(logFormat);
+
         Option logHttp = new Option(null, "log-http", true,
             "How much HTTP traffic detail to log: none, url, headers, or errors (default). "
             + "'errors' logs the request line and headers only for failed or 5xx responses: "
@@ -258,6 +268,14 @@ public class App {
             + "Empty fields match anything / leave that half unchanged.");
         connectTo.setArgName("HOST1:PORT1:HOST2:PORT2");
         options.addOption(connectTo);
+
+        Option allowHosts = new Option(null, "allow-hosts", true,
+            "Only allow the tunnel to reach these hosts, comma separated. An entry is an exact "
+            + "host or *.suffix for subdomains. Everything else is refused with 403. The "
+            + "opposite of --fast-fail-regexps, which denies a named few and permits the rest; "
+            + "this permits a named few and denies the rest. Omit it to permit any host.");
+        allowHosts.setArgName("HOST,*.HOST");
+        options.addOption(allowHosts);
 
         Option fastFail = new Option("F", "fast-fail-regexps", true,
             "Specify domains you don't want to proxy, comma separated. "
@@ -476,6 +494,12 @@ public class App {
     }
 
     /** The effective level: --log-level, else --debug, else info. */
+    /** {@code --log-format} straight off the command line, for use before an App exists. */
+    static String requestedLogFormat(CommandLine commandLine) {
+        String value = commandLine.getOptionValue("log-format");
+        return value == null ? "text" : value.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
     static String requestedLogLevel(CommandLine commandLine) {
         String levelArg = commandLine.getOptionValue("log-level");
         if (levelArg == null && commandLine.hasOption("debug")) {
@@ -487,6 +511,15 @@ public class App {
     static void applyOptions(App app, CommandLine commandLine) throws Exception {
         // Parsed here purely to validate: a typo should be a startup error with the usual
         // CLI wording, not an IllegalArgumentException from inside proxy construction.
+        if (commandLine.hasOption("log-format")) {
+            String value = commandLine.getOptionValue("log-format").trim().toLowerCase(java.util.Locale.ROOT);
+            if (!value.equals("text") && !value.equals("json")) {
+                throw new ParseException("Invalid --log-format '" + value
+                        + "'. Expected text or json.");
+            }
+            app.setLogFormat(value);
+        }
+
         if (commandLine.hasOption("log-http")) {
             String value = commandLine.getOptionValue("log-http").trim();
             try {
@@ -524,6 +557,17 @@ public class App {
 
         if (commandLine.hasOption("connect-to")) {
             app.setConnectTo(commandLine.getOptionValue("connect-to").split(","));
+        }
+
+        if (commandLine.hasOption("allow-hosts")) {
+            try {
+                app.allowedHosts = com.testingbot.tunnel.proxy.AllowedHosts.parse(
+                        commandLine.getOptionValue("allow-hosts"));
+            } catch (IllegalArgumentException invalid) {
+                throw new ParseException(invalid.getMessage());
+            }
+            Logger.getLogger(App.class.getName()).log(Level.INFO,
+                    "Tunnel may only reach: {0}", app.allowedHosts);
         }
 
         if (commandLine.hasOption("fast-fail-regexps")) {
@@ -730,7 +774,9 @@ public class App {
             Logger logger = Logger.getLogger(App.class.getName());
             logger.setUseParentHandlers(false);
             ConsoleHandler handler = new ConsoleHandler();
-            handler.setFormatter(new LogFormatter());
+            // Read from the command line rather than the App, which does not exist yet: the
+            // console handler is installed before anything is parsed into an App.
+            handler.setFormatter(logFormatterFor(requestedLogFormat(commandLine)));
             logger.addHandler(handler);
 
             App app = new App();
@@ -763,7 +809,7 @@ public class App {
                 String logfilePath = commandLine.getOptionValue("logfile");
                 try {
                     FileHandler handlerFile = new FileHandler(logfilePath, true);
-                    handlerFile.setFormatter(new LogFormatter());
+                    handlerFile.setFormatter(logFormatterFor(app.getLogFormat()));
                     handlerFile.setLevel(Level.ALL);
                     // Attach to App's logger (useParentHandlers=false above) AND to the JUL root
                     // so messages from sibling loggers (HttpProxy, SSHTunnel, Doctor, ...) land in the file too.
@@ -772,7 +818,13 @@ public class App {
 
                     ch.qos.logback.classic.encoder.PatternLayoutEncoder encoder = new ch.qos.logback.classic.encoder.PatternLayoutEncoder();
                     encoder.setContext(loggerContext);
-                    encoder.setPattern("%d{ISO8601} [%thread] %-5level %logger{36} - %msg%n");
+                    // The same file receives records from both logging stacks, so a json run
+                    // must not leave logback emitting text into it.
+                    encoder.setPattern("json".equalsIgnoreCase(app.getLogFormat())
+                            ? "{\"timestamp\":\"%d{ISO8601}\",\"level\":\"%level\","
+                              + "\"logger\":\"%logger\",\"message\":\"%replace(%msg%ex)"
+                              + "{'\"'}{'\\\\\"'}\"}%n"
+                            : "%d{ISO8601} [%thread] %-5level %logger{36} - %msg%n");
                     encoder.start();
                     ch.qos.logback.core.FileAppender<ch.qos.logback.classic.spi.ILoggingEvent> fileAppender = new ch.qos.logback.core.FileAppender<>();
                     fileAppender.setContext(loggerContext);
@@ -1402,6 +1454,20 @@ public class App {
         return logHttp;
     }
 
+    /** {@code text} or {@code json}; see {@link JsonLogFormatter}. */
+    public String getLogFormat() {
+        return logFormat;
+    }
+
+    public void setLogFormat(String logFormat) {
+        this.logFormat = logFormat == null ? "text" : logFormat;
+    }
+
+    /** The formatter for {@code --log-format}, shared by the console and the log file. */
+    static java.util.logging.Formatter logFormatterFor(String logFormat) {
+        return "json".equalsIgnoreCase(logFormat) ? new JsonLogFormatter() : new LogFormatter();
+    }
+
     public void setLogHttp(String logHttp) {
         this.logHttp = logHttp;
         this.logHttpPolicy = com.testingbot.tunnel.proxy.LogHttpPolicy.parse(logHttp);
@@ -1642,6 +1708,16 @@ public class App {
 
     public void setHttpIdleTimeoutSeconds(Integer seconds) {
         this.httpIdleTimeoutSeconds = seconds;
+    }
+
+    /** The hosts this tunnel may reach; unrestricted unless {@code --allow-hosts} was given. */
+    public com.testingbot.tunnel.proxy.AllowedHosts getAllowedHosts() {
+        return allowedHosts;
+    }
+
+    public void setAllowedHosts(com.testingbot.tunnel.proxy.AllowedHosts allowedHosts) {
+        this.allowedHosts = allowedHosts == null
+                ? com.testingbot.tunnel.proxy.AllowedHosts.unrestricted() : allowedHosts;
     }
 
     /** Hosts that may receive SPNEGO credentials; empty unless {@code --krb5-hosts} was given. */

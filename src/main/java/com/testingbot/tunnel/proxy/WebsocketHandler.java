@@ -50,6 +50,21 @@ public class WebsocketHandler extends ConnectHandler {
 
     private CustomDnsResolver dnsResolver;
     private ConnectToMap connectTo = ConnectToMap.none();
+    private AllowedHosts allowedHosts = AllowedHosts.unrestricted();
+    private FastFailPolicy fastFail = FastFailPolicy.none();
+    private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
+
+    public void setAllowedHosts(AllowedHosts allowedHosts) {
+        this.allowedHosts = allowedHosts == null ? AllowedHosts.unrestricted() : allowedHosts;
+    }
+
+    public void setBlackList(String[] patterns) {
+        this.fastFail = FastFailPolicy.compile(patterns);
+    }
+
+    public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {
+        this.localhostPolicy = localhostPolicy == null ? LocalhostPolicy.ALLOW : localhostPolicy;
+    }
 
     public WebsocketHandler() {
         super();
@@ -137,6 +152,28 @@ public class WebsocketHandler extends ConnectHandler {
             if (request.getTunnelSupport() == null) {
                 LOG.info("WS tunnelling not supported for {}", request);
                 Response.writeError(request, response, callback, HttpStatus.FORBIDDEN_403);
+                return true;
+            }
+            // This handler sits outside CustomConnectHandler in the chain and intercepts
+            // upgrades before they reach it, so none of the destination policies were being
+            // applied to a WebSocket at all: --fast-fail-regexps and --localhost-policy deny
+            // could both be walked straight past by using ws:// instead of http://.
+            String target = request.getHttpURI().getHost();
+            if (!allowedHosts.permits(target)) {
+                LOG.info("Not in --allow-hosts: rejecting WebSocket upgrade to {}", target);
+                ProxyErrors.write(request, response, callback, ProxyErrors.Reason.NOT_ALLOWED);
+                return true;
+            }
+            if (fastFail.blocks(target)) {
+                LOG.info("Fast-fail: rejecting WebSocket upgrade to {}", target);
+                ProxyErrors.write(request, response, callback,
+                        ProxyErrors.Reason.DENIED_BY_FAST_FAIL);
+                return true;
+            }
+            if (localhostPolicy.blocks(target, dnsResolver == null ? null : dnsResolver::resolve)) {
+                LOG.info("Localhost policy: rejecting WebSocket upgrade to {}", target);
+                ProxyErrors.write(request, response, callback,
+                        ProxyErrors.Reason.DENIED_LOCALHOST);
                 return true;
             }
             handleConnect(request, response, callback, request.getHttpURI().getAuthority());

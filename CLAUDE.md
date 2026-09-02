@@ -81,6 +81,10 @@ java -jar testingbot-tunnel.jar --doctor
 
 - `--se-port`: Local Selenium port (default 4445)
 - `--localproxy`: Local HTTP proxy port (default 8087)
+- `--allow-hosts`: Only these hosts may be reached; everything else gets 403. An entry is an
+  exact host or `*.suffix` for subdomains, which does *not* match the apex. The inverse of
+  `--fast-fail-regexps`: that denies a named few and permits the rest, this permits a named few
+  and denies the rest. Omitted means any host, so the default is unchanged
 - `--fast-fail-regexps`: Domains to refuse, comma separated. Prefix an entry with `!` to make
   it an exception, so `.*,!ok\.com` blocks everything except `ok.com`
 - `--auth`: Basic authentication for specific hosts
@@ -104,6 +108,8 @@ java -jar testingbot-tunnel.jar --doctor
   deliberately *not* inherited from `--proxy-userpwd`: they belong to a different proxy
 - `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy
 - `--proxy-spn`, `--krb5-keytab`, `--krb5-principal`: Kerberos settings for `negotiate`
+- `--log-format`: `text` (default) or `json`. JSON emits one object per record, so a collector
+  need not guess where a multi-line message or a stack trace ends
 - `--log-http`: HTTP logging detail -- `none`, `url`, `headers`, or `errors` (default).
   Per module as `proxy:LEVEL` / `forwarder:LEVEL`, comma separated. `body` adds the redacted
   request body and is available for `forwarder` only
@@ -208,6 +214,26 @@ opaque CONNECT tunnel with nothing local to edit.
 `--doctor` now runs its Kerberos checks when `--krb5-hosts` is set even with no upstream proxy,
 and reports whether a ticket can actually be obtained for each host. A host named here with no
 principal registered otherwise fails as a 401 from the site, which reads as a site problem.
+
+### Destination policy
+
+Three options decide what a tunnel may reach, and all three are enforced on every way out --
+plain HTTP, CONNECT, and WebSocket upgrades:
+
+| | shape |
+|---|---|
+| `--allow-hosts` | permit only what is named; refuse the rest |
+| `--fast-fail-regexps` | permit everything; refuse what is named |
+| `--localhost-policy deny` | refuse this machine's loopback |
+
+`WebsocketHandler` sits outside `CustomConnectHandler` in the chain and intercepts upgrades
+before they reach it, so until `--allow-hosts` was added it applied **no** destination policy at
+all: a `ws://` URL walked straight past `--fast-fail-regexps` and `--localhost-policy deny`. All
+three are now checked there too, which `AllowHostsEnforcementTest` covers per path.
+
+`AllowedHosts` supports `*.suffix` where `NegotiateHosts` and `BumpPolicy` refuse wildcards. The
+difference is who matches: those two are matched by a KDC and by Squid, so this client cannot
+define what a pattern means, while this list is matched here.
 
 ### HTTP logging
 
@@ -346,7 +372,7 @@ ready and has since lost its connection.
 - Requires Java 17+ (compiled with release 17)
 - Uses Maven Shade plugin to create fat JAR with minimized dependencies
 - Logging configured via Logback (src/main/resources/logback.xml)
-- 782 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
+- 808 unit/integration tests (`mvn test`); end-to-end suite against real browsers in `e2e/`
 - SSH via the maintained JSch fork `com.github.mwiede:jsch`
 - The SSH connection honours `--proxy` (HTTP CONNECT or SOCKS5), so it works on
   networks whose only egress is a proxy

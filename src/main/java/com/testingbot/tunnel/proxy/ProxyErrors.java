@@ -55,6 +55,8 @@ public final class ProxyErrors {
                 "The request URI is malformed and was not forwarded."),
         DENIED_BY_FAST_FAIL("denied-by-fast-fail", HttpStatus.FORBIDDEN_403,
                 "Blocked by the --fast-fail-regexps policy."),
+        NOT_ALLOWED("not-allowed", HttpStatus.FORBIDDEN_403,
+                "This host is not in the --allow-hosts list, so the tunnel may not reach it."),
         DENIED_LOCALHOST("denied-localhost", HttpStatus.FORBIDDEN_403,
                 "Blocked by --localhost-policy deny: the tunnel may not reach this machine's "
                 + "loopback interface."),
