@@ -221,8 +221,7 @@ public class WebsocketHandler extends ConnectHandler {
         } catch (Throwable x) {
             close(channel);
             LOG.warn("WebSocket connect to {}:{} failed", host, port, x);
-            com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
-            observeWsDial(request);
+            // Not counted here: the promise failure reaches onConnectFailure, which counts it.
             promise.failed(x);
         }
     }
@@ -239,6 +238,30 @@ public class WebsocketHandler extends ConnectHandler {
         if (timer instanceof io.prometheus.client.Histogram.Timer t) {
             t.observeDuration();
         }
+    }
+
+    /**
+     * Tells the client why an upgrade could not be dialled.
+     *
+     * <p>Without this override the failure went to ConnectHandler's default, which calls
+     * sendConnectResponse -- setting Content-Length: 0 and then writing an error body. The
+     * client got either nothing at all or a 500 naming Jetty's own content-length bookkeeping,
+     * while a CONNECT to the same unreachable host answered 502 with a classified reason. "The
+     * service behind the tunnel is down" and "the tunnel is broken" were indistinguishable.
+     *
+     * <p>The dial is also counted here, which is where a TCP-level failure actually arrives:
+     * ConnectManager.connectionFailed calls this directly, so the handshake connection that
+     * counts the other outcomes never exists.
+     */
+    @Override
+    protected void onConnectFailure(Request request, Response response, Callback callback,
+                                    Throwable failure) {
+        com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
+        observeWsDial(request);
+        ProxyErrors.Reason reason = ProxyErrors.classify(failure);
+        LOG.warn("WebSocket upgrade failed ({}): {}", reason.reason(),
+                failure == null ? "unknown" : failure.getMessage());
+        ProxyErrors.write(request, response, callback, reason);
     }
 
     @Override
@@ -361,9 +384,8 @@ public class WebsocketHandler extends ConnectHandler {
                 // Already settled -- past the hand-off, or a concurrent failure won.
                 return;
             }
-            com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
-            observeWsDial(context.getRequest());
-            LOG.warn("WebSocket connect/handshake failed", failure);
+            // Counting and reporting both live in onConnectFailure, so this must not repeat
+            // them: doing it in two places counted one failed dial twice.
             onConnectFailure(context.getRequest(), context.getResponse(), context.getCallback(),
                     failure);
             getEndPoint().close();
