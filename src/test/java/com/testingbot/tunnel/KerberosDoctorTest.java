@@ -140,6 +140,23 @@ class KerberosDoctorTest {
     }
 
     @Test
+    void aKrb5HostsFailureDoesNotAdviseProxySpn() {
+        // For a --krb5-hosts entry the origin client is built with a null service principal, so
+        // the SPN is always derived as HTTP/<host> and --proxy-spn is never read. Naming it here
+        // sent the operator to set an option, see no change, and misdiagnose.
+        App app = new App();
+        app.setNegotiateHosts(
+                com.testingbot.tunnel.proxy.NegotiateHosts.parse("intranet.example.com"));
+
+        List<KerberosDoctor.Finding> findings = new KerberosDoctor(app).check();
+
+        assertThat(findings).anyMatch(f -> !f.ok()
+                && f.message().contains("HTTP@intranet.example.com")
+                && f.message().contains("HTTP/intranet.example.com is registered")
+                && !f.message().contains("--proxy-spn overrides"));
+    }
+
+    @Test
     void checkNeverThrows_soDoctorAlwaysCompletes() {
         // Doctor's value is reporting every problem at once; an exception here would hide the
         // checks that come after it.

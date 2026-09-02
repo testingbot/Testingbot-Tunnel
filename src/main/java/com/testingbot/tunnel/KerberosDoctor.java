@@ -126,7 +126,7 @@ public final class KerberosDoctor {
                 app.getKrb5KeyTab() == null ? null : Path.of(app.getKrb5KeyTab()),
                 app.getKrb5Principal());
         for (String host : hosts.hosts()) {
-            findings.add(serviceTicket(client, host, client.servicePrincipalFor(host)));
+            findings.add(serviceTicket(client, host, client.servicePrincipalFor(host), false));
         }
         return findings;
     }
@@ -216,16 +216,31 @@ public final class KerberosDoctor {
      * The check that matters: everything above can look right and the KDC still refuse a ticket
      * for this SPN, which is the single most common Negotiate failure.
      */
-    private Finding serviceTicket(SpnegoClient client, String proxyHost, String spn) {
+    private Finding serviceTicket(SpnegoClient client, String host, String spn) {
+        return serviceTicket(client, host, spn, true);
+    }
+
+    /**
+     * @param forProxy true when this ticket is for the upstream proxy, so {@code --proxy-spn} is
+     *                 worth naming. For a {@code --krb5-hosts} entry the SPN is always derived as
+     *                 {@code HTTP/<host>} -- {@code --proxy-spn} is only read for the proxy -- so
+     *                 advising it there sends the operator to set an option, see no change, and
+     *                 conclude the wrong thing
+     */
+    private Finding serviceTicket(SpnegoClient client, String host, String spn, boolean forProxy) {
         try {
-            String token = client.initialToken(proxyHost);
+            String token = client.initialToken(host);
             return new Finding(true, "Obtained a Kerberos service ticket for " + spn
                     + " (" + token.length() + " base64 characters).");
         } catch (Exception failure) {
             return new Finding(false, "Could not obtain a service ticket for " + spn + ": "
                     + rootCause(failure)
-                    + ". Check that the SPN is registered for the proxy (--proxy-spn overrides it) "
-                    + "and that the ticket cache or keytab is valid.");
+                    + (forProxy
+                        ? ". Check that the SPN is registered for the proxy (--proxy-spn overrides"
+                          + " it) and that the ticket cache or keytab is valid."
+                        : ". Check that HTTP/" + host + " is registered in the directory and that"
+                          + " the ticket cache or keytab is valid. --proxy-spn does not apply"
+                          + " here; it is only used for the upstream proxy."));
         }
     }
 
