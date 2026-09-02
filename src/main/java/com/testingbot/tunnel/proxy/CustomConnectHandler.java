@@ -58,8 +58,6 @@ public class CustomConnectHandler extends ConnectHandler {
     private boolean debugMode = false;
     private CustomDnsResolver dnsResolver;
 
-    private final String proxyHost;
-    private final int proxyPort;
     private final ProxySpec proxySpec;
     private final String proxyUserPassword;
     private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
@@ -81,14 +79,6 @@ public class CustomConnectHandler extends ConnectHandler {
     public CustomConnectHandler(final App app) {
         this.proxySpec = ProxySpec.parse(app.getProxy());
         this.proxyUserPassword = app.getProxyAuth();
-
-        if (proxySpec != null) {
-            proxyHost = proxySpec.getHost();
-            proxyPort = proxySpec.getPort();
-        } else {
-            proxyHost = null;
-            proxyPort = -1;
-        }
 
         // Proxy-Authorization only applies to an HTTP upstream proxy; SOCKS authenticates
         // inside its own handshake. Negotiate needs no user/password -- credentials come from
@@ -249,10 +239,13 @@ public class CustomConnectHandler extends ConnectHandler {
     @Override
     protected void onConnectFailure(Request request, Response response, Callback callback,
                                     Throwable failure) {
-        if (proxyHost == null) {
-            TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
-            observeDial(request);
-        }
+        // Every failed dial is counted here, whichever path it took. Keying this on the static
+        // --proxy got three cases wrong: a TCP failure reaching the proxy was never counted at
+        // all, because it arrives here and the handshake connection that would have counted it
+        // only exists once the connect has succeeded; --pac-local returning PROXY without
+        // --proxy counted twice; and --pac-local returning DIRECT with --proxy counted nothing.
+        TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
+        observeDial(request);
         ProxyErrors.Reason reason = ProxyErrors.classify(failure);
         TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels(reason.reason().replace('-', '_')).inc();
         LOG.warn("CONNECT failed ({}): {}", reason.reason(),
@@ -275,10 +268,11 @@ public class CustomConnectHandler extends ConnectHandler {
 
     @Override
     protected void onConnectSuccess(ConnectContext connectContext, UpstreamConnection upstreamConnection) {
-        if (proxyHost == null) {
-            TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
-            observeDial(connectContext.getRequest());
-        }
+        // The other single counting point. On the upstream-proxy path this runs from
+        // HandshakeConnection.handshakeSucceeded's super.onOpen(), which is exactly when that
+        // dial is known to have worked, so one rule covers both paths.
+        TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
+        observeDial(connectContext.getRequest());
         super.onConnectSuccess(connectContext, upstreamConnection);
     }
 
@@ -436,8 +430,7 @@ public class CustomConnectHandler extends ConnectHandler {
                 return;
             }
             getEndPoint().setIdleTimeout(getIdleTimeout());
-            TunnelMetrics.DIAL_TOTAL.labels("connect", "success").inc();
-            observeDial(context.getRequest());
+            // Counted in onConnectSuccess, which super.onOpen() below reaches.
             if (debugMode) {
                 LOG.info("Established {} tunnel through upstream proxy {}:{} to {}:{}",
                         protocolName(), target.upstream().getHost(), target.upstream().getPort(),
@@ -451,8 +444,7 @@ public class CustomConnectHandler extends ConnectHandler {
                 // Already settled -- past the hand-off, or a concurrent failure won.
                 return;
             }
-            TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
-            observeDial(context.getRequest());
+            // Counted in onConnectFailure, called below.
             LOG.error("Failed to establish {} tunnel through upstream proxy {}:{} to {}:{}: {}",
                     protocolName(), target.upstream().getHost(), target.upstream().getPort(),
                     target.host(), target.port(), failure.getMessage());
