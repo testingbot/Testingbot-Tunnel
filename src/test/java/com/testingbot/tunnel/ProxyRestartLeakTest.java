@@ -31,9 +31,7 @@ class ProxyRestartLeakTest {
     private static final int RESTARTS = 40;
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     private static Server serverOf(HttpProxy proxy) throws Exception {

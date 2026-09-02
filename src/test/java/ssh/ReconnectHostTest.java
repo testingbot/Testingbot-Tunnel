@@ -1,5 +1,6 @@
 package ssh;
 
+import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
 import org.junit.jupiter.api.AfterEach;
@@ -25,9 +26,7 @@ class ReconnectHostTest {
     private int proxyPort;
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @AfterEach

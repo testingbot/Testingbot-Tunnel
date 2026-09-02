@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.integration;
 
+import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
 import org.junit.jupiter.api.AfterEach;
@@ -36,9 +37,7 @@ class ProxyAuthSchemeConnectTest {
     private final List<String> connectHeaders = new CopyOnWriteArrayList<>();
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     /** Records the CONNECT it receives and always refuses, so nothing has to be tunnelled. */

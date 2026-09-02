@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.integration;
 
+import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
 import com.testingbot.tunnel.Statistics;
@@ -29,9 +30,7 @@ class ProxyLoopTest {
     private int proxyPort;
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @BeforeEach

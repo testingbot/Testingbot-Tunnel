@@ -21,9 +21,7 @@ import static org.assertj.core.api.Assertions.assertThatCode;
 class InsightServerLifecycleTest {
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     private static boolean isListening(int port) {

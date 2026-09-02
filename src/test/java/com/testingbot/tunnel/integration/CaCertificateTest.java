@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.integration;
 
+import com.testingbot.tunnel.TestPorts;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsServer;
 import com.testingbot.tunnel.proxy.CaCertificates;
@@ -49,9 +50,7 @@ class CaCertificateTest {
     }
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     /** True when keytool ran; false means the JDK is cut down and the test should be skipped. */

@@ -10,24 +10,49 @@ answers 407 without it. That is what makes the credential path testable end to
 end: a corporate proxy the tunnel must authenticate to before anything works,
 including the SSH control connection (TB-321).
 
-    upstream_proxy.py PORT [user:password]
+    upstream_proxy.py PORT [user:password] [--freeze-file PATH]
+
+With --freeze-file, the proxy stops relaying whenever PATH exists while keeping every socket
+open, which is what a black-holing network looks like from either end.
 """
 import base64
+import os
 import select
 import socket
 import sys
 import threading
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
 
 
+FREEZE_FILE = None
+
+
+def frozen():
+    """True while the freeze file exists: relay nothing, but keep the sockets open."""
+    return FREEZE_FILE is not None and os.path.exists(FREEZE_FILE)
+
+
 def pump(a, b):
+    """Relay until one side closes, or sit silent while frozen.
+
+    Freezing is how a half-open connection is reproduced. Killing this proxy closes its sockets
+    and the tunnel sees a FIN, which is the easy case; a network that starts dropping packets
+    sends nothing at all, and the connection is only discovered to be dead by a keepalive or a
+    TCP retransmit timeout. Those are different code paths and only the first was ever tested.
+    """
     try:
         while True:
+            if frozen():
+                time.sleep(0.5)
+                continue
             r, _, _ = select.select([a, b], [], [], 30)
             if not r:
                 return
             for s in r:
+                if frozen():
+                    break
                 data = s.recv(65536)
                 if not data:
                     return
@@ -119,6 +144,14 @@ class Proxy(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
+    argv = list(sys.argv[1:])
+    if "--freeze-file" in argv:
+        at = argv.index("--freeze-file")
+        FREEZE_FILE = argv[at + 1]
+        del argv[at:at + 2]
+        sys.stderr.write("[upstream] freeze file: %s\n" % FREEZE_FILE)
+        sys.stderr.flush()
+    sys.argv = [sys.argv[0]] + argv
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8891
     if len(sys.argv) > 2 and sys.argv[2]:
         REQUIRED_CREDENTIALS = sys.argv[2]

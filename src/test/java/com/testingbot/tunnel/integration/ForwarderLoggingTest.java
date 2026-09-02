@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.integration;
 
+import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpForwarder;
 import org.junit.jupiter.api.AfterEach;
@@ -64,9 +65,7 @@ class ForwarderLoggingTest {
     private CapturingHandler captured;
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @AfterEach

@@ -136,6 +136,27 @@ cycle takes about twenty seconds instead of never finishing.
 
 ### Soak with reconnects
 
+`E2E_SOAK_MINUTES` turns the cycle count into a deadline, so a long run is asked for as "two
+hours" rather than as a cycle arithmetic problem.
+
+Severing alternates two styles, because they are different code paths and only the first was
+ever tested. Killing the upstream proxy closes its sockets and the tunnel sees a FIN.
+`--freeze-file` makes the proxy stop relaying while holding every socket open, which is what a
+black-holing network looks like: nothing arrives, nothing closes, and the connection is only
+discovered dead by a keepalive or a retransmit timeout. A freeze that is thawed before a
+keepalive fires reports "ridden out" and passes -- the tunnel is not obliged to tear down a
+connection it rode through.
+
+Recorded run, 32 minutes, 21 sever/recover cycles (11 clean-close, 10 black-hole, one of which
+was detected by the keepalive rather than ridden out):
+
+    threads  71 76 70 77 70 76 71 77 71 81 71 76 71 78 71 80 71 78 71 77 71
+    fds      101 for all 21 cycles
+
+Drift +0.1 threads over 21 reconnects. The oscillation is the two sever styles, not a leak: odd
+cycles are clean closes and read 71, even cycles are measured while a freeze still holds the
+burst's connections open and read 76-81. The last reading is back at 71.
+
 `e2e/run-e2e.sh soak_reconnect` severs the SSH connection on every cycle, because the leaks that
 actually happened here were per-reconnect rather than per-request: a SelectorManager added on
 every start and never removed, port forwards not rebuilt, a bind failure on the second start. A

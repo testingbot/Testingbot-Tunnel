@@ -1,5 +1,6 @@
 package ssh;
 
+import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
 import org.apache.sshd.common.util.net.SshdSocketAddress;
 import org.apache.sshd.server.SshServer;
@@ -50,9 +51,7 @@ class SSHTunnelEmbeddedServerTest {
     private SSHTunnel tunnel;
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @BeforeEach

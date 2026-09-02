@@ -222,9 +222,7 @@ class InsightServerTest {
     }
 
     private static int freePort() throws Exception {
-        try (java.net.ServerSocket s = new java.net.ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @Test

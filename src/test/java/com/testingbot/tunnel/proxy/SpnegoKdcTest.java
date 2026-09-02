@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.proxy;
 
+import com.testingbot.tunnel.TestPorts;
 import org.apache.kerby.kerberos.kerb.server.SimpleKdcServer;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
@@ -40,9 +41,7 @@ class SpnegoKdcTest {
     private static String previousUseSubjectCredsOnly;
 
     private static int freePort() throws Exception {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @BeforeAll

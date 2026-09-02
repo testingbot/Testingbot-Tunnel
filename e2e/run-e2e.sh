@@ -1318,8 +1318,18 @@ scenario_soak() {
     return 1
   fi
 
+  # E2E_SOAK_MINUTES turns the cycle count into a deadline, which is how a genuinely long run
+  # is asked for: "soak for two hours" rather than "work out how many cycles that is".
+  local deadline=0
+  if [ -n "${E2E_SOAK_MINUTES:-}" ]; then
+    deadline=$((SECONDS + E2E_SOAK_MINUTES * 60))
+    cycles=100000
+    printf '    running to a %s minute deadline rather than a cycle count\n' "$E2E_SOAK_MINUTES"
+  fi
+
   local peak_threads="$threads0" peak_fds="$fds0" cycle i t f growth
   for cycle in $(seq 1 "$cycles"); do
+    if [ "$deadline" -gt 0 ] && [ "$SECONDS" -ge "$deadline" ]; then break; fi
     local phase_start=$SECONDS
     printf '    cycle %s/%s: bulk' "$cycle" "$cycles"
     # Bulk: enough bytes to churn buffers, over the proxied and the relayed path alike.
@@ -1445,7 +1455,9 @@ scenario_soak_reconnect() {
   printf '    plan: %s sever/recover cycles -- each waits out a 30s keepalive, so allow 10+ minutes\n' \
     "$cycles"
 
-  python3 "$HERE/upstream_proxy.py" "$uport" > "$WORK/soak-rc-proxy.log" 2>&1 &
+  rm -f "$WORK/soak-rc-freeze"
+  python3 "$HERE/upstream_proxy.py" "$uport" --freeze-file "$WORK/soak-rc-freeze" \
+    > "$WORK/soak-rc-proxy.log" 2>&1 &
   local up=$!
   sleep 1
   # SSH is forced through a proxy we control, which is what makes severing deterministic.
@@ -1463,9 +1475,18 @@ scenario_soak_reconnect() {
   fi
   printf '    baseline: %s threads, %s fds\n' "$threads0" "$fds0"
 
-  local warm_threads=0 warm_fds=0 cycle i t f pids recovered noticed
+  local rc_deadline=0
+  if [ -n "${E2E_SOAK_MINUTES:-}" ]; then
+    rc_deadline=$((SECONDS + E2E_SOAK_MINUTES * 60))
+    cycles=100000
+    printf '    running to a %s minute deadline rather than a cycle count\n' "$E2E_SOAK_MINUTES"
+  fi
+
+  local warm_threads=0 warm_fds=0 cycle i t f pids recovered noticed style
+  local freeze="$WORK/soak-rc-freeze"
   for cycle in $(seq 1 "$cycles"); do
-    printf '    cycle %s/%s: load' "$cycle" "$cycles"
+    if [ "$rc_deadline" -gt 0 ] && [ "$SECONDS" -ge "$rc_deadline" ]; then break; fi
+    printf '    cycle %s: load' "$cycle"
     pids=()
     for i in $(seq 1 "$burst"); do
       soak_worker http "$ORIGIN_PORT" & pids+=($!)
@@ -1473,10 +1494,25 @@ scenario_soak_reconnect() {
     done
     for i in "${pids[@]}"; do wait "$i" 2>/dev/null || true; done
 
-    printf ', sever'
-    kill $up 2>/dev/null; wait $up 2>/dev/null
-    python3 "$HERE/upstream_proxy.py" "$uport" >> "$WORK/soak-rc-proxy.log" 2>&1 &
-    up=$!
+    # Alternate how the connection is broken. Killing the proxy closes its sockets and the
+    # tunnel sees a FIN, which is the easy case and the only one previously tested. Freezing
+    # relays nothing while holding every socket open, which is what a black-holing network
+    # looks like: nothing arrives, nothing is closed, and only a keepalive or a retransmit
+    # timeout discovers it. They are different code paths.
+    if [ $((cycle % 2)) -eq 0 ]; then
+      style="black-hole"
+      printf ', freeze'
+      touch "$freeze"
+      sleep "${E2E_SOAK_FREEZE:-75}"
+      rm -f "$freeze"
+    else
+      style="clean-close"
+      printf ', sever'
+      kill $up 2>/dev/null; wait $up 2>/dev/null
+      python3 "$HERE/upstream_proxy.py" "$uport" --freeze-file "$freeze" \
+        >> "$WORK/soak-rc-proxy.log" 2>&1 &
+      up=$!
+    fi
 
     # Wait for the tunnel to notice, then to come back. Polling straight after the kill reads a
     # readiness that is simply stale, which is how the first reconnect scenario fooled itself.
@@ -1486,7 +1522,15 @@ scenario_soak_reconnect() {
                 "http://127.0.0.1:$mport/readyz")" != "200" ]; then noticed=1; break; fi
       sleep 2
     done
-    printf ', %s' "$([ "$noticed" = 1 ] && echo noticed || echo 'never-noticed')"
+    if [ "$noticed" = 1 ]; then
+      printf ', %s noticed' "$style"
+    elif [ "$style" = "black-hole" ]; then
+      # Thawed before a keepalive fired. The connection survived the stall, which is the other
+      # acceptable outcome -- the tunnel is not required to tear down for a blip it rode out.
+      printf ', %s ridden out' "$style"
+    else
+      printf ', %s NOT noticed' "$style"
+    fi
 
     recovered=0
     for i in $(seq 1 90); do

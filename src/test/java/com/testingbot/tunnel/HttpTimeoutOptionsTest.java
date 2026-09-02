@@ -99,9 +99,7 @@ class HttpTimeoutOptionsTest {
     }
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @Test

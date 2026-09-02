@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.integration;
 
+import com.testingbot.tunnel.TestPorts;
 import com.sun.net.httpserver.HttpServer;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
@@ -45,9 +46,7 @@ class ProxyChainIntegrationTest {
     private int wsPort;
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @BeforeEach

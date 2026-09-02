@@ -1,5 +1,6 @@
 package com.testingbot.tunnel.integration;
 
+import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
 import com.testingbot.tunnel.HttpProxy;
 import com.sun.net.httpserver.HttpServer;
@@ -34,9 +35,7 @@ class BasicAuthInjectionTest {
     private final List<String> authorizations = new CopyOnWriteArrayList<>();
 
     private static int findFreePort() throws IOException {
-        try (ServerSocket s = new ServerSocket(0)) {
-            return s.getLocalPort();
-        }
+        return TestPorts.free();
     }
 
     @AfterEach
