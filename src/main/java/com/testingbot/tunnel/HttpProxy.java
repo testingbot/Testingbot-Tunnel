@@ -14,6 +14,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+import com.testingbot.tunnel.proxy.ProxySpec;
+import com.testingbot.tunnel.proxy.ProxyAuthenticator;
 import com.testingbot.tunnel.proxy.WebsocketHandler;
 
 import org.apache.hc.client5.http.classic.methods.HttpPost;
@@ -168,6 +170,17 @@ public final class HttpProxy {
         websocketHandler.setAllowedHosts(app.getAllowedHosts());
         websocketHandler.setBlackList(app.getFastFail());
         websocketHandler.setLocalhostPolicy(localhostPolicy);
+        // And the same egress routing. A ws:// upgrade used to be dialled straight at the target
+        // whatever --proxy said, so on a proxy-only network it was the one scheme that hung.
+        ProxySpec websocketUpstream = ProxySpec.parse(app.getProxy());
+        websocketHandler.setProxySpec(websocketUpstream);
+        websocketHandler.setPacPolicy(app.getPacPolicy());
+        websocketHandler.setProxyUserPassword(app.getProxyAuth());
+        // SOCKS5 authenticates inside its own handshake, so an HTTP authenticator is not applied
+        // to it -- the rule CustomConnectHandler follows.
+        websocketHandler.setProxyAuthenticator(
+                websocketUpstream != null && websocketUpstream.isSocks5()
+                        ? ProxyAuthenticator.none() : app.proxyAuthenticator());
         tuneTunnelRelay(websocketHandler);
 
         TunnelProxyHandler proxyHandler = new TunnelProxyHandler();

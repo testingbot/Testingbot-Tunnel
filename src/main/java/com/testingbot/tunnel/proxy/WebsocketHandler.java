@@ -53,6 +53,61 @@ public class WebsocketHandler extends ConnectHandler {
     private AllowedHosts allowedHosts = AllowedHosts.unrestricted();
     private FastFailPolicy fastFail = FastFailPolicy.none();
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
+    /**
+     * Egress routing, held to the same shape as CustomConnectHandler's.
+     *
+     * <p>Without these this handler dialled the target directly whatever {@code --proxy} said,
+     * so on a network whose only way out is a proxy, {@code http://} and {@code https://} worked
+     * and {@code ws://} hung until the dial timed out. It sits outside CustomConnectHandler in
+     * the chain, so nothing downstream could apply them on its behalf.
+     */
+    private ProxySpec proxySpec;
+    private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
+    private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
+    private String proxyUserPassword;
+
+    /** The static {@code --proxy}, or null for a direct dial. */
+    public void setProxySpec(ProxySpec proxySpec) {
+        this.proxySpec = proxySpec;
+    }
+
+    public void setPacPolicy(com.testingbot.tunnel.pac.PacPolicy pacPolicy) {
+        this.pacPolicy = pacPolicy;
+    }
+
+    /**
+     * How to authenticate to the upstream proxy.
+     *
+     * <p>SOCKS5 authenticates inside its own handshake, from {@code --proxy-userpwd}, so an HTTP
+     * authenticator is not applied to it -- the same rule CustomConnectHandler follows.
+     */
+    public void setProxyAuthenticator(ProxyAuthenticator proxyAuthenticator) {
+        this.proxyAuthenticator = proxyAuthenticator == null
+                ? ProxyAuthenticator.none() : proxyAuthenticator;
+    }
+
+    public void setProxyUserPassword(String proxyUserPassword) {
+        this.proxyUserPassword = proxyUserPassword;
+    }
+
+    /**
+     * The proxy to route this destination through, or null to dial it directly.
+     *
+     * <p>Resolved per destination because {@code --pac-local} can answer differently per host;
+     * without a PAC file this is just the static {@code --proxy}.
+     */
+    ProxySpec upstreamFor(String host, int port) {
+        if (pacPolicy == null) {
+            return proxySpec;
+        }
+        // ws:// is carried over HTTP, so that is the scheme a PAC file is asked about.
+        com.testingbot.tunnel.pac.PacResult result =
+                pacPolicy.resolve("http://" + host + ":" + port + "/", host);
+        if (result.first().isDirect()) {
+            return null;
+        }
+        return ProxySpec.parse(result.first().toProxySpec());
+    }
 
     public void setAllowedHosts(AllowedHosts allowedHosts) {
         this.allowedHosts = allowedHosts == null ? AllowedHosts.unrestricted() : allowedHosts;
@@ -129,8 +184,25 @@ public class WebsocketHandler extends ConnectHandler {
             "proxy-authorization", "proxy-connection", "proxy-authenticate", "keep-alive", "te", "trailer");
 
     static String buildUpgradeRequest(Request clientRequest) {
+        return buildUpgradeRequest(clientRequest, false, null);
+    }
+
+    /**
+     * The upgrade to replay against the target.
+     *
+     * @param absoluteForm  true when this goes to an HTTP proxy rather than the target itself, so
+     *                      the request line names the whole URL. An upgrade needs no CONNECT --
+     *                      a proxy forwards it like any other request and relays the 101 back
+     * @param authorization the {@code Proxy-Authorization} value, or null
+     */
+    static String buildUpgradeRequest(Request clientRequest, boolean absoluteForm,
+            String authorization) {
         StringBuilder requestHeaders = new StringBuilder();
-        requestHeaders.append(clientRequest.getMethod()).append(" ").append(clientRequest.getHttpURI().getPath());
+        requestHeaders.append(clientRequest.getMethod()).append(" ");
+        if (absoluteForm) {
+            requestHeaders.append("http://").append(clientRequest.getHttpURI().getAuthority());
+        }
+        requestHeaders.append(clientRequest.getHttpURI().getPath());
         if (clientRequest.getHttpURI().getQuery() != null) {
             requestHeaders.append("?").append(clientRequest.getHttpURI().getQuery());
         }
@@ -140,6 +212,11 @@ public class WebsocketHandler extends ConnectHandler {
                 continue;
             }
             requestHeaders.append(field.getName()).append(": ").append(field.getValue()).append("\r\n");
+        }
+        // Sent pre-emptively rather than after a 407, as the CONNECT path does: waiting for the
+        // challenge would mean replaying the upgrade, and an upgrade is not replayable.
+        if (authorization != null) {
+            requestHeaders.append("Proxy-Authorization: ").append(authorization).append("\r\n");
         }
         requestHeaders.append("\r\n");
         return requestHeaders.toString();
@@ -203,9 +280,21 @@ public class WebsocketHandler extends ConnectHandler {
      * as the fifteen-second select loop that preceded it, enough concurrent upgrades to a slow
      * target still tied up pool threads doing nothing but waiting.
      */
+    /** Carries the upstream proxy and the real destination to the handshake connection. */
+    private static final String WS_PROXY_TARGET_ATTRIBUTE =
+            WebsocketHandler.class.getName() + ".proxyTarget";
+
+    /** What the handshake has to ask the upstream proxy for. */
+    private record ProxyTarget(ProxySpec upstream, String host, int port) {
+    }
+
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         request.setAttribute(WS_TARGET_ATTRIBUTE, Boolean.TRUE);
+        ProxySpec upstream = upstreamFor(host, port);
+        if (upstream != null) {
+            request.setAttribute(WS_PROXY_TARGET_ATTRIBUTE, new ProxyTarget(upstream, host, port));
+        }
         request.setAttribute(WS_DIAL_TIMER_ATTRIBUTE,
                 com.testingbot.tunnel.TunnelMetrics.DIAL_DURATION_SECONDS
                         .labels("websocket").startTimer());
@@ -216,11 +305,17 @@ public class WebsocketHandler extends ConnectHandler {
             channel.configureBlocking(false);
             // newConnectAddress() applies --dns and --connect-to. Dialling an InetSocketAddress
             // directly here is what once made the custom resolver dead code on this path.
-            channel.connect(newConnectAddress(host, port));
+            //
+            // With an upstream proxy the socket goes to the proxy; the target's name travels in
+            // the request line, which is why --connect-to and --dns are not applied to it here.
+            channel.connect(upstream == null
+                    ? newConnectAddress(host, port)
+                    : newConnectAddress(upstream.getHost(), upstream.getPort()));
             promise.succeeded(channel);
         } catch (Throwable x) {
             close(channel);
-            LOG.warn("WebSocket connect to {}:{} failed", host, port, x);
+            LOG.warn("WebSocket connect to {}:{} failed", upstream == null ? host
+                    : upstream.getHost(), upstream == null ? port : upstream.getPort(), x);
             // Not counted here: the promise failure reaches onConnectFailure, which counts it.
             promise.failed(x);
         }
@@ -267,7 +362,9 @@ public class WebsocketHandler extends ConnectHandler {
     @Override
     protected UpstreamConnection newUpstreamConnection(EndPoint endPoint, ConnectContext context) {
         if (context.getRequest().getAttribute(WS_TARGET_ATTRIBUTE) != null) {
-            return new WebsocketHandshakeConnection(endPoint, context);
+            Object target = context.getRequest().getAttribute(WS_PROXY_TARGET_ATTRIBUTE);
+            return new WebsocketHandshakeConnection(endPoint, context,
+                    target instanceof ProxyTarget proxyTarget ? proxyTarget : null);
         }
         return super.newUpstreamConnection(endPoint, context);
     }
@@ -283,6 +380,10 @@ public class WebsocketHandler extends ConnectHandler {
     private class WebsocketHandshakeConnection extends UpstreamConnection {
 
         private final ConnectContext context;
+        /** The upstream proxy this has to traverse, or null for a direct dial. */
+        private final ProxyTarget proxyTarget;
+        private final Socks5Handshake socks;
+        private ByteBuffer socksBuffer;
         private final StringBuilder response = new StringBuilder();
         // Jetty's fill() appends to a buffer in flush mode, taking its space from limit to
         // capacity. A ByteBuffer.allocate() is in fill mode, where limit == capacity, so fill()
@@ -298,10 +399,20 @@ public class WebsocketHandler extends ConnectHandler {
         private final java.util.concurrent.atomic.AtomicBoolean settled =
                 new java.util.concurrent.atomic.AtomicBoolean();
 
-        WebsocketHandshakeConnection(EndPoint endPoint, ConnectContext context) {
+        WebsocketHandshakeConnection(EndPoint endPoint, ConnectContext context,
+                ProxyTarget proxyTarget) {
             super(endPoint, WebsocketHandler.this.getExecutor(),
                     WebsocketHandler.this.getByteBufferPool(), context);
             this.context = context;
+            this.proxyTarget = proxyTarget;
+            if (proxyTarget != null && proxyTarget.upstream().isSocks5()) {
+                String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
+                this.socks = new Socks5Handshake(proxyTarget.host(), proxyTarget.port(),
+                        credentials == null ? null : credentials[0],
+                        credentials == null ? null : credentials[1]);
+            } else {
+                this.socks = null;
+            }
         }
 
         @Override
@@ -309,9 +420,73 @@ public class WebsocketHandler extends ConnectHandler {
             // The endpoint carries the tunnel's idle timeout, which is long by design. The
             // handshake gets the connect timeout instead, restored once the tunnel is up.
             getEndPoint().setIdleTimeout(getConnectTimeout());
-            ByteBuffer request = ByteBuffer.wrap(buildUpgradeRequest(context.getRequest())
-                    .getBytes(StandardCharsets.UTF_8));
+            if (socks != null) {
+                // SOCKS5 negotiates before anything HTTP can be sent; the upgrade follows once
+                // the proxy has opened the connection to the target.
+                sendSocks(socks.greeting());
+                return;
+            }
+            sendUpgrade();
+        }
+
+        private void sendUpgrade() {
+            // Through an HTTP proxy the upgrade goes in absolute form. No CONNECT: a proxy
+            // forwards an upgrade like any other request and relays the 101 back, so the reply
+            // reader below is the same either way.
+            boolean throughHttpProxy = proxyTarget != null && !proxyTarget.upstream().isSocks5();
+            String authorization = throughHttpProxy
+                    ? proxyAuthenticator.authorizationValue(proxyTarget.upstream().getHost())
+                    : null;
+            ByteBuffer request = ByteBuffer.wrap(
+                    buildUpgradeRequest(context.getRequest(), throughHttpProxy, authorization)
+                            .getBytes(StandardCharsets.UTF_8));
             getEndPoint().write(Callback.from(this::readMore, this::handshakeFailed), request);
+        }
+
+        private void sendSocks(ByteBuffer buffer) {
+            getEndPoint().write(Callback.from(this::awaitSocksStep, this::handshakeFailed), buffer);
+        }
+
+        private void awaitSocksStep() {
+            // Sized to exactly what the step wants, so a read can never take a byte of the
+            // upgrade reply that follows it.
+            socksBuffer = org.eclipse.jetty.util.BufferUtil.allocate(socks.bytesNeeded());
+            getEndPoint().fillInterested(
+                    Callback.from(this::onSocksBytes, this::handshakeFailed));
+        }
+
+        private void onSocksBytes() {
+            try {
+                while (true) {
+                    int wanted = socks.bytesNeeded();
+                    while (org.eclipse.jetty.util.BufferUtil.length(socksBuffer) < wanted) {
+                        int read = getEndPoint().fill(socksBuffer);
+                        if (read < 0) {
+                            throw new IOException("Upstream SOCKS proxy "
+                                    + proxyTarget.upstream().getHost() + ":"
+                                    + proxyTarget.upstream().getPort()
+                                    + " closed the connection during the handshake");
+                        }
+                        if (read == 0) {
+                            getEndPoint().fillInterested(
+                                    Callback.from(this::onSocksBytes, this::handshakeFailed));
+                            return;
+                        }
+                    }
+                    ByteBuffer reply = socks.accept(socksBuffer);
+                    if (socks.isDone()) {
+                        sendUpgrade();
+                        return;
+                    }
+                    if (reply != null) {
+                        sendSocks(reply);
+                        return;
+                    }
+                    socksBuffer = org.eclipse.jetty.util.BufferUtil.allocate(socks.bytesNeeded());
+                }
+            } catch (Throwable failure) {
+                handshakeFailed(failure);
+            }
         }
 
         private void readMore() {
