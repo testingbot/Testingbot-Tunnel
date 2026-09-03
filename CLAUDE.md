@@ -351,9 +351,9 @@ on a random port and on 8080, which the VM does register a local listener for, s
 about the port. Note that plain **HTTP** to `localhost` does travel through the tunnel, which is
 what made the asymmetry so easy to miss.
 
-Addressed by a routable name (`localtest.me`, which resolves to 127.0.0.1, so the tunnel client
-dials the same origin) the self-signed origin loads over an unbumped tunnel and returns its
-marker. Reading back the capabilities the hub hands out for a `--nobump` tunnel confirms the
+Addressed by a routable name (`local.testingbot.com`, which resolves to 127.0.0.1, so the tunnel
+client dials the same origin) the self-signed origin loads over an unbumped tunnel and returns
+its marker. Reading back the capabilities the hub hands out for a `--nobump` tunnel confirms the
 other half: `sslProxy` is `<ip>:2010`, the raw SSH-forwarded port, so Squid is bypassed rather
 than reconfigured. The whole chain -- client sends `no_bump`, the API persists it, the hub
 selects port 2010 -- is correct.

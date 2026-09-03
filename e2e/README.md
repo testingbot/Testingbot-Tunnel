@@ -226,8 +226,10 @@ splice" and "the certificate must be untrusted" from failures where no request h
 browser VM.
 
 Browser-facing scenarios therefore address the local origin as `$TUNNEL_HOST_NAME`
-(`localtest.me` by default, a public name resolving to 127.0.0.1, so the tunnel client dials the
-same origin). Override with `E2E_TLS_HOST` where that name cannot be resolved. The `sslbump`
+(`local.testingbot.com` by default, which resolves to 127.0.0.1, so the tunnel client dials the
+same origin and only the browser's treatment of the name differs). It is an A record only: an
+AAAA of `::1` would let a browser prefer IPv6 and miss an origin bound to IPv4. Override with
+`E2E_TLS_HOST` where that name cannot be resolved. The `sslbump`
 scenario additionally asserts the CONNECT appears in the tunnel client's log, so a navigation
 that succeeds *without* traversing the tunnel fails the test rather than passing it.
 

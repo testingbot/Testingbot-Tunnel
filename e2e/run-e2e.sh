@@ -272,10 +272,11 @@ TLS_ORIGIN_PORT=""; TLS_ORIGIN_PID=""
 # Chrome answers ERR_SSL_PROTOCOL_ERROR from whatever is on its own loopback, and the tunnel
 # client logs no CONNECT. The same origin reached by a resolvable name works on both ports.
 #
-# localtest.me is a public name that resolves to 127.0.0.1, so the tunnel client dials the very
-# same origin; only the browser's treatment of the name differs. Override with E2E_TLS_HOST for
-# a network that cannot resolve it.
-TUNNEL_HOST_NAME="${E2E_TLS_HOST:-localtest.me}"
+# local.testingbot.com resolves to 127.0.0.1, so the tunnel client dials the very same origin;
+# only the browser's treatment of the name differs. A record only -- an AAAA of ::1 would let a
+# browser prefer IPv6 and miss an origin bound to IPv4. Override with E2E_TLS_HOST for a network
+# that cannot resolve it.
+TUNNEL_HOST_NAME="${E2E_TLS_HOST:-local.testingbot.com}"
 
 start_tls_origin() {
   local cert="${E2E_TLS_CERT:-$WORK/origin.crt}" key="${E2E_TLS_KEY:-$WORK/origin.key}"
