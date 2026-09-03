@@ -38,6 +38,8 @@ public class App {
     private String[] fastFail;
     private String[] connectTo;
     private String localhostPolicy;
+    /** How ws:// traverses an upstream proxy; see --ws-proxy-mode. */
+    private String wsProxyMode = "connect";
     private InsightServer insightServer;
     private String pacLocal;
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
@@ -261,6 +263,15 @@ public class App {
             + "staging network and nothing running locally. Does not affect the Selenium relay.");
         localhostPolicy.setArgName("allow|deny");
         options.addOption(localhostPolicy);
+
+        Option wsProxyMode = new Option(null, "ws-proxy-mode", true,
+            "How a ws:// upgrade traverses --proxy: connect (default) asks the proxy to open a "
+            + "tunnel with CONNECT and upgrades inside it, which is what RFC 6455 specifies and "
+            + "what browsers do; get sends the upgrade to the proxy as an ordinary absolute-URI "
+            + "request, for proxies that forward Upgrade but only allow CONNECT to 443. "
+            + "Does not affect wss://, which is always a CONNECT.");
+        wsProxyMode.setArgName("connect|get");
+        options.addOption(wsProxyMode);
 
         Option connectTo = new Option(null, "connect-to", true,
             "Dial a different host/port than the request asks for, without changing the URL, "
@@ -569,6 +580,15 @@ public class App {
                         + ". Expected allow or deny.");
             }
             app.setLocalhostPolicy(value);
+        }
+
+        if (commandLine.hasOption("ws-proxy-mode")) {
+            String value = commandLine.getOptionValue("ws-proxy-mode").trim();
+            if (!value.equalsIgnoreCase("connect") && !value.equalsIgnoreCase("get")) {
+                throw new ParseException("Invalid --ws-proxy-mode value: " + value
+                        + ". Expected connect or get.");
+            }
+            app.setWsProxyMode(value.toLowerCase(java.util.Locale.ROOT));
         }
 
         if (commandLine.hasOption("connect-to")) {
@@ -1549,6 +1569,14 @@ public class App {
 
     public void setResponseHeaderRules(String[] responseHeaderRules) {
         this.responseHeaderRules = responseHeaderRules;
+    }
+
+    public String getWsProxyMode() {
+        return wsProxyMode;
+    }
+
+    public void setWsProxyMode(String wsProxyMode) {
+        this.wsProxyMode = wsProxyMode == null || wsProxyMode.isBlank() ? "connect" : wsProxyMode;
     }
 
     public String getLocalhostPolicy() {

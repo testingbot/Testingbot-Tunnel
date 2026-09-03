@@ -180,6 +180,7 @@ public final class HttpProxy {
         websocketHandler.setProxySpec(websocketUpstream);
         websocketHandler.setPacPolicy(app.getPacPolicy());
         websocketHandler.setProxyUserPassword(app.getProxyAuth());
+        websocketHandler.setWsProxyMode(app.getWsProxyMode());
         // SOCKS5 authenticates inside its own handshake, so an HTTP authenticator is not applied
         // to it -- the rule CustomConnectHandler follows.
         websocketHandler.setProxyAuthenticator(

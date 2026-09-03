@@ -120,6 +120,51 @@ class WebsocketThroughProxyTest {
         });
     }
 
+    /**
+     * A proxy that grants CONNECT and relays, and refuses to forward an upgrade.
+     *
+     * <p>Which is how a stock Squid behaves: CONNECT works, and an Upgrade request is not
+     * relayed without http_upgrade_request_protocols.
+     */
+    private void startConnectOnlyProxy() throws Exception {
+        proxyPort = TestPorts.free();
+        proxy = new ServerSocket(proxyPort, 50, InetAddress.getLoopbackAddress());
+        pool.submit(() -> {
+            while (!proxy.isClosed()) {
+                Socket accepted;
+                try {
+                    accepted = proxy.accept();
+                } catch (IOException closed) {
+                    return;
+                }
+                pool.submit(() -> {
+                    try (Socket client = accepted) {
+                        String head = readHead(client.getInputStream());
+                        proxyLog.add(head);
+                        OutputStream out = client.getOutputStream();
+                        if (!head.startsWith("CONNECT ")) {
+                            out.write(("HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\n\r\n")
+                                    .getBytes(StandardCharsets.UTF_8));
+                            out.flush();
+                            return;
+                        }
+                        try (Socket upstream = new Socket("127.0.0.1", originPort)) {
+                            out.write("HTTP/1.1 200 Connection established\r\n\r\n"
+                                    .getBytes(StandardCharsets.UTF_8));
+                            out.flush();
+                            InputStream fromClient = client.getInputStream();
+                            OutputStream toUpstream = upstream.getOutputStream();
+                            pool.submit(() -> copy(fromClient, toUpstream));
+                            copy(upstream.getInputStream(), out);
+                        }
+                    } catch (IOException ignored) {
+                        // test finished
+                    }
+                });
+            }
+        });
+    }
+
     /** A SOCKS5 proxy that records the destination it was asked for and then relays. */
     private void startSocks5(boolean requireAuth) throws Exception {
         proxyPort = TestPorts.free();
@@ -191,12 +236,18 @@ class WebsocketThroughProxyTest {
     }
 
     private void startTunnel(String proxySpec, String credentials) throws Exception {
+        startTunnel(proxySpec, credentials, "get");
+    }
+
+    private void startTunnel(String proxySpec, String credentials, String wsProxyMode)
+            throws Exception {
         tunnelPort = TestPorts.free();
         App app = new App();
         app.setJettyPort(tunnelPort);
         app.setClientKey("test_key");
         app.setClientSecret("test_secret");
         app.setProxy(proxySpec);
+        app.setWsProxyMode(wsProxyMode);
         if (credentials != null) {
             app.setProxyAuth(credentials);
         }
@@ -344,5 +395,58 @@ class WebsocketThroughProxyTest {
         assertThat(response).contains("101");
         assertThat(response).contains("session=abc");
         assertThat(response).contains("affinity=node7");
+    }
+
+    @Test
+    void theDefaultAsksTheProxyForATunnelAndUpgradesInsideIt() throws Exception {
+        // RFC 6455 section 4.1: a client configured with a proxy should ask it to open a TCP
+        // connection to the host, phrased for both schemes, with a worked example that is a
+        // plain CONNECT to port 80. It is also what browsers do, so it is the default.
+        pool = Executors.newCachedThreadPool();
+        startOrigin();
+        startConnectOnlyProxy();
+        startTunnel("http://127.0.0.1:" + proxyPort, null, "connect");
+
+        String response = upgrade();
+
+        assertThat(response).contains("101 Switching Protocols");
+        assertThat(response).endsWith("relayed");
+        assertThat(proxyLog).hasSize(1);
+        assertThat(proxyLog.get(0)).startsWith("CONNECT 127.0.0.1:" + originPort);
+        // Inside the tunnel the proxy is no longer the peer, so the upgrade must not be in
+        // absolute form -- the target would see a request addressed to somebody else.
+        assertThat(proxyLog.get(0)).doesNotContain("GET http://");
+    }
+
+    @Test
+    void connectModeSendsProxyCredentialsWithTheConnect() throws Exception {
+        pool = Executors.newCachedThreadPool();
+        startOrigin();
+        startConnectOnlyProxy();
+        startTunnel("http://127.0.0.1:" + proxyPort, "alice:s3cret", "connect");
+
+        assertThat(upgrade()).contains("101");
+
+        assertThat(proxyLog.get(0)).contains("Proxy-Authorization: Basic "
+                + java.util.Base64.getEncoder().encodeToString(
+                        "alice:s3cret".getBytes(StandardCharsets.UTF_8)));
+    }
+
+    @Test
+    void getModeAgainstAProxyThatWillNotForwardAnUpgradeSaysSo() throws Exception {
+        // The failure a stock Squid produces. The old message said "Target refused WebSocket
+        // upgrade", blaming the origin for something the proxy did.
+        pool = Executors.newCachedThreadPool();
+        startOrigin();
+        startConnectOnlyProxy();
+        startTunnel("http://127.0.0.1:" + proxyPort, null, "get");
+
+        String response = upgrade();
+
+        assertThat(response).doesNotContain("101");
+        assertThat(proxyLog.get(0)).startsWith("GET http://");
+        // The proxy answered, so this is a refusal and not a connectivity problem: an operator
+        // told "unreachable" goes and checks a connection that is working.
+        assertThat(response).contains("upstream-proxy-refused");
     }
 }

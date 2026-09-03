@@ -154,7 +154,8 @@ public final class ProxyErrors {
                 return Reason.UPSTREAM_PROXY_AUTH_FAILED;
             }
             // A refusal is not a connectivity problem, and is checked first: the proxy answered.
-            if (message.contains("rejected connect") || message.contains("refused connect")) {
+            if (message.contains("rejected connect") || message.contains("refused connect")
+                    || message.contains("did not forward")) {
                 return Reason.UPSTREAM_PROXY_REFUSED;
             }
             if (message.contains("upstream proxy") || message.contains("socks")) {

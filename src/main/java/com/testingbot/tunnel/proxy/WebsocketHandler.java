@@ -63,6 +63,20 @@ public class WebsocketHandler extends ConnectHandler {
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private ProxyAuthenticator proxyAuthenticator = ProxyAuthenticator.none();
     private String proxyUserPassword;
+    /**
+     * How a ws:// upgrade traverses an HTTP upstream proxy.
+     *
+     * <p>{@code connect} is the default because RFC 6455 section 4.1 tells a client configured
+     * with a proxy to "connect to that proxy and ask it to open a TCP connection to the host",
+     * phrased for both schemes, with a worked example that is a plain CONNECT to port 80. It is
+     * also what browsers do. {@code get} is the alternative for proxies that forward Upgrade but
+     * restrict CONNECT to 443.
+     */
+    private boolean upgradeViaConnect = true;
+
+    public void setWsProxyMode(String mode) {
+        this.upgradeViaConnect = mode == null || !"get".equalsIgnoreCase(mode.trim());
+    }
 
     /** The static {@code --proxy}, or null for a direct dial. */
     public void setProxySpec(ProxySpec proxySpec) {
@@ -382,6 +396,9 @@ public class WebsocketHandler extends ConnectHandler {
         private final ProxyTarget proxyTarget;
         private final Socks5Handshake socks;
         private ByteBuffer socksBuffer;
+        /** True while the CONNECT reply is being read, before the upgrade is sent. */
+        private boolean awaitingConnectReply;
+        private final StringBuilder connectReply = new StringBuilder();
         private final StringBuilder response = new StringBuilder();
         // Jetty's fill() appends to a buffer in flush mode, taking its space from limit to
         // capacity. A ByteBuffer.allocate() is in fill mode, where limit == capacity, so fill()
@@ -424,14 +441,45 @@ public class WebsocketHandler extends ConnectHandler {
                 sendSocks(socks.greeting());
                 return;
             }
+            if (proxyTarget != null && upgradeViaConnect) {
+                sendConnect();
+                return;
+            }
             sendUpgrade();
+        }
+
+        /**
+         * Asks the proxy for a tunnel, then upgrades inside it.
+         *
+         * <p>What RFC 6455 specifies and what a browser does. The upgrade that follows is in
+         * origin form: once the proxy has opened the tunnel it is no longer addressed, the
+         * target is.
+         */
+        private void sendConnect() {
+            awaitingConnectReply = true;
+            StringBuilder connect = new StringBuilder();
+            connect.append("CONNECT ").append(proxyTarget.host()).append(':')
+                    .append(proxyTarget.port()).append(" HTTP/1.1\r\n");
+            connect.append("Host: ").append(proxyTarget.host()).append(':')
+                    .append(proxyTarget.port()).append("\r\n");
+            String authorization =
+                    proxyAuthenticator.authorizationValue(proxyTarget.upstream().getHost());
+            if (authorization != null) {
+                connect.append("Proxy-Authorization: ").append(authorization).append("\r\n");
+            }
+            connect.append("\r\n");
+            getEndPoint().write(Callback.from(this::readMore, this::handshakeFailed),
+                    ByteBuffer.wrap(connect.toString().getBytes(StandardCharsets.UTF_8)));
         }
 
         private void sendUpgrade() {
             // Through an HTTP proxy the upgrade goes in absolute form. No CONNECT: a proxy
             // forwards an upgrade like any other request and relays the 101 back, so the reply
             // reader below is the same either way.
-            boolean throughHttpProxy = proxyTarget != null && !proxyTarget.upstream().isSocks5();
+            // Absolute form addresses the proxy, so it is only right when the proxy is still the
+            // peer. After a CONNECT or a SOCKS handshake the peer is the target itself.
+            boolean throughHttpProxy = proxyTarget != null
+                    && !proxyTarget.upstream().isSocks5() && !upgradeViaConnect;
             String authorization = throughHttpProxy
                     ? proxyAuthenticator.authorizationValue(proxyTarget.upstream().getHost())
                     : null;
@@ -499,6 +547,10 @@ public class WebsocketHandler extends ConnectHandler {
          * first frame immediately.
          */
         private void onResponseBytes() {
+            if (awaitingConnectReply) {
+                onConnectReplyBytes();
+                return;
+            }
             try {
                 while (response.indexOf("\r\n\r\n") < 0) {
                     org.eclipse.jetty.util.BufferUtil.clear(readBuffer);
@@ -520,8 +572,18 @@ public class WebsocketHandler extends ConnectHandler {
 
                 String[] lines = response.substring(0, response.indexOf("\r\n\r\n")).split("\r\n");
                 if (lines.length == 0 || !lines[0].contains("101")) {
-                    throw new IOException("Target refused WebSocket upgrade: "
-                            + (lines.length > 0 ? lines[0] : "empty response"));
+                    String answered = lines.length > 0 ? lines[0] : "empty response";
+                    // Naming the proxy matters here: in get mode the answer usually comes from
+                    // the proxy declining to forward the upgrade, not from the target refusing
+                    // it, and the old message blamed the target either way.
+                    throw new IOException(proxyTarget != null && !upgradeViaConnect
+                            ? "Upstream proxy (" + proxyTarget.upstream().getHost() + ":"
+                              + proxyTarget.upstream().getPort() + ") did not forward the "
+                              + "WebSocket upgrade to " + proxyTarget.host() + ":"
+                              + proxyTarget.port() + ", answering: " + answered
+                              + ". Squid needs http_upgrade_request_protocols; otherwise use "
+                              + "--ws-proxy-mode connect."
+                            : "Target refused WebSocket upgrade: " + answered);
                 }
                 // add(), not put() into a Map: a 101 carrying two Set-Cookie -- a session and a
                 // load balancer's affinity cookie is ordinary -- reached the client with only
@@ -537,6 +599,44 @@ public class WebsocketHandler extends ConnectHandler {
                 }
                 context.getRequest().setAttribute(WS_RESPONSE_HEADERS_ATTRIBUTE, wsResponseHeaders);
                 handshakeSucceeded(lines[0], wsResponseHeaders.size());
+            } catch (Throwable failure) {
+                handshakeFailed(failure);
+            }
+        }
+
+        /**
+         * Reads the proxy's answer to CONNECT, a byte at a time so nothing past it is consumed.
+         */
+        private void onConnectReplyBytes() {
+            try {
+                while (connectReply.indexOf("\r\n\r\n") < 0) {
+                    org.eclipse.jetty.util.BufferUtil.clear(readBuffer);
+                    int read = getEndPoint().fill(readBuffer);
+                    if (read < 0) {
+                        throw new IOException("Upstream proxy " + proxyTarget.upstream().getHost()
+                                + ":" + proxyTarget.upstream().getPort()
+                                + " closed the connection before answering CONNECT");
+                    }
+                    if (read == 0) {
+                        readMore();
+                        return;
+                    }
+                    connectReply.append((char) (readBuffer.get() & 0xFF));
+                    if (connectReply.length() > MAX_HANDSHAKE_BYTES) {
+                        throw new IOException("Upstream proxy CONNECT response exceeded "
+                                + MAX_HANDSHAKE_BYTES + " bytes");
+                    }
+                }
+                String statusLine = connectReply.substring(0, connectReply.indexOf("\r\n"));
+                if (!CustomConnectHandler.isSuccessfulConnect(statusLine)) {
+                    throw new IOException("Upstream proxy (" + proxyTarget.upstream().getHost()
+                            + ":" + proxyTarget.upstream().getPort() + ") rejected CONNECT to "
+                            + proxyTarget.host() + ":" + proxyTarget.port() + ". Status: "
+                            + statusLine + ". A proxy that only allows CONNECT to 443 needs "
+                            + "--ws-proxy-mode get.");
+                }
+                awaitingConnectReply = false;
+                sendUpgrade();
             } catch (Throwable failure) {
                 handshakeFailed(failure);
             }

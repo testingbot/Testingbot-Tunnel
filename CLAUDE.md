@@ -130,6 +130,13 @@ java -jar testingbot-tunnel.jar --doctor
 - `--dns-round-robin`: Spread queries across the `--dns` servers instead of preferring the first
 - `--connect-to`: Dial `HOST2:PORT2` for requests naming `HOST1:PORT1`, leaving the URL, Host
   header and TLS SNI untouched (`HOST1:PORT1:HOST2:PORT2`, comma separated)
+- `--ws-proxy-mode`: How a `ws://` upgrade traverses `--proxy`. `connect` (default) asks the
+  proxy for a tunnel and upgrades inside it, which is what RFC 6455 s4.1 specifies -- "connect to
+  that proxy and ask it to open a TCP connection to the host", phrased for both schemes, with a
+  worked example that is a plain CONNECT to port 80 -- and what browsers do. `get` sends the
+  upgrade as an absolute-URI request, for proxies that forward `Upgrade` but only allow CONNECT
+  to 443. Squid needs `http_upgrade_request_protocols` for `get` to work at all. Does not affect
+  `wss://`, which arrives as a CONNECT and never reaches this decision
 - `--localhost-policy`: `allow` (default) or `deny` for tunnel traffic reaching this machine's
   loopback interface
 - `--pac-local`: Evaluate a PAC file locally to choose egress per destination. Distinct from
