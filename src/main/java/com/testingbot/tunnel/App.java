@@ -99,6 +99,11 @@ public class App {
      */
     static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
     private String bindAddress = DEFAULT_BIND_ADDRESS;
+    /**
+     * Host keys the tunnel server may present. Empty means the server is not verified, which is
+     * the pre-existing behaviour and still the default, because the keys are not published yet.
+     */
+    private ssh.HostKeyPins sshHostKeyPins = ssh.HostKeyPins.none();
     private int sshPort = 0;
     private boolean shared = false;
 
@@ -307,6 +312,14 @@ public class App {
 
         Option metrics = Option.builder().longOpt("metrics-port").hasArg().valueSeparator().desc("Use the specified port to access metrics. Default port 8003").build();
         options.addOption(metrics);
+
+        Option sshHostKeyOpt = Option.builder().longOpt("ssh-host-key").hasArg().argName("FINGERPRINT")
+                .desc("Only connect to a tunnel server presenting one of these host keys, as "
+                    + "OpenSSH SHA-256 fingerprints, comma separated (SHA256:... -- get one with "
+                    + "ssh-keygen -lf <key> -E sha256). The account secret is the SSH password, "
+                    + "so without a pin it is sent to whatever answers on the tunnel port. "
+                    + "MD5 fingerprints are refused. Env: TESTINGBOT_SSH_HOST_KEY.").build();
+        options.addOption(sshHostKeyOpt);
 
         Option bindAddressOpt = Option.builder().longOpt("bind-address").hasArg().argName("ADDRESS")
                 .desc("Interface for every local listener -- the Selenium relay (--se-port), the "
@@ -663,6 +676,17 @@ public class App {
 
         if (commandLine.hasOption("bind-address")) {
             app.setBindAddress(commandLine.getOptionValue("bind-address"));
+        }
+
+        if (commandLine.hasOption("ssh-host-key")) {
+            try {
+                app.setSshHostKeyPins(
+                    ssh.HostKeyPins.parse(commandLine.getOptionValue("ssh-host-key")));
+            } catch (IllegalArgumentException ex) {
+                // Refused rather than dropped: a pin that silently did not apply would leave the
+                // operator believing the server is checked when it is not.
+                throw new ParseException("--ssh-host-key: " + ex.getMessage());
+            }
         }
 
         String metricsAuthValue = commandLine.hasOption("metrics-auth")
@@ -1064,6 +1088,8 @@ public class App {
             this.tunnelID = Integer.parseInt(tunnelData.get("id").asText());
             api.setTunnelID(tunnelID);
         }
+
+        adoptApiHostKeyFingerprint(tunnelData);
 
         TunnelMetrics.setTunnelInfo(App.VERSION, this.tunnelID, this.tunnelIdentifier);
 
@@ -1928,6 +1954,62 @@ public class App {
      */
     public String getBindAddress() {
         return bindAddress;
+    }
+
+    /**
+     * Takes the tunnel server's host key fingerprint from the API response, when it sends one.
+     *
+     * <p>The API call is HTTPS with the platform trust store (plus any {@code --cacert-file}),
+     * and it is already authenticated with the account credentials, so a fingerprint arriving
+     * on it comes from TestingBot rather than from whoever is on the network path. That makes
+     * it a usable channel for the one value the SSH connection cannot otherwise establish.
+     *
+     * <p>The field is optional and not yet sent, so this is inert until the service publishes
+     * it -- at which point every client on this version starts verifying with no flag and no
+     * upgrade. An explicit {@code --ssh-host-key} wins: it is the operator saying which key
+     * they mean, and it must not be overridden by the far side.
+     */
+    void adoptApiHostKeyFingerprint(com.fasterxml.jackson.databind.JsonNode tunnelData) {
+        if (tunnelData == null || !sshHostKeyPins.isEmpty()) {
+            return;
+        }
+        for (String field : new String[]{"ssh_fingerprint", "ssh_host_key_fingerprint"}) {
+            if (!tunnelData.hasNonNull(field)) {
+                continue;
+            }
+            String value = tunnelData.get(field).asText();
+            try {
+                ssh.HostKeyPins pins = ssh.HostKeyPins.parse(value);
+                if (!pins.isEmpty()) {
+                    this.sshHostKeyPins = pins;
+                    Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "Tunnel server host key will be verified against the fingerprint "
+                            + "supplied by the API: {0}", pins.displayValues());
+                }
+                return;
+            } catch (IllegalArgumentException ex) {
+                // Logged, not fatal: an unusable value from the service should not stop a tunnel
+                // that would otherwise start, and the connect path warns that it is unverified.
+                Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "Ignoring unusable host key fingerprint from the API ({0}): {1}",
+                    new Object[]{field, ex.getMessage()});
+                return;
+            }
+        }
+    }
+
+    /**
+     * @return the host keys the tunnel server may present, never null and possibly empty
+     */
+    public ssh.HostKeyPins getSshHostKeyPins() {
+        return sshHostKeyPins;
+    }
+
+    /**
+     * @param pins the host keys to accept; null clears them back to "unverified"
+     */
+    public void setSshHostKeyPins(ssh.HostKeyPins pins) {
+        this.sshHostKeyPins = pins == null ? ssh.HostKeyPins.none() : pins;
     }
 
     /**

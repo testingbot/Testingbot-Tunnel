@@ -76,6 +76,30 @@ public final class Doctor {
         checkOpenPorts();
         checkCaCertificates();
         checkKerberos();
+        checkSshHostKeyPins();
+    }
+
+    /**
+     * Whether the tunnel server's identity will be checked before it receives the account secret.
+     *
+     * <p>An unverified control connection fails no check and produces no error -- it connects
+     * perfectly well to whatever answers -- so without a line here there is nothing an operator
+     * could look at to discover the difference.
+     */
+    public void checkSshHostKeyPins() {
+        ssh.HostKeyPins pins = app.getSshHostKeyPins();
+        if (pins == null || pins.isEmpty()) {
+            Logger.getLogger(Doctor.class.getName()).log(Level.WARNING,
+                "WARN - the tunnel server's SSH host key will not be verified. The account "
+                    + "secret is that connection's password, so it goes to whatever answers. "
+                    + "Pin the key with --ssh-host-key SHA256:... when TestingBot publishes it.");
+            return;
+        }
+        Logger.getLogger(Doctor.class.getName()).log(Level.INFO,
+            "OK - tunnel server must present one of {0} pinned host key(s)", pins.size());
+        for (String fingerprint : pins.displayValues()) {
+            Logger.getLogger(Doctor.class.getName()).log(Level.INFO, "     {0}", fingerprint);
+        }
     }
 
     /**

@@ -110,6 +110,34 @@ public class SSHTunnel implements ReconnectableTunnel {
         return new String[]{userPassword.substring(0, colon), userPassword.substring(colon + 1)};
     }
 
+    /**
+     * Decides what the server has to prove before it receives the account secret.
+     *
+     * <p>With pins configured the session verifies against them and a mismatch aborts the
+     * connect. Without pins there is nothing to verify against, so the previous behaviour stands
+     * -- any key is accepted -- and that fact is logged rather than left implicit: the password
+     * on this session is the customer's account secret, and an unverified server is one that
+     * could be anybody.
+     */
+    private void applyHostKeyVerification(Session session) {
+        HostKeyPins pins = app.getSshHostKeyPins();
+        if (pins == null || pins.isEmpty()) {
+            session.setConfig("StrictHostKeyChecking", "no");
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
+                String.format("[%s] The tunnel server's host key is not verified: no pin is "
+                    + "configured and none was supplied by the API. The account secret is this "
+                    + "connection's password, so anything answering %s:%d receives it. Pin the "
+                    + "key with --ssh-host-key SHA256:... to check it.",
+                    connectionId, server, sshPort));
+            return;
+        }
+        session.setHostKeyRepository(new PinnedHostKeyRepository(pins));
+        session.setConfig("StrictHostKeyChecking", "yes");
+        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
+            String.format("[%s] Verifying the tunnel server against %d pinned host key(s)",
+                connectionId, pins.size()));
+    }
+
     public final void connect() throws Exception {
         Histogram.Timer histogramTimer = TunnelMetrics.TUNNEL_CONNECT_DURATION_SECONDS.startTimer();
         try {
@@ -117,7 +145,7 @@ public class SSHTunnel implements ReconnectableTunnel {
             long startTime = System.currentTimeMillis();
             session = jsch.getSession(app.getClientKey(), server, sshPort);
             session.setPassword(app.getClientSecret());
-            session.setConfig("StrictHostKeyChecking", "no");
+            applyHostKeyVerification(session);
             applyUpstreamProxy(session);
             session.connect();
             long connectTime = System.currentTimeMillis() - startTime;

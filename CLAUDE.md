@@ -81,6 +81,13 @@ java -jar testingbot-tunnel.jar --doctor
 
 - `--se-port`: Local Selenium port (default 4445)
 - `--localproxy`: Local HTTP proxy port (default 8087)
+- `--ssh-host-key`: Only connect to a tunnel server presenting one of these host keys, as
+  OpenSSH SHA-256 fingerprints, comma separated. The account secret is the SSH password, so
+  without a pin it goes to whatever answers on the tunnel port. MD5 fingerprints are refused
+  rather than accepted: a pin that can be collided reads as protection while providing none.
+  Empty by default, because TestingBot does not publish the keys yet -- when the API starts
+  returning `ssh_fingerprint`, that value is adopted automatically and no flag is needed. An
+  explicit flag always wins over the API's value
 - `--bind-address`: Interface for every local listener -- the Selenium relay, the local proxy,
   the insight endpoints and `--web`. Default `127.0.0.1`. These listeners do not authenticate:
   the relay attaches the account key and secret to everything it forwards, and the proxy will
