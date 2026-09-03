@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Minimal upstream HTTP proxy for exercising the tunnel's --proxy option.
 
-Supports absolute-URI GET forwarding and CONNECT tunnelling -- enough to prove
-the tunnel chains through it. Logs each request so the harness can assert the
+Supports absolute-URI GET forwarding, protocol upgrades, and CONNECT tunnelling --
+enough to prove the tunnel chains through it. Logs each request so the harness can assert the
 traffic really went this way.
 
 With a second argument of user:password it demands Basic proxy authentication and
@@ -116,6 +116,56 @@ class Proxy(BaseHTTPRequestHandler):
         pump(self.connection, upstream)
         upstream.close()
 
+    # Meant for us rather than the origin, so they are not forwarded. Everything else is,
+    # which is what makes an upgrade possible: Upgrade, Connection and Sec-WebSocket-Key have
+    # to arrive intact or the origin has no reason to answer 101.
+    HOP_BY_HOP = {"proxy-authorization", "proxy-connection", "proxy-authenticate"}
+
+    def forward_upgrade(self, parts, upstream):
+        """Forward a protocol upgrade, then relay bytes in both directions.
+
+        The plain-GET path below rewrites the request as HTTP/1.0 with Connection: close and
+        keeps none of the client's headers, so an upgrade sent through it could never produce a
+        101 -- the origin never saw that one was being asked for. That made the tunnel's
+        ws://-through---proxy path untestable here: it looked like the tunnel had failed when
+        this proxy was what could not carry it.
+        """
+        path = parts.path or "/"
+        if parts.query:
+            path += "?" + parts.query
+        lines = [f"GET {path} HTTP/1.1", f"Host: {parts.netloc}"]
+        for name, value in self.headers.items():
+            if name.lower() in self.HOP_BY_HOP or name.lower() == "host":
+                continue
+            lines.append(f"{name}: {value}")
+        upstream.sendall(("\r\n".join(lines) + "\r\n\r\n").encode())
+
+        # Read just the response head, a byte at a time: anything after it is already frame
+        # data and taking it here would drop it.
+        head = b""
+        while b"\r\n\r\n" not in head:
+            byte = upstream.recv(1)
+            if not byte:
+                self.log_message("upgrade: origin closed before answering")
+                self.send_error(502, "origin closed before answering the upgrade")
+                return
+            head += byte
+        status = head.split(b"\r\n", 1)[0].decode("latin-1")
+        self.log_message("upgrade -> %s", status)
+        self.connection.sendall(head)
+        if b" 101 " not in head.split(b"\r\n", 1)[0] + b" ":
+            # Not an upgrade after all; the head has been passed on, so pass on the rest too.
+            while True:
+                chunk = upstream.recv(65536)
+                if not chunk:
+                    break
+                self.connection.sendall(chunk)
+            self.close_connection = True
+            return
+        self.connection.setblocking(True)
+        pump(self.connection, upstream)
+        self.close_connection = True
+
     def do_GET(self):
         self.log_message("GET %s", self.path)
         if not self.authorized():
@@ -128,6 +178,15 @@ class Proxy(BaseHTTPRequestHandler):
         except OSError as e:
             self.send_error(502, str(e))
             return
+
+        upgrade = self.headers.get("Upgrade")
+        if upgrade:
+            try:
+                self.forward_upgrade(parts, upstream)
+            finally:
+                upstream.close()
+            return
+
         path = parts.path or "/"
         if parts.query:
             path += "?" + parts.query
