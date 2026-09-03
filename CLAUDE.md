@@ -81,6 +81,15 @@ java -jar testingbot-tunnel.jar --doctor
 
 - `--se-port`: Local Selenium port (default 4445)
 - `--localproxy`: Local HTTP proxy port (default 8087)
+- `--bind-address`: Interface for every local listener -- the Selenium relay, the local proxy,
+  the insight endpoints and `--web`. Default `127.0.0.1`. These listeners do not authenticate:
+  the relay attaches the account key and secret to everything it forwards, and the proxy will
+  connect anywhere this machine can, including its own loopback. `0.0.0.0` hands both to any
+  host that can route here, so it is opt-in and logs a warning. The reverse SSH forward
+  delivers to `127.0.0.1`, so the default costs the product's own path nothing. The Docker
+  image sets `TESTINGBOT_BIND_ADDRESS=0.0.0.0`, because a loopback bind is per network
+  namespace and the container has its own -- there the narrowing belongs on the host side of
+  the port publish (`-p 127.0.0.1:4445:4445`)
 - `--allow-hosts`: Only these hosts may be reached; everything else gets 403. An entry is an
   exact host or `*.suffix` for subdomains, which does *not* match the apex. The inverse of
   `--fast-fail-regexps`: that denies a named few and permits the rest, this permits a named few

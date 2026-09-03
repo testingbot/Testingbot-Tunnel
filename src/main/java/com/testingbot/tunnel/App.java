@@ -89,6 +89,16 @@ public class App {
     static final int DEFAULT_METRICS_PORT = 8003;
     private int metricsPort = DEFAULT_METRICS_PORT;
     private String metricsAuth;
+    /**
+     * Loopback, because every listener this program opens is meant for a client on this
+     * machine: the Selenium relay and the local proxy are reached by the tests and by the
+     * reverse SSH forward, which delivers to 127.0.0.1. Binding the wildcard address instead
+     * offered the relay -- which stamps the account key and secret onto every request it
+     * forwards -- and the proxy -- which is an open CONNECT relay into this host's network
+     * and loopback -- to anyone who could route here.
+     */
+    static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
+    private String bindAddress = DEFAULT_BIND_ADDRESS;
     private int sshPort = 0;
     private boolean shared = false;
 
@@ -297,6 +307,15 @@ public class App {
 
         Option metrics = Option.builder().longOpt("metrics-port").hasArg().valueSeparator().desc("Use the specified port to access metrics. Default port 8003").build();
         options.addOption(metrics);
+
+        Option bindAddressOpt = Option.builder().longOpt("bind-address").hasArg().argName("ADDRESS")
+                .desc("Interface for every local listener -- the Selenium relay (--se-port), the "
+                    + "local proxy (--localproxy), the insight endpoints (--metrics-port) and "
+                    + "--web. Default 127.0.0.1. Use 0.0.0.0 to accept connections from other "
+                    + "hosts, which exposes the relay's TestingBot credentials and an open "
+                    + "forward proxy to everyone who can reach this machine. "
+                    + "Env: TESTINGBOT_BIND_ADDRESS.").build();
+        options.addOption(bindAddressOpt);
 
         options.addOption(null, "ready", false,
             "Ask a running tunnel whether it is ready, then exit 0 (ready) or 1 (not ready). "
@@ -642,6 +661,10 @@ public class App {
             app.setMetricsPort(port(commandLine, "metrics-port"));
         }
 
+        if (commandLine.hasOption("bind-address")) {
+            app.setBindAddress(commandLine.getOptionValue("bind-address"));
+        }
+
         String metricsAuthValue = commandLine.hasOption("metrics-auth")
                 ? commandLine.getOptionValue("metrics-auth")
                 : System.getenv("TESTINGBOT_METRICS_AUTH");
@@ -927,7 +950,7 @@ public class App {
             applyOptions(app, commandLine);
 
             if (commandLine.hasOption("web")) {
-                new LocalWebServer(commandLine.getOptionValue("web"));
+                new LocalWebServer(commandLine.getOptionValue("web"), app.getBindAddress());
             }
 
             app.init();
@@ -1898,6 +1921,47 @@ public class App {
      */
     public int getMetricsPort() {
         return metricsPort;
+    }
+
+    /**
+     * @return the interface every local listener binds to, never null
+     */
+    public String getBindAddress() {
+        return bindAddress;
+    }
+
+    /**
+     * @param bindAddress the interface for every local listener; blank restores the default
+     */
+    public void setBindAddress(String bindAddress) {
+        if (bindAddress == null || bindAddress.trim().isEmpty()) {
+            this.bindAddress = DEFAULT_BIND_ADDRESS;
+            return;
+        }
+        this.bindAddress = bindAddress.trim();
+        if (!isLoopbackBind(this.bindAddress)) {
+            // Not refused: reaching the tunnel from another host is a legitimate setup. But it
+            // is the one that hands an unauthenticated relay and forward proxy to the network,
+            // so it is never entered silently.
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                "Listeners will bind {0}, so other hosts can reach the Selenium relay and the "
+                    + "local proxy. Both are unauthenticated: the relay forwards requests with "
+                    + "your TestingBot key and secret attached, and the proxy will connect "
+                    + "anywhere this machine can, including its own loopback. Restrict access "
+                    + "to this port or bind 127.0.0.1 instead.",
+                this.bindAddress);
+        }
+    }
+
+    /** True when {@code address} names this machine's loopback interface. */
+    private static boolean isLoopbackBind(String address) {
+        try {
+            return java.net.InetAddress.getByName(address).isLoopbackAddress();
+        } catch (java.net.UnknownHostException ex) {
+            // Unresolvable here means the bind will fail with a clearer message than anything
+            // this check could produce, so let it get that far rather than guessing.
+            return false;
+        }
     }
 
     /**

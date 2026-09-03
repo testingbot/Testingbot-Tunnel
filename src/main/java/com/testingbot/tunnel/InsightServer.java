@@ -38,6 +38,7 @@ public class InsightServer {
         server = new Server();
         org.eclipse.jetty.server.ServerConnector connector =
                 new org.eclipse.jetty.server.ServerConnector(server);
+        connector.setHost(app.getBindAddress());
         connector.setPort(app.getMetricsPort());
         server.addConnector(connector);
 

@@ -71,7 +71,12 @@ class HttpProxyTest {
     
     @Test
     void start_whenPortAlreadyBound_throwsHttpProxyStartException() throws Exception {
-        try (ServerSocket blocker = new ServerSocket(0)) {
+        // Bound on the address the proxy itself binds. A wildcard blocker does not collide with
+        // a loopback bind on BSD-derived systems, where SO_REUSEADDR admits the more specific
+        // address -- so the port would still be free for the proxy and the test would prove
+        // nothing about how it reports one that is not.
+        try (ServerSocket blocker = new ServerSocket()) {
+            blocker.bind(new java.net.InetSocketAddress(app.getBindAddress(), 0));
             app.setJettyPort(blocker.getLocalPort());
             assertThatThrownBy(() -> new HttpProxy(app))
                 .isInstanceOf(HttpProxy.HttpProxyStartException.class)

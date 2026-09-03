@@ -110,6 +110,7 @@ public final class HttpProxy {
         ServerConnector proxyConnector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
 
+        proxyConnector.setHost(app.getBindAddress());
         proxyConnector.setPort(app.getJettyPort());
         proxyConnector.setIdleTimeout(400000);
 

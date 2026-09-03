@@ -35,6 +35,14 @@ COPY --from=build --chown=tunnel:tunnel /build/target/testingbot-tunnel.jar /opt
 USER tunnel
 WORKDIR /home/tunnel
 
+# Listeners bind 127.0.0.1 by default, which inside a container makes every published port
+# unreachable from the host -- a loopback bind is per network namespace, and the container has
+# its own. The namespace is the boundary here, so the listeners bind wide and the narrowing
+# belongs on the host side of the port publish: `-p 127.0.0.1:4445:4445`, not `-p 4445:4445`.
+# Publishing 4445 or 8087 to a routable address hands out the account's credentials and an
+# open forward proxy; see the compose example.
+ENV TESTINGBOT_BIND_ADDRESS=0.0.0.0
+
 # Metrics / insight endpoint (default --metrics-port 8003)
 # Also serves /healthz (process alive) and /readyz (tunnel forwarding).
 EXPOSE 8003

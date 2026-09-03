@@ -28,6 +28,7 @@ public class HttpForwarder {
         this.seleniumPort = app.getSeleniumPort();
         httpProxy = new Server();
         ServerConnector connector = new ServerConnector(httpProxy);
+        connector.setHost(app.getBindAddress());
         connector.setPort(app.getSeleniumPort());
         connector.setIdleTimeout(440000);
 
