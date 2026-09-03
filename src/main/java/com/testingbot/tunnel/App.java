@@ -313,14 +313,6 @@ public class App {
         Option metrics = Option.builder().longOpt("metrics-port").hasArg().valueSeparator().desc("Use the specified port to access metrics. Default port 8003").build();
         options.addOption(metrics);
 
-        Option sshHostKeyOpt = Option.builder().longOpt("ssh-host-key").hasArg().argName("FINGERPRINT")
-                .desc("Only connect to a tunnel server presenting one of these host keys, as "
-                    + "OpenSSH SHA-256 fingerprints, comma separated (SHA256:... -- get one with "
-                    + "ssh-keygen -lf <key> -E sha256). The account secret is the SSH password, "
-                    + "so without a pin it is sent to whatever answers on the tunnel port. "
-                    + "MD5 fingerprints are refused. Env: TESTINGBOT_SSH_HOST_KEY.").build();
-        options.addOption(sshHostKeyOpt);
-
         Option bindAddressOpt = Option.builder().longOpt("bind-address").hasArg().argName("ADDRESS")
                 .desc("Interface for every local listener -- the Selenium relay (--se-port), the "
                     + "local proxy (--localproxy), the insight endpoints (--metrics-port) and "
@@ -676,17 +668,6 @@ public class App {
 
         if (commandLine.hasOption("bind-address")) {
             app.setBindAddress(commandLine.getOptionValue("bind-address"));
-        }
-
-        if (commandLine.hasOption("ssh-host-key")) {
-            try {
-                app.setSshHostKeyPins(
-                    ssh.HostKeyPins.parse(commandLine.getOptionValue("ssh-host-key")));
-            } catch (IllegalArgumentException ex) {
-                // Refused rather than dropped: a pin that silently did not apply would leave the
-                // operator believing the server is checked when it is not.
-                throw new ParseException("--ssh-host-key: " + ex.getMessage());
-            }
         }
 
         String metricsAuthValue = commandLine.hasOption("metrics-auth")
@@ -1966,8 +1947,9 @@ public class App {
      *
      * <p>The field is optional and not yet sent, so this is inert until the service publishes
      * it -- at which point every client on this version starts verifying with no flag and no
-     * upgrade. An explicit {@code --ssh-host-key} wins: it is the operator saying which key
-     * they mean, and it must not be overridden by the far side.
+     * upgrade. A pin already set wins, so a caller that established one out of band -- the
+     * only recourse where a TLS-intercepting proxy can rewrite this very response -- is not
+     * overridden by the far side.
      */
     void adoptApiHostKeyFingerprint(com.fasterxml.jackson.databind.JsonNode tunnelData) {
         if (tunnelData == null || !sshHostKeyPins.isEmpty()) {

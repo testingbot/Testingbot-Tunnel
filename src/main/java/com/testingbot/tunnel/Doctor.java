@@ -92,7 +92,7 @@ public final class Doctor {
             Logger.getLogger(Doctor.class.getName()).log(Level.WARNING,
                 "WARN - the tunnel server's SSH host key will not be verified. The account "
                     + "secret is that connection's password, so it goes to whatever answers. "
-                    + "Pin the key with --ssh-host-key SHA256:... when TestingBot publishes it.");
+                    + "The API did not supply a fingerprint for this tunnel.");
             return;
         }
         Logger.getLogger(Doctor.class.getName()).log(Level.INFO,

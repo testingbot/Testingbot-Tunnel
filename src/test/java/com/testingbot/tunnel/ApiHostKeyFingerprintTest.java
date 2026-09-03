@@ -56,9 +56,9 @@ class ApiHostKeyFingerprintTest {
     }
 
     @Test
-    void doesNotOverrideAnExplicitPin() {
-        // --ssh-host-key is the operator saying which key they mean. The far side of the
-        // connection does not get to replace it.
+    void doesNotOverrideAPinAlreadySet() {
+        // The recourse where a TLS-intercepting proxy could rewrite this very response is a pin
+        // established out of band. The far side does not get to replace it.
         App app = app();
         String configured = someFingerprint("the-key-i-configured");
         app.setSshHostKeyPins(HostKeyPins.parse(configured));
@@ -78,7 +78,7 @@ class ApiHostKeyFingerprintTest {
     }
 
     @Test
-    void md5FromTheApiIsRefusedTheSameAsFromTheCommandLine() {
+    void md5FromTheApiIsRefused() {
         App app = app();
 
         app.adoptApiHostKeyFingerprint(

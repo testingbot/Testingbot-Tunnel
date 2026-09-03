@@ -124,10 +124,9 @@ public class SSHTunnel implements ReconnectableTunnel {
         if (pins == null || pins.isEmpty()) {
             session.setConfig("StrictHostKeyChecking", "no");
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
-                String.format("[%s] The tunnel server's host key is not verified: no pin is "
-                    + "configured and none was supplied by the API. The account secret is this "
-                    + "connection's password, so anything answering %s:%d receives it. Pin the "
-                    + "key with --ssh-host-key SHA256:... to check it.",
+                String.format("[%s] The tunnel server's host key is not verified: the API "
+                    + "supplied no fingerprint. The account secret is this connection's "
+                    + "password, so anything answering %s:%d receives it.",
                     connectionId, server, sshPort));
             return;
         }
