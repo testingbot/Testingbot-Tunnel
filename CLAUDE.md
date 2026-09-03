@@ -338,13 +338,29 @@ tunnel is created -- `no_bump` for the whole tunnel, `no_bump_domains` for named
 something meaningless. An entry that is a URL or carries a port would match nothing on the
 server, and the tunnel would bump the very host the user was exempting.
 
-**Measured caveat:** `--nobump` has no observable effect on tunnelled HTTPS to an origin
-presenting a certificate Squid cannot chain. The e2e `sslbump` scenario drives a browser at a
-self-signed origin with `acceptInsecureCerts` agreed, and it fails identically with and without
-the flag -- so Squid is not splicing. `ApiTest` asserts the parameter does leave this side, so
-the gap is server-side. The scenario reports it as a skip and turns into a pass once the server
-honours the flag. Tracked as TB-352, which also covers accepting
-`no_bump_domains`.
+**`--nobump` works, end to end.** This previously read as a measured server-side gap: the e2e
+`sslbump` scenario failed identically with and without the flag, which was taken to mean Squid
+was not splicing. TB-352 was raised against the server on that basis. It was wrong, and the
+reason is worth keeping because it invalidates a whole class of test:
+
+The scenario navigated to `https://localhost:PORT`. A browser given `localhost` over **HTTPS**
+never reaches the tunnel at all -- it resolves it on the browser VM and answers
+`ERR_SSL_PROTOCOL_ERROR` from whatever is on that machine's own loopback. So both runs failed
+before the proxy was ever consulted, which is exactly why they failed *identically*. Confirmed
+on a random port and on 8080, which the VM does register a local listener for, so it is not
+about the port. Note that plain **HTTP** to `localhost` does travel through the tunnel, which is
+what made the asymmetry so easy to miss.
+
+Addressed by a routable name (`localtest.me`, which resolves to 127.0.0.1, so the tunnel client
+dials the same origin) the self-signed origin loads over an unbumped tunnel and returns its
+marker. Reading back the capabilities the hub hands out for a `--nobump` tunnel confirms the
+other half: `sslProxy` is `<ip>:2010`, the raw SSH-forwarded port, so Squid is bypassed rather
+than reconfigured. The whole chain -- client sends `no_bump`, the API persists it, the hub
+selects port 2010 -- is correct.
+
+`no_bump_domains` is a different matter and remains unimplemented server-side: nothing consumes
+it, and it is the one case port selection cannot serve, since a single `sslProxy` value cannot
+vary per domain.
 
 ### Configuration sources
 

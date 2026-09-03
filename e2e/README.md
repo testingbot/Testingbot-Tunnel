@@ -86,7 +86,7 @@ may hold tunnel slots on the same account.
 | `dns` | 1 | `--dns` server list against local servers, using `.invalid` names nothing else can resolve, including fall-through past a dead entry |
 | `websocket` | 1 | `ws://` through both handler paths and a real browser; `wss://` through the CONNECT relay |
 | `protocols` | 1 | which HTTP versions survive the tunnel, and streamed-vs-buffered responses |
-| `sslbump` | 1 | what `--nobump` actually does, measured by which certificate a browser sees |
+| `sslbump` | 1 | `--nobump` passes TLS through untouched, asserted via the tunnel client's own log |
 | `reconnect` | 1 | severs the SSH connection and asserts recovery, readiness and traffic afterwards |
 | `upstream_proxy` | 1 | `--proxy` chaining through a local upstream proxy |
 | `upstream_proxy_auth` | 1 | the same, through a proxy that demands Basic credentials |
@@ -211,8 +211,25 @@ reach the tunnel, so an e2e run would exercise nothing the unit tests do not.
 accept a query and never answer, which is the case that matters. Spending a tunnel start on
 them would buy no coverage.
 
-`--nobump-domains` has no behavioural e2e because the server does not read the parameter yet
-(TB-352). The `sslbump` scenario is its acceptance test for when it does.
+`--nobump-domains` has no behavioural e2e because nothing server-side consumes the parameter:
+it has no column and no code in either the API or the hub. It is also the one bump option that
+port selection cannot serve, since a single `sslProxy` value cannot vary per domain. The
+`sslbump` scenario is its acceptance test for when that is built.
+
+`--nobump` itself is covered and passes. It previously did not, and the reason is a trap worth
+naming: **a browser given `localhost` over HTTPS never reaches the tunnel.** It resolves the
+name on its own VM and answers `ERR_SSL_PROTOCOL_ERROR` from whatever is on that loopback, on a
+random port and on 8080 alike -- 8080 being one of the ports the VM registers a local listener
+for, so this is not about which port is used. Plain HTTP to `localhost` *does* travel through
+the tunnel, and that asymmetry is what hid it: two scenarios concluded "the server does not
+splice" and "the certificate must be untrusted" from failures where no request had left the
+browser VM.
+
+Browser-facing scenarios therefore address the local origin as `$TUNNEL_HOST_NAME`
+(`localtest.me` by default, a public name resolving to 127.0.0.1, so the tunnel client dials the
+same origin). Override with `E2E_TLS_HOST` where that name cannot be resolved. The `sslbump`
+scenario additionally asserts the CONNECT appears in the tunnel client's log, so a navigation
+that succeeds *without* traversing the tunnel fails the test rather than passing it.
 
 `--krb5-hosts` has only its negative half in e2e. Minting a ticket needs a KDC, and Kerby is a
 Java test dependency the shaded jar cannot reach, so the positive case -- a listed host receiving

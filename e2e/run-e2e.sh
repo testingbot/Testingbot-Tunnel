@@ -264,6 +264,19 @@ check_se_status()     { assert_contains "$1 se-hub-status" "$(curl -s --max-time
 # A TLS twin of the origin, for wss://. Self-signed: the tunnel relays these bytes without
 # being able to read them either, so what the certificate says is not what is under test.
 TLS_ORIGIN_PORT=""; TLS_ORIGIN_PID=""
+# The host name a browser must use to reach a local origin *through the tunnel*.
+#
+# Not "localhost". Measured against a real session: http://localhost:PORT does travel through
+# the proxy and arrive at the tunnel client, but https://localhost:PORT never leaves the browser
+# VM at all -- on a random port and on 8080, which the VM does register a local listener for.
+# Chrome answers ERR_SSL_PROTOCOL_ERROR from whatever is on its own loopback, and the tunnel
+# client logs no CONNECT. The same origin reached by a resolvable name works on both ports.
+#
+# localtest.me is a public name that resolves to 127.0.0.1, so the tunnel client dials the very
+# same origin; only the browser's treatment of the name differs. Override with E2E_TLS_HOST for
+# a network that cannot resolve it.
+TUNNEL_HOST_NAME="${E2E_TLS_HOST:-localtest.me}"
+
 start_tls_origin() {
   local cert="${E2E_TLS_CERT:-$WORK/origin.crt}" key="${E2E_TLS_KEY:-$WORK/origin.key}"
   if [ -n "${E2E_TLS_CERT:-}" ] && [ -f "$cert" ] && [ -f "$key" ]; then
@@ -279,7 +292,8 @@ start_tls_origin() {
     return 1
   fi
   openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
-      -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" \
+      -subj "/CN=localhost" \
+      -addext "subjectAltName=DNS:localhost,DNS:${TUNNEL_HOST_NAME},IP:127.0.0.1" \
       -keyout "$key" -out "$cert" >/dev/null 2>&1 || { bad "tls origin" "openssl failed"; return 1; }
 
   TLS_ORIGIN_PORT="$(free_port)"
@@ -970,7 +984,9 @@ scenario_sslbump() {
   start_tls_origin || return 1
   local bump_args="--nobump"
   [ "${E2E_SSLBUMP_ON:-0}" = "1" ] && bump_args=""
-  start_tunnel $bump_args || { stop_tls_origin; return 1; }
+  # --log-http url so the tunnel-traversal assertion below has something to read: the default
+  # (errors) logs nothing for a request that worked.
+  start_tunnel $bump_args --log-http url || { stop_tls_origin; return 1; }
 
   if [ "$SKIP_BROWSER" = "1" ]; then
     skip "sslbump" "E2E_SKIP_BROWSER=1"
@@ -985,17 +1001,33 @@ scenario_sslbump() {
   if [ -z "$sid" ]; then bad "sslbump session" "could not create session"; stop_tunnel; stop_tls_origin; return; fi
   assert_eq "the browser agreed to accept insecure certificates" "$agreed" "True"
 
-  local nav; nav="$(wd_goto_verbose 4445 "$sid" "https://localhost:$TLS_ORIGIN_PORT/")"
-  if [ "${nav%%|*}" = "200" ]; then
-    ok "TLS is passed through for an unbumped tunnel" "self-signed origin loaded"
+  local nav; nav="$(wd_goto_verbose 4445 "$sid" "https://$TUNNEL_HOST_NAME:$TLS_ORIGIN_PORT/")"
+  assert_eq "TLS is passed through for an unbumped tunnel" "${nav%%|*}" "200"
+
+  # Loading is not the same as loading *through the tunnel*: a page served by anything else
+  # would satisfy the status check. The marker only exists on our origin.
+  assert_contains "the unbumped page came from our origin" \
+    "$(wd_source 4445 "$sid")" "$MARKER"
+
+  # And the CONNECT has to have reached this client. This is what the scenario was missing: it
+  # asserted a navigation result and never checked that the request travelled the tunnel, so
+  # for a long time it reported a server-side splicing failure for a request that never left
+  # the browser VM.
+  if grep -q "CONNECT http://$TUNNEL_HOST_NAME:$TLS_ORIGIN_PORT" "$TUNNEL_LOG" 2>/dev/null; then
+    ok "the unbumped CONNECT travelled through the tunnel" "seen in the tunnel log"
   else
-    # Not a failure of this client: it sends no_bump=true correctly, which ApiTest asserts.
-    # Whether Squid then splices instead of re-signing is decided on the tunnel server, and
-    # measured here it does not -- the error is identical with and without --nobump. Reported
-    # as a skip so the suite stays honest without going red over something no change in this
-    # repository can fix; it becomes a pass the moment the server honours the flag.
-    skip "TLS is passed through for an unbumped tunnel" \
-      "TB-352: server did not splice: $(printf '%.70s' "${nav#*|}")"
+    bad "the unbumped CONNECT travelled through the tunnel" \
+      "no CONNECT to $TUNNEL_HOST_NAME:$TLS_ORIGIN_PORT in the tunnel log"
+  fi
+
+  # The behaviour this scenario used to report as a server fault, kept as a regression check:
+  # a browser given "localhost" never reaches the tunnel over HTTPS, whatever the port.
+  local loopback; loopback="$(wd_goto_verbose 4445 "$sid" "https://localhost:$TLS_ORIGIN_PORT/")"
+  if [ "${loopback%%|*}" = "200" ]; then
+    ok "localhost over HTTPS now reaches the tunnel too" "browsers stopped short-circuiting it"
+  else
+    skip "localhost over HTTPS does not reach the tunnel" \
+      "expected: the browser resolves it locally, so tests must use a routable name"
   fi
   wd_delete 4445 "$sid"
 
@@ -1088,22 +1120,18 @@ scenario_websocket() {
   check_websocket websocket tls "127.0.0.1:$TLS_ORIGIN_PORT"
 
   # Then the real thing: a browser in the cloud opening a socket back to this machine.
-  check_websocket_browser websocket-ws "http://localhost:$ORIGIN_PORT/wstest"
+  check_websocket_browser websocket-ws "http://$TUNNEL_HOST_NAME:$ORIGIN_PORT/wstest"
 
-  # wss:// from the browser needs a certificate the *remote* side trusts. acceptInsecureCerts
-  # only relaxes the browser, and the refusal happens before that -- at Squid, which terminates
-  # or validates the TLS it is asked to carry. Verified: a self-signed origin fails with
-  # ERR_SSL_PROTOCOL_ERROR identically with and without --nobump, so it is the certificate and
-  # not the bumping. A harness cannot mint a certificate that chain, so this runs only when one
-  # is supplied.
-  if [ -n "${E2E_TLS_CERT:-}" ] && [ -n "${E2E_TLS_KEY:-}" ]; then
-    check_websocket_browser websocket-wss "https://${E2E_TLS_HOST:-localhost}:$TLS_ORIGIN_PORT/wstest"
-  else
-    skip "websocket-wss ws-browser-echo" "set E2E_TLS_CERT/E2E_TLS_KEY to a trusted certificate"
-    # What can still be checked without one: that the browser reaches https at all through the
-    # tunnel. If this fails, TLS through Squid is broken and the skip above is hiding it.
-    check_browser_https websocket-wss
-  fi
+  # A self-signed origin is enough: acceptInsecureCerts relaxes the browser, and the connection
+  # does reach the tunnel once the host name is routable.
+  #
+  # This used to be gated behind E2E_TLS_CERT, on the reasoning that a self-signed origin failed
+  # with ERR_SSL_PROTOCOL_ERROR identically with and without --nobump, so the certificate had to
+  # be the problem and Squid the place it was refused. That was the localhost bug: over HTTPS
+  # the request never left the browser VM, so neither Squid nor the certificate was ever
+  # reached. Addressed by a routable name it works, and the gate is gone.
+  check_websocket_browser websocket-wss \
+    "https://$TUNNEL_HOST_NAME:$TLS_ORIGIN_PORT/wstest" insecure
 
   stop_tunnel
   stop_tls_origin
