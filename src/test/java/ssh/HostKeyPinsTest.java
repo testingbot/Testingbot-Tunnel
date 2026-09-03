@@ -22,6 +22,27 @@ class HostKeyPinsTest {
         return HostKeyPins.displayFingerprint(key);
     }
 
+    /**
+     * A real ed25519 host key blob and the fingerprint {@code ssh-keygen -lf key.pub -E sha256}
+     * prints for it.
+     *
+     * <p>The pin is produced on the server side, by TestingBot's provisioning, and consumed
+     * here. Both sides claim to implement "the OpenSSH SHA-256 fingerprint", and if they ever
+     * disagree the failure is silent in the worst direction -- every tunnel refuses to connect,
+     * or worse, a mismatch is read as a match. Fixing both to ssh-keygen's own output is what
+     * keeps them honest about the same key.
+     */
+    @Test
+    void agreesWithOpenSshForAKnownKey() {
+        byte[] blob = java.util.Base64.getDecoder().decode(
+            "AAAAC3NzaC1lZDI1NTE5AAAAIA5bqZrdnj+5TF1wtRoUOlwsWtCPsy9dJRAACProONkE");
+
+        assertThat(HostKeyPins.displayFingerprint(blob))
+            .isEqualTo("SHA256:eTI8P5+7OfTXiXYyaS6HEBg6oU36cD95+p1JhR3JcNs");
+        assertThat(HostKeyPins.parse("SHA256:eTI8P5+7OfTXiXYyaS6HEBg6oU36cD95+p1JhR3JcNs")
+            .matches(blob)).isTrue();
+    }
+
     @Test
     void matchesTheKeyItWasBuiltFrom() {
         HostKeyPins pins = HostKeyPins.parse(fingerprintOf(KEY));
