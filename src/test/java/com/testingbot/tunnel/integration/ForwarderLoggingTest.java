@@ -63,6 +63,7 @@ class ForwarderLoggingTest {
     private HttpForwarder forwarder;
     private Logger forwarderLogger;
     private CapturingHandler captured;
+    private com.sun.net.httpserver.HttpServer hub;
 
     private static int findFreePort() throws IOException {
         return TestPorts.free();
@@ -79,6 +80,14 @@ class ForwarderLoggingTest {
     }
 
     /** Starts the relay with the given --log-http value and sends one request through it. */
+    @org.junit.jupiter.api.AfterEach
+    void stopHub() {
+        if (hub != null) {
+            hub.stop(0);
+            hub = null;
+        }
+    }
+
     private List<String> relayOneRequest(String logHttp) throws Exception {
         int port = findFreePort();
         App app = new App();
@@ -93,6 +102,22 @@ class ForwarderLoggingTest {
         forwarderLogger = Logger.getLogger("com.testingbot.tunnel.proxy.ForwarderHandler");
         forwarderLogger.addHandler(captured);
         forwarderLogger.setLevel(Level.ALL);
+
+        // A stub hub, so a request can actually succeed. Without one every request 502s, and
+        // "quiet for successful requests" could not be told apart from "quiet always".
+        hub = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
+        hub.createContext("/", exchange -> {
+            byte[] body = "{\"value\":{\"ready\":true}}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        hub.start();
+        // The relay forwards to 127.0.0.1:<sshPort>; there is no setter, so point it at the stub.
+        java.lang.reflect.Field sshPort = App.class.getDeclaredField("sshPort");
+        sshPort.setAccessible(true);
+        sshPort.set(app, hub.getAddress().getPort());
 
         // The constructor starts it.
         forwarder = new HttpForwarder(app);
@@ -144,7 +169,18 @@ class ForwarderLoggingTest {
     @Test
     void theDefaultIsQuietForSuccessfulRequests() throws Exception {
         // errors is the documented default since TB-319. This path ignored it entirely.
+        //
+        // The request has to actually succeed for the name to be true: with no hub behind the
+        // relay every request 502s, and ERRORS writes no request line either way, so this was
+        // indistinguishable from noneSilencesTheRelay below.
         assertThat(relayOneRequest(null))
                 .noneMatch(m -> m.contains("/wd/hub"));
+    }
+
+    /** The positive control: at url level the same successful request IS logged. */
+    @Test
+    void urlLevelLogsTheSuccessfulRequest() throws Exception {
+        assertThat(relayOneRequest("forwarder:url"))
+                .anyMatch(m -> m.contains("/wd/hub"));
     }
 }

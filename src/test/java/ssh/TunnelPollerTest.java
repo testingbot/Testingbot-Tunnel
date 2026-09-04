@@ -4,22 +4,62 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.testingbot.tunnel.Api;
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.TunnelFailedException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
- * Tests for TunnelPoller
+ * The poll that waits for a freshly created tunnel to become READY.
+ *
+ * <p>Driven through an injected scheduler rather than the real five-second timer. The previous
+ * version slept 6 and 16 seconds per test -- about eighty seconds for the class -- and still
+ * could not distinguish a poller that cancelled itself from one that never polled at all, since
+ * every assertion was {@code never(tunnelReady)}, which holds either way.
  */
 class TunnelPollerTest {
+
+    /** Runs the scheduled task on demand and records cancellation. */
+    private static final class ManualScheduler implements Scheduler {
+        private Runnable task;
+        private int cancels;
+
+        @Override
+        public void scheduleOnce(String name, Runnable task, long delayMs) {
+            this.task = task;
+        }
+
+        @Override
+        public void scheduleRepeating(String name, Runnable task, long delayMs, long periodMs) {
+            this.task = task;
+        }
+
+        @Override
+        public void cancel() {
+            cancels++;
+        }
+
+        void poll() {
+            task.run();
+        }
+
+        boolean wasCancelled() {
+            return cancels > 0;
+        }
+    }
 
     private App app;
     private Api api;
     private ObjectMapper objectMapper;
+    private ManualScheduler scheduler;
 
     @BeforeEach
     void setUp() {
@@ -27,169 +67,80 @@ class TunnelPollerTest {
         api = mock(Api.class);
         when(app.getApi()).thenReturn(api);
         objectMapper = new ObjectMapper();
+        scheduler = new ManualScheduler();
+    }
+
+    private TunnelPoller poller() {
+        return new TunnelPoller(app, "tunnel123", scheduler);
+    }
+
+    private JsonNode state(String value) throws Exception {
+        return objectMapper.readTree("{\"state\":\"" + value + "\"}");
     }
 
     @Test
-    void constructor_shouldStartPolling() throws Exception {
-        // Given: API returns READY state
-        JsonNode readyResponse = objectMapper.readTree("{\"state\":\"READY\",\"tunnel_id\":\"123\"}");
-        when(api.pollTunnel(anyString())).thenReturn(readyResponse);
+    void aReadyTunnelIsHandedOverAndThePollStops() throws Exception {
+        when(api.pollTunnel(anyString())).thenReturn(state("READY"));
+        poller();
 
-        // When: Creating TunnelPoller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
+        scheduler.poll();
 
-        // Then: Should start polling
-        assertThat(poller).isNotNull();
-
-        // Wait for at least one poll
-        Thread.sleep(6000);
-
-        // Clean up
-        poller.cancel();
+        verify(app).tunnelReady(any());
+        assertThat(scheduler.wasCancelled())
+                .as("a tunnel that is up must not keep being polled for")
+                .isTrue();
     }
 
     @Test
-    void pollTask_whenStateIsReady_shouldCallTunnelReady() throws Exception {
-        // Given: API returns READY state
-        JsonNode readyResponse = objectMapper.readTree("{\"state\":\"READY\",\"tunnel_id\":\"123\"}");
-        when(api.pollTunnel(anyString())).thenReturn(readyResponse);
+    void aTunnelStillBootingIsPolledAgain() throws Exception {
+        when(api.pollTunnel(anyString())).thenReturn(state("BOOTING"));
+        poller();
 
-        // When: Starting poller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
+        scheduler.poll();
+        scheduler.poll();
 
-        // Wait for poll to execute
-        Thread.sleep(6000);
-
-        // Then: Should call tunnelReady
-        verify(app, atLeastOnce()).tunnelReady(any(JsonNode.class));
-
-        // Clean up
-        poller.cancel();
+        // The poll happened -- which never(tunnelReady) alone could not show -- and the
+        // schedule was left in place.
+        verify(api, times(2)).pollTunnel("tunnel123");
+        verify(app, never()).tunnelReady(any());
+        assertThat(scheduler.wasCancelled()).isFalse();
     }
 
     @Test
-    void pollTask_whenStateIsPending_shouldContinuePolling() throws Exception {
-        // Given: API returns PENDING then READY
-        JsonNode pendingResponse = objectMapper.readTree("{\"state\":\"PENDING\",\"tunnel_id\":\"123\"}");
-        JsonNode readyResponse = objectMapper.readTree("{\"state\":\"READY\",\"tunnel_id\":\"123\"}");
+    void aFailureWhilePollingStopsTheSchedule() throws Exception {
+        when(api.pollTunnel(anyString())).thenThrow(new RuntimeException("boom"));
+        poller();
 
-        when(api.pollTunnel(anyString()))
-            .thenReturn(pendingResponse)
-            .thenReturn(pendingResponse)
-            .thenReturn(readyResponse);
+        scheduler.poll();
 
-        // When: Starting poller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
-
-        // Wait for multiple polls
-        Thread.sleep(16000);
-
-        // Then: Should eventually call tunnelReady
-        verify(app, atLeastOnce()).tunnelReady(any(JsonNode.class));
-
-        // Clean up
-        poller.cancel();
+        // The cancel is the point: without it the poller keeps throwing every five seconds for
+        // the life of the process. The old test asserted only that tunnelReady was not called.
+        verify(api, times(1)).pollTunnel("tunnel123");
+        verify(app, never()).tunnelReady(any());
+        assertThat(scheduler.wasCancelled()).isTrue();
     }
 
     @Test
-    void cancel_shouldStopPolling() throws Exception {
-        // Given: API returns PENDING state
-        JsonNode pendingResponse = objectMapper.readTree("{\"state\":\"PENDING\",\"tunnel_id\":\"123\"}");
-        when(api.pollTunnel(anyString())).thenReturn(pendingResponse);
+    void aTunnelThatCameUpButCouldNotBeSetUpStopsTheSchedule() throws Exception {
+        when(api.pollTunnel(anyString())).thenReturn(state("READY"));
+        org.mockito.Mockito.doThrow(new TunnelFailedException("no port"))
+                .when(app).tunnelReady(any());
+        poller();
 
-        // When: Creating and immediately canceling poller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
-        poller.cancel();
+        scheduler.poll();
 
-        // Wait to verify no more polling
-        Thread.sleep(6000);
-
-        // Then: Should not call tunnelReady
-        verify(app, never()).tunnelReady(any(JsonNode.class));
+        // Runs on a timer thread with nobody to propagate to, so it must stop itself rather
+        // than retry a setup that already failed.
+        assertThat(scheduler.wasCancelled()).isTrue();
     }
 
     @Test
-    void pollTask_whenExceptionOccurs_shouldCancelPolling() throws Exception {
-        // Given: API throws exception
-        when(api.pollTunnel(anyString())).thenThrow(new RuntimeException("API Error"));
+    void cancelStopsTheSchedule() throws Exception {
+        when(api.pollTunnel(anyString())).thenReturn(state("BOOTING"));
+        TunnelPoller poller = poller();
 
-        // When: Starting poller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
-
-        // Wait for poll to execute
-        Thread.sleep(6000);
-
-        // Then: Should not call tunnelReady
-        verify(app, never()).tunnelReady(any(JsonNode.class));
-
-        // Clean up
         poller.cancel();
-    }
 
-    @Test
-    void pollTask_shouldPassCorrectTunnelId() throws Exception {
-        // Given: API returns READY state
-        JsonNode readyResponse = objectMapper.readTree("{\"state\":\"READY\",\"tunnel_id\":\"456\"}");
-        when(api.pollTunnel(anyString())).thenReturn(readyResponse);
-
-        String tunnelId = "tunnel456";
-
-        // When: Starting poller with specific tunnel ID
-        TunnelPoller poller = new TunnelPoller(app, tunnelId);
-
-        // Wait for poll
-        Thread.sleep(6000);
-
-        // Then: Should poll with correct tunnel ID
-        ArgumentCaptor<String> tunnelIdCaptor = ArgumentCaptor.forClass(String.class);
-        verify(api, atLeastOnce()).pollTunnel(tunnelIdCaptor.capture());
-        assertThat(tunnelIdCaptor.getValue()).isEqualTo(tunnelId);
-
-        // Clean up
-        poller.cancel();
-    }
-
-    @Test
-    void pollTask_withDifferentStates_shouldHandleAll() throws Exception {
-        // Given: API returns various states
-        JsonNode initializingResponse = objectMapper.readTree("{\"state\":\"INITIALIZING\",\"tunnel_id\":\"123\"}");
-        JsonNode connectingResponse = objectMapper.readTree("{\"state\":\"CONNECTING\",\"tunnel_id\":\"123\"}");
-        JsonNode readyResponse = objectMapper.readTree("{\"state\":\"READY\",\"tunnel_id\":\"123\"}");
-
-        when(api.pollTunnel(anyString()))
-            .thenReturn(initializingResponse)
-            .thenReturn(connectingResponse)
-            .thenReturn(readyResponse);
-
-        // When: Starting poller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
-
-        // Wait for polls
-        Thread.sleep(16000);
-
-        // Then: Should eventually reach READY and call tunnelReady
-        verify(app, atLeastOnce()).tunnelReady(any(JsonNode.class));
-
-        // Clean up
-        poller.cancel();
-    }
-
-    @Test
-    void pollTask_shouldPollEvery5Seconds() throws Exception {
-        // Given: API returns PENDING state
-        JsonNode pendingResponse = objectMapper.readTree("{\"state\":\"PENDING\",\"tunnel_id\":\"123\"}");
-        when(api.pollTunnel(anyString())).thenReturn(pendingResponse);
-
-        // When: Starting poller
-        TunnelPoller poller = new TunnelPoller(app, "tunnel123");
-
-        // Wait for multiple poll cycles
-        Thread.sleep(16000);
-
-        // Then: Should have polled multiple times (at least 2-3 times in 16 seconds)
-        verify(api, atLeast(2)).pollTunnel(anyString());
-
-        // Clean up
-        poller.cancel();
+        assertThat(scheduler.wasCancelled()).isTrue();
     }
 }

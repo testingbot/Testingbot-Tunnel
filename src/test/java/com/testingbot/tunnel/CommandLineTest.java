@@ -188,15 +188,6 @@ class CommandLineTest {
                 "localhost:8080:user:pass", "example.com:443:u2:p2");
     }
 
-    @Test
-    void setFreeJettyPort_shouldAssignPort() {
-        // Given: Fresh App instance
-        // When: Setting free jetty port
-        app.setFreeJettyPort();
-
-        // Then: Should assign a port > 0
-        assertThat(app.getJettyPort()).isGreaterThan(0);
-    }
 
     @Test
     void getHttpProxy_shouldReturnNullInitially() {

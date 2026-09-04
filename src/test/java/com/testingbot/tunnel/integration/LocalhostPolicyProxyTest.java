@@ -170,6 +170,23 @@ class LocalhostPolicyProxyTest {
         App app = startProxy("deny");
         int seleniumPort = findFreePort();
         app.setSeleniumPort(seleniumPort);
+
+        // A stub hub behind the relay, so a *successful* relay is observable. Without one the
+        // answer is always 502, and "not 403" held for a relay broken in any way at all --
+        // nothing in HttpForwarder -> ForwarderHandler can even produce a 403.
+        com.sun.net.httpserver.HttpServer hub = com.sun.net.httpserver.HttpServer.create(
+                new java.net.InetSocketAddress(java.net.InetAddress.getLoopbackAddress(), 0), 0);
+        hub.createContext("/", exchange -> {
+            byte[] body = "{\"value\":{\"ready\":true}}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        hub.start();
+        java.lang.reflect.Field sshPort = App.class.getDeclaredField("sshPort");
+        sshPort.setAccessible(true);
+        sshPort.set(app, hub.getAddress().getPort());
+
         forwarder = new HttpForwarder(app);
         waitForPort(seleniumPort);
 
@@ -183,11 +200,12 @@ class LocalhostPolicyProxyTest {
             BufferedReader reader = new BufferedReader(
                     new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             String status = reader.readLine();
+            hub.stop(0);
 
-            // Without a tunnel behind it the relay cannot reach the hub, so the status will be
-            // an error -- but it must not be our 403, which is what a leaked policy would give.
-            assertThat(status).isNotNull();
-            assertThat(status).doesNotContain("403");
+            // A real 200: the relay reached the hub with --localhost-policy deny in force,
+            // which is the point. The previous "not 403" was satisfied by the 502 a hubless
+            // relay always returns.
+            assertThat(status).contains("200");
         }
     }
 }

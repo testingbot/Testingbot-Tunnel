@@ -142,6 +142,51 @@ class ConnectLoggingTest {
                 .noneMatch(m -> m.contains("CONNECT"));
     }
 
+    /**
+     * The positive control for the test above.
+     *
+     * <p>Without it, that assertion held for a HttpLogHandler that had stopped wrapping the
+     * CONNECT path altogether, or whose logger had been renamed -- nothing else in the suite
+     * drives a CONNECT through the logging handler, since HttpLoggingTest only sends plain GETs.
+     */
+    @Test
+    void aConnectIsLoggedAtUrlLevel() throws Exception {
+        int port = findFreePort();
+        App app = new App();
+        app.setJettyPort(port);
+        app.setClientKey("test_key");
+        app.setClientSecret("test_secret");
+        app.setLogHttp("url");
+
+        CapturingHandler urlCaptured = new CapturingHandler();
+        Logger logger = Logger.getLogger("com.testingbot.tunnel.proxy.HttpLogHandler");
+        logger.addHandler(urlCaptured);
+        logger.setLevel(Level.ALL);
+
+        HttpProxy urlProxy = new HttpProxy(app);
+        try {
+            waitForPort(port);
+            try (Socket socket = new Socket("127.0.0.1", port)) {
+                socket.setSoTimeout(15_000);
+                socket.getOutputStream().write(
+                        ("CONNECT nowhere.invalid:443 HTTP/1.1\r\nHost: nowhere.invalid:443\r\n\r\n")
+                                .getBytes(StandardCharsets.UTF_8));
+                socket.getOutputStream().flush();
+                socket.getInputStream().read();
+            } catch (IOException expected) {
+                // the dial cannot succeed; the line is written on the way in regardless
+            }
+            Thread.sleep(300);
+
+            assertThat(urlCaptured.messages())
+                    .as("--log-http url must log the CONNECT")
+                    .anyMatch(m -> m.contains("CONNECT"));
+        } finally {
+            logger.removeHandler(urlCaptured);
+            urlProxy.stop();
+        }
+    }
+
     @Test
     void debugDumpsTheConnectHeaders() throws Exception {
         // HttpProxy set six properties on the cast CONNECT handler and not this one, so --debug

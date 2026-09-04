@@ -63,12 +63,15 @@ class NegotiateProxyTest {
     // tunnel derives is HTTP/<proxy-host>, so the two have to be the same string.
     private static final String PROXY_HOST = "localhost";
     private static final String SERVICE_PRINCIPAL = "HTTP/" + PROXY_HOST;
+    /** A real service that is not the proxy, for the wrong-SPN case. */
+    private static final String OTHER_SERVICE = "HTTP/other.test";
     private static final String CLIENT_PRINCIPAL = "tunnel-svc";
     private static final String SPNEGO_OID = "1.3.6.1.5.5.2";
 
     private static SimpleKdcServer kdc;
     private static Path clientKeyTab;
     private static Path serviceKeyTab;
+    private static Path otherServiceKeyTab;
     private static String previousKrb5Conf;
     private static String previousUseSubjectCredsOnly;
     private static String previousLoginConfig;
@@ -79,6 +82,8 @@ class NegotiateProxyTest {
     private int proxyPort;
     /** One entry per token the proxy verified: the client principal it named. */
     private final List<String> verifiedClients = new CopyOnWriteArrayList<>();
+    /** Tokens the upstream was offered, whether or not they verified. */
+    private final List<String> offeredTokens = new CopyOnWriteArrayList<>();
     private final List<String> requestLines = new CopyOnWriteArrayList<>();
 
     private static int freePort() throws IOException {
@@ -103,6 +108,12 @@ class NegotiateProxyTest {
         kdc.createAndExportPrincipals(clientKeyTab.toFile(), CLIENT_PRINCIPAL + "@" + REALM);
         serviceKeyTab = tmp.resolve("service.keytab");
         kdc.createAndExportPrincipals(serviceKeyTab.toFile(), SERVICE_PRINCIPAL + "@" + REALM);
+        // A second, unrelated service. Without one, "the wrong SPN" could only be an SPN with
+        // no KDC entry at all -- which fails to get a ticket, so no header is sent and the
+        // proxy never rejects anything. This lets the client obtain a real ticket for the
+        // wrong service, which is the case worth proving.
+        otherServiceKeyTab = tmp.resolve("other-service.keytab");
+        kdc.createAndExportPrincipals(otherServiceKeyTab.toFile(), OTHER_SERVICE + "@" + REALM);
 
         previousKrb5Conf = System.getProperty("java.security.krb5.conf");
         previousUseSubjectCredsOnly =
@@ -245,6 +256,7 @@ class NegotiateProxyTest {
                 challenge(out);
                 return;
             }
+            offeredTokens.add(token);
             try {
                 verifiedClients.add(verify(subject, token));
             } catch (Exception rejected) {
@@ -378,7 +390,7 @@ class NegotiateProxyTest {
         app.setClientSecret("test_secret");
         app.setProxy(PROXY_HOST + ":" + upstream.getLocalPort());
         app.setProxyAuthScheme("negotiate");
-        app.setProxySpn("HTTP/" + CLIENT_PRINCIPAL);      // a principal that is not the proxy
+        app.setProxySpn(OTHER_SERVICE);                   // a real service, but not this proxy
         app.setKrb5KeyTab(clientKeyTab.toAbsolutePath().toString());
         app.setKrb5Principal(CLIENT_PRINCIPAL + "@" + REALM);
         httpProxy = new HttpProxy(app);
@@ -398,6 +410,12 @@ class NegotiateProxyTest {
             assertThat(statusLine(socket.getInputStream())).doesNotContain("200");
         }
 
+        // Both halves matter. Without the first, this passed because no ticket could be
+        // obtained for a non-existent SPN, so nothing was ever sent and the proxy rejected
+        // nothing -- a duplicate of the "no header" case rather than a test of rejection.
+        assertThat(offeredTokens)
+                .as("a ticket for the other service must actually have been sent")
+                .isNotEmpty();
         assertThat(verifiedClients)
                 .as("a ticket for another service must not verify")
                 .isEmpty();
