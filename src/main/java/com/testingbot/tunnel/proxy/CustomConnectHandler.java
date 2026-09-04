@@ -117,21 +117,33 @@ public class CustomConnectHandler extends ConnectHandler {
      */
     @Override
     protected java.net.InetSocketAddress newConnectAddress(String host, int port) {
+        ConnectToMap.Target target = connectTo.remap(host, port);
+        return refuseLoopback(target.host(), resolveAddress(target));
+    }
+
+    /**
+     * Resolves a dial target without applying {@code --localhost-policy}.
+     *
+     * <p>Used for the upstream proxy, whose address is not a destination. A proxy on this
+     * machine's loopback -- Cntlm, px and every other local auth helper -- is an ordinary
+     * setup, and judging the socket address blindly refused all of them under
+     * {@code --localhost-policy deny}. Where traffic leaves through a proxy, what that proxy
+     * then reaches is its decision, not something this client can see or police.
+     */
+    private java.net.InetSocketAddress resolveAddress(ConnectToMap.Target target) {
         // --connect-to first: it decides *where* to dial, and --dns then resolves that name.
         // The CONNECT authority the client sent is untouched, so the tunnel still carries the
         // original host and the TLS handshake inside it still uses the original SNI.
-        ConnectToMap.Target target = connectTo.remap(host, port);
         String dialHost = target.host();
         int dialPort = target.port();
         if (dnsResolver != null) {
             try {
-                return refuseLoopback(dialHost,
-                        new java.net.InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort));
+                return new java.net.InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort);
             } catch (java.net.UnknownHostException ex) {
                 LOG.warn("Custom DNS could not resolve {}: {}", dialHost, ex.getMessage());
             }
         }
-        return refuseLoopback(dialHost, super.newConnectAddress(dialHost, dialPort));
+        return super.newConnectAddress(dialHost, dialPort);
     }
 
     /**
@@ -143,7 +155,9 @@ public class CustomConnectHandler extends ConnectHandler {
         if (address != null && localhostPolicy.blocksAddress(address.getAddress())) {
             JUL.log(Level.INFO, "Localhost policy: refusing dial to {0} ({1})",
                      new Object[]{dialHost, address.getAddress().getHostAddress()});
-            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("denied_localhost").inc();
+            // Not counted here. The throw reaches onConnectFailure, which counts every failure
+            // exactly once from the classified reason; incrementing here as well double-counted
+            // the same refusal under two different labels.
             throw new LocalhostPolicy.Denied(dialHost, address.getAddress());
         }
         return address;
@@ -365,7 +379,9 @@ public class CustomConnectHandler extends ConnectHandler {
             channel = SocketChannel.open();
             channel.socket().setTcpNoDelay(true);
             channel.configureBlocking(false);
-            channel.connect(newConnectAddress(upstream.getHost(), upstream.getPort()));
+            // resolveAddress, not newConnectAddress: this socket goes to the proxy, and the
+            // loopback policy is about destinations.
+            channel.connect(resolveAddress(connectTo.remap(upstream.getHost(), upstream.getPort())));
             promise.succeeded(channel);
         } catch (Throwable x) {
             closeQuietly(channel);

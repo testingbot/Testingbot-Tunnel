@@ -35,7 +35,7 @@ class ProxyAuthenticatorTest {
 
     @Test
     void basic_encodesTheCredentials() {
-        ProxyAuthenticator auth = ProxyAuthenticator.basic("user:secret", null);
+        ProxyAuthenticator auth = ProxyAuthenticator.basic("user:secret", "proxy.example.com");
 
         String expected = "Basic " + Base64.getEncoder()
                 .encodeToString("user:secret".getBytes(StandardCharsets.UTF_8));

@@ -164,7 +164,11 @@ public final class Doctor {
 
     private boolean checkPortOpen(int port) {
         try (ServerSocket ss = new ServerSocket()) {
-            ss.bind(new InetSocketAddress(port));
+            // On the address the listener will actually use. A wildcard probe and a loopback
+            // listener can coexist on BSD-derived systems under SO_REUSEADDR, so with a tunnel
+            // already running this reported "OK - port can be opened" for a port the real start
+            // then failed to bind.
+            ss.bind(new InetSocketAddress(app.getBindAddress(), port));
             return true;
         } catch (IOException e) {
             return false;

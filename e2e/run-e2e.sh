@@ -166,7 +166,13 @@ active_tunnel_count() {
   [ -z "$creds" ] && return 0
   # Credentials on stdin, not in argv: -u puts them in the process table, where any other
   # user on the machine can read them out of ps for as long as the request runs.
-  printf 'user = "%s"\n' "$creds" \
+  #
+  # Escaped first. curl's config parser ends a quoted value at the first unescaped " and
+  # unescapes \\ inside it, so a secret containing either character would be silently
+  # truncated or altered -- and the resulting 401 reads as "API unreachable", which skips the
+  # quota wait rather than failing loudly.
+  local escaped; escaped="$(printf '%s' "$creds" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+  printf 'user = "%s"\n' "$escaped" \
     | curl -s --max-time 15 -K - https://api.testingbot.com/v1/tunnel/list 2>/dev/null \
     | python3 -c 'import json,sys
 try:

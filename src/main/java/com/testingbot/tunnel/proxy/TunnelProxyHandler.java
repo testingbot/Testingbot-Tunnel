@@ -358,7 +358,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             client.setConnectTimeout(connectTimeoutMs);
         }
 
-        if (dnsResolver != null || !connectTo.isEmpty()) {
+        // Also when --localhost-policy is enforcing: the dial-time check lives in this resolver,
+        // so without it plain HTTP kept the check/dial split on a default configuration while
+        // CONNECT and ws:// did not.
+        if (dnsResolver != null || !connectTo.isEmpty() || localhostPolicy != LocalhostPolicy.ALLOW) {
             // Resolving is where --connect-to belongs: it changes where we dial without
             // touching the request URI, so the Host header and TLS SNI still carry the name
             // the caller asked for. Rewriting the request instead would defeat the purpose.
@@ -421,7 +424,11 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                  */
                 private List<InetSocketAddress> refuseLoopback(String host,
                                                                List<InetSocketAddress> addresses) {
-                    if (addresses != null) {
+                    // With an upstream proxy jetty-client resolves the *proxy's* origin here, not
+                    // the destination, and a proxy on this machine's loopback is an ordinary
+                    // setup. Judging that address refused every request under
+                    // --localhost-policy deny; what the proxy then reaches is its decision.
+                    if (addresses != null && upstreamProxy == null) {
                         for (InetSocketAddress address : addresses) {
                             if (localhostPolicy.blocksAddress(address.getAddress())) {
                                 LOG.log(Level.INFO, "Localhost policy: refusing dial to {0} ({1})",

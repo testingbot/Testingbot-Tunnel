@@ -94,6 +94,44 @@ class BindAddressTest {
         assertThat(app.getBindAddress()).isEqualTo("0.0.0.0");
     }
 
+    /**
+     * Only loopback and the wildcard are accepted.
+     *
+     * <p>Every path this process uses to reach its own listeners dials IPv4 loopback -- the
+     * reverse SSH forward delivers to 127.0.0.1:&lt;localproxy&gt;, and the forwarding monitor,
+     * testForwarding, testProxy and --ready all go there. A listener bound to a routable address
+     * receives none of it, so the tunnel would come up, carry no traffic, and report a broken
+     * reverse forward, which points at the hub rather than at this setting.
+     */
+    @Test
+    void aRoutableBindAddressIsRefused() {
+        App app = appWithCredentials();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(
+                () -> app.setBindAddress("192.168.1.10"))
+            .isInstanceOf(IllegalArgumentException.class)
+            .hasMessageContaining("127.0.0.1 or 0.0.0.0");
+    }
+
+    /** ::1 is loopback, but not the loopback everything here dials. */
+    @Test
+    void ipv6LoopbackIsRefusedRatherThanSilentlyBroken() {
+        App app = appWithCredentials();
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> app.setBindAddress("::1"))
+            .isInstanceOf(IllegalArgumentException.class);
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> app.setBindAddress("::"))
+            .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    /** "localhost" can resolve to ::1, so it is normalised rather than passed through. */
+    @Test
+    void localhostIsNormalisedToIpv4Loopback() {
+        App app = appWithCredentials();
+        app.setBindAddress("localhost");
+        assertThat(app.getBindAddress()).isEqualTo("127.0.0.1");
+    }
+
     @Test
     void seleniumRelay_isNotReachableFromOtherHosts() throws Exception {
         InetAddress routable = routableAddress();

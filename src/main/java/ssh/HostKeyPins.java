@@ -83,13 +83,23 @@ public final class HostKeyPins {
                 "Host key fingerprint '" + value + "' is not a SHA-256 fingerprint "
                     + "(expected 43 base64 characters, got " + unpadded.length() + ")");
         }
+        byte[] raw;
         try {
-            Base64.getDecoder().decode(unpadded + "=");
+            raw = Base64.getDecoder().decode(unpadded + "=");
         } catch (IllegalArgumentException ex) {
             throw new IllegalArgumentException(
                 "Host key fingerprint '" + value + "' is not valid base64");
         }
-        return unpadded;
+        if (raw.length != 32) {
+            throw new IllegalArgumentException(
+                "Host key fingerprint '" + value + "' does not decode to a 32-byte SHA-256");
+        }
+        // Re-encoded, not stored as written. The last base64 character of a 43-character
+        // fingerprint carries two bits that no byte of the digest uses, and the decoder ignores
+        // them -- so "...SIE" and "...SIF" decode to identical bytes. Comparing the strings, one
+        // of those would have been accepted here and then never matched anything, which is the
+        // "accepted and never matches" outcome this class refuses everywhere else.
+        return Base64.getEncoder().withoutPadding().encodeToString(raw);
     }
 
     /** MD5 fingerprints are 16 hex pairs separated by colons. */

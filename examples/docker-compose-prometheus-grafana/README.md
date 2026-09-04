@@ -21,7 +21,9 @@ export TESTINGBOT_SECRET=<your-secret>
 docker compose --profile tunnel up
 ```
 
-(You can also drop those into a `.env` file next to `docker-compose.yaml`.) Either way, the in-compose tunnel publishes port `8003` on the host so the same scrape config works.
+(You can also drop those into a `.env` file next to `docker-compose.yaml`.) The in-compose
+tunnel does not publish its metrics port at all — Prometheus reaches it as
+`testingbot-tunnel:8003` over the compose network.
 
 The stack runs:
 
@@ -47,19 +49,31 @@ something that authenticates rather than widening these.
 
 The tunnel's metrics port is not published at all — Prometheus reaches it as
 `testingbot-tunnel:8003` over the compose network. The scrape config also lists
-`host.docker.internal:8003` for a tunnel running natively on your host, so whichever
-way you run it, one of those two targets is DOWN in Prometheus. That is expected.
+`host.docker.internal:8003` for a tunnel running natively on your host, so normally one of
+those two targets is DOWN in Prometheus. That is expected.
+
+If you run both at once — a native tunnel *and* `--profile tunnel` — both targets answer and
+the dashboard panels, which sum across instances, will add the two together. Narrow the
+dashboard's `$instance` variable to the one you mean.
 
 ## Open the dashboard
 
 Set a Grafana admin password first — the stack will not start without one, and there
-is no default:
+is no default. Put it in a `.env` file next to `docker-compose.yaml`:
 
 ```sh
-export GRAFANA_ADMIN_PASSWORD=<something of your own>
+echo 'GRAFANA_ADMIN_PASSWORD=<something of your own>' >> .env
 ```
 
-(Or put it in a `.env` file next to `docker-compose.yaml`.)
+Use the file rather than `export`: the variable is required by *every* compose subcommand,
+`down`, `ps` and `logs` included, so an exported value that does not survive a new terminal
+leaves you unable to stop the stack.
+
+**Upgrading an existing stack:** Grafana only reads this when it first creates the admin
+user, and those credentials live in the `grafana_data` volume. If you ran this example
+before, you still have `admin`/`admin` and setting the variable changes nothing. Either
+reset it — `docker compose exec grafana grafana cli admin reset-admin-password '<new>'` —
+or discard the volume with `docker compose down -v`.
 
 Then browse to <http://localhost:3000/d/testingbot-tunnel/testingbot-tunnel> and log in
 as `admin` with that password.

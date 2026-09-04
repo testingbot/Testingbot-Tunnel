@@ -118,9 +118,12 @@ public final class ProxyAuthenticator {
             // operator did not expect to be talking to, and "no credentials were sent, and why"
             // is the only thing that makes that traceable.
             LOG.log(Level.WARNING,
-                    "Not sending upstream proxy credentials to {0}: they are configured for {1}."
+                    "Not sending upstream proxy credentials to {0}: they belong to {1}."
                     + " A proxy chosen by --pac-local is not the proxy they were issued for.",
-                    new Object[]{proxyHost, authorizedHost});
+                    new Object[]{proxyHost,
+                                 authorizedHost == null
+                                         ? "no proxy, because --proxy is unset or unparseable"
+                                         : authorizedHost});
             return null;
         }
         if (scheme == Scheme.NEGOTIATE) {
@@ -145,14 +148,20 @@ public final class ProxyAuthenticator {
     /**
      * True when {@code proxyHost} is the peer these credentials were issued for.
      *
-     * <p>An unconfigured authenticator has nothing to give away, so it is not restricted; a null
-     * {@code authorizedHost} means no peer was named, which only happens in tests.
+     * <p>An unconfigured authenticator has nothing to give away, so it is not restricted.
+     * Configured credentials with no named peer are authorized to <em>nobody</em>: that state is
+     * reachable in production -- {@code --proxy-userpwd} with no parseable {@code --proxy} --
+     * and it is precisely the case {@code --pac-local} then picks the proxy for, so treating it
+     * as "any host" would have left the leak open in the one configuration where the PAC file is
+     * the only source of a proxy. It also matches the SOCKS gate, which refuses when there is no
+     * configured proxy to compare against.
      */
     public boolean isAuthorizedPeer(String proxyHost) {
-        if (!isConfigured() || authorizedHost == null) {
+        if (!isConfigured()) {
             return true;
         }
-        return proxyHost != null && authorizedHost.equals(proxyHost.trim().toLowerCase(Locale.ROOT));
+        return authorizedHost != null && proxyHost != null
+                && authorizedHost.equals(proxyHost.trim().toLowerCase(Locale.ROOT));
     }
 
     /** The SPN that would be used, for diagnostics. Null unless Negotiate is configured. */

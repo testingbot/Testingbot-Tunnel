@@ -146,7 +146,7 @@ class SpnegoKdcTest {
         // What actually goes on the wire.
         ProxyAuthenticator authenticator = ProxyAuthenticator.create(
                 ProxyAuthenticator.Scheme.NEGOTIATE, null, SERVICE_PRINCIPAL, keyTab,
-                CLIENT_PRINCIPAL + "@" + REALM, null);
+                CLIENT_PRINCIPAL + "@" + REALM, PROXY_HOST);
 
         String value = authenticator.authorizationValue(PROXY_HOST);
 

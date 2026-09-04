@@ -142,16 +142,23 @@ public final class FastFailPolicy {
     private static boolean matchesAnyException(List<Pattern> patterns, String host) {
         for (Pattern p : patterns) {
             java.util.regex.Matcher m = p.matcher(host);
-            while (m.find()) {
+            // From each position rather than from the end of the previous match. find() returns
+            // the leftmost match and then resumes past it, so a longer match that fails the
+            // boundary test would hide a shorter one after it that passes -- "(www\.)?ok\.com"
+            // against "xwww.ok.com" matches at 1 and would never see the valid "ok.com" at 5.
+            for (int from = 0; from <= host.length() && m.find(from); from = m.start() + 1) {
                 if (m.end() != host.length()) {
                     // Something follows the match, so the pattern named a prefix of some other
                     // name rather than this host. This is the suffix trick.
                     continue;
                 }
                 int start = m.start();
+                // start == host.length() is a zero-length match at the end, which "!x*" or a
+                // trailing "|" produces. It matches nothing, so it excepts nothing -- and
+                // charAt(start) there used to throw straight out through blocks().
                 if (start == 0
                         || host.charAt(start - 1) == '.'
-                        || host.charAt(start) == '.') {
+                        || (start < host.length() && host.charAt(start) == '.')) {
                     return true;
                 }
                 // Otherwise the match began mid-label ("staging.example.com" inside

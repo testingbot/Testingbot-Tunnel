@@ -99,12 +99,24 @@ public class App {
      * and loopback -- to anyone who could route here.
      */
     static final String DEFAULT_BIND_ADDRESS = "127.0.0.1";
+    /** The only accepted alternative; see {@link #setBindAddress}. */
+    static final String WILDCARD_BIND_ADDRESS = "0.0.0.0";
     private String bindAddress = DEFAULT_BIND_ADDRESS;
     /**
      * Host keys the tunnel server may present. Empty means the server is not verified, which is
      * the pre-existing behaviour and still the default, because the keys are not published yet.
      */
     private ssh.HostKeyPins sshHostKeyPins = ssh.HostKeyPins.none();
+    /**
+     * Whether {@link #sshHostKeyPins} came from the API rather than from a caller.
+     *
+     * <p>A rebuilt tunnel is a *different* server with a different host key: rebuildTunnel() is
+     * stop() then boot(), and boot() calls createTunnel() again. Without this flag the pin from
+     * the first server survived and the second was refused as "HostKey has been changed" --
+     * permanently, since every later rebuild hit the same stale pin. So an API-supplied pin may
+     * be replaced by a later API-supplied one, while a pin a caller set is never overwritten.
+     */
+    private boolean sshHostKeyPinsFromApi;
     private int sshPort = 0;
     private boolean shared = false;
 
@@ -328,9 +340,11 @@ public class App {
         Option bindAddressOpt = Option.builder().longOpt("bind-address").hasArg().argName("ADDRESS")
                 .desc("Interface for every local listener -- the Selenium relay (--se-port), the "
                     + "local proxy (--localproxy), the insight endpoints (--metrics-port) and "
-                    + "--web. Default 127.0.0.1. Use 0.0.0.0 to accept connections from other "
-                    + "hosts, which exposes the relay's TestingBot credentials and an open "
-                    + "forward proxy to everyone who can reach this machine. "
+                    + "--web. Either 127.0.0.1 (default) or 0.0.0.0; nothing else, because this "
+                    + "process reaches its own listeners over IPv4 loopback. 0.0.0.0 accepts "
+                    + "connections from other hosts, which exposes the relay's TestingBot "
+                    + "credentials and an open forward proxy to everyone who can reach this "
+                    + "machine. "
                     + "Env: TESTINGBOT_BIND_ADDRESS.").build();
         options.addOption(bindAddressOpt);
 
@@ -679,7 +693,11 @@ public class App {
         }
 
         if (commandLine.hasOption("bind-address")) {
-            app.setBindAddress(commandLine.getOptionValue("bind-address"));
+            try {
+                app.setBindAddress(commandLine.getOptionValue("bind-address"));
+            } catch (IllegalArgumentException ex) {
+                throw new ParseException(ex.getMessage());
+            }
         }
 
         String metricsAuthValue = commandLine.hasOption("metrics-auth")
@@ -1085,7 +1103,6 @@ public class App {
             api.setTunnelID(tunnelID);
         }
 
-        adoptApiHostKeyFingerprint(tunnelData);
 
         TunnelMetrics.setTunnelInfo(App.VERSION, this.tunnelID, this.tunnelIdentifier);
 
@@ -1178,6 +1195,11 @@ public class App {
         // server is booted, make the connection
         try {
             String _serverIP = apiResponse.get("ip").asText();
+            // Here rather than in boot(): this is reached both directly and from TunnelPoller,
+            // and when the create response was not yet READY it is the *polled* response that
+            // describes the server about to be dialled. Adopting only in boot() left every
+            // polled tunnel unverified.
+            adoptApiHostKeyFingerprint(apiResponse);
             tunnel = new SSHTunnel(this, _serverIP);
             if (tunnel.isAuthenticated()) {
                 this.serverIP = _serverIP;
@@ -1994,7 +2016,11 @@ public class App {
      * overridden by the far side.
      */
     void adoptApiHostKeyFingerprint(com.fasterxml.jackson.databind.JsonNode tunnelData) {
-        if (tunnelData == null || !sshHostKeyPins.isEmpty()) {
+        if (tunnelData == null) {
+            return;
+        }
+        if (!sshHostKeyPins.isEmpty() && !sshHostKeyPinsFromApi) {
+            // Set by a caller, which outranks the far side of the connection.
             return;
         }
         for (String field : new String[]{"ssh_fingerprint", "ssh_host_key_fingerprint"}) {
@@ -2004,12 +2030,15 @@ public class App {
             String value = tunnelData.get(field).asText();
             try {
                 ssh.HostKeyPins pins = ssh.HostKeyPins.parse(value);
-                if (!pins.isEmpty()) {
-                    this.sshHostKeyPins = pins;
-                    Logger.getLogger(App.class.getName()).log(Level.INFO,
-                        "Tunnel server host key will be verified against the fingerprint "
-                            + "supplied by the API: {0}", pins.displayValues());
+                if (pins.isEmpty()) {
+                    // Present but empty. Try the other spelling rather than giving up here.
+                    continue;
                 }
+                this.sshHostKeyPins = pins;
+                this.sshHostKeyPinsFromApi = true;
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                    "Tunnel server host key will be verified against the fingerprint "
+                        + "supplied by the API: {0}", pins.displayValues());
                 return;
             } catch (IllegalArgumentException ex) {
                 // Logged, not fatal: an unusable value from the service should not stop a tunnel
@@ -2034,6 +2063,7 @@ public class App {
      */
     public void setSshHostKeyPins(ssh.HostKeyPins pins) {
         this.sshHostKeyPins = pins == null ? ssh.HostKeyPins.none() : pins;
+        this.sshHostKeyPinsFromApi = false;
     }
 
     /**
@@ -2044,11 +2074,30 @@ public class App {
             this.bindAddress = DEFAULT_BIND_ADDRESS;
             return;
         }
-        this.bindAddress = bindAddress.trim();
-        if (!isLoopbackBind(this.bindAddress)) {
-            // Not refused: reaching the tunnel from another host is a legitimate setup. But it
-            // is the one that hands an unauthenticated relay and forward proxy to the network,
-            // so it is never entered silently.
+        String value = bindAddress.trim();
+        if ("localhost".equalsIgnoreCase(value)) {
+            // Normalised rather than passed through: "localhost" resolves to ::1 on some
+            // machines, and everything below dials IPv4 loopback.
+            value = DEFAULT_BIND_ADDRESS;
+        }
+        if (!DEFAULT_BIND_ADDRESS.equals(value) && !WILDCARD_BIND_ADDRESS.equals(value)) {
+            // Refused, not warned about. Every path this process uses to reach its own
+            // listeners is hardcoded to IPv4 loopback -- the reverse SSH forward delivers to
+            // 127.0.0.1:<localproxy> (ssh/SSHTunnel REVERSE_FORWARD_HOST), and the forwarding
+            // monitor, testForwarding, testProxy and --ready all dial it. Binding anywhere else
+            // leaves nothing listening there, so the tunnel comes up and carries no traffic
+            // while reporting a broken reverse forward, which points at the hub rather than at
+            // this setting. That includes ::1: loopback, but not the loopback they dial.
+            throw new IllegalArgumentException(
+                "--bind-address must be " + DEFAULT_BIND_ADDRESS + " or "
+                    + WILDCARD_BIND_ADDRESS + " (got '" + bindAddress.trim() + "'). This process "
+                    + "reaches its own listeners over IPv4 loopback -- the tunnel's reverse "
+                    + "forward delivers there -- so a listener bound anywhere else receives "
+                    + "nothing. To reach the tunnel from another machine use "
+                    + WILDCARD_BIND_ADDRESS + " and restrict the port with a firewall.");
+        }
+        this.bindAddress = value;
+        if (WILDCARD_BIND_ADDRESS.equals(value)) {
             Logger.getLogger(App.class.getName()).log(Level.WARNING,
                 "Listeners will bind {0}, so other hosts can reach the Selenium relay and the "
                     + "local proxy. Both are unauthenticated: the relay forwards requests with "
@@ -2056,17 +2105,6 @@ public class App {
                     + "anywhere this machine can, including its own loopback. Restrict access "
                     + "to this port or bind 127.0.0.1 instead.",
                 this.bindAddress);
-        }
-    }
-
-    /** True when {@code address} names this machine's loopback interface. */
-    private static boolean isLoopbackBind(String address) {
-        try {
-            return java.net.InetAddress.getByName(address).isLoopbackAddress();
-        } catch (java.net.UnknownHostException ex) {
-            // Unresolvable here means the bind will fail with a clearer message than anything
-            // this check could produce, so let it get that far rather than guessing.
-            return false;
         }
     }
 

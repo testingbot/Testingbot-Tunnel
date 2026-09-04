@@ -187,4 +187,29 @@ class FastFailPolicyTest {
         assertThat(of("facebook").blocks("www.facebook.com")).isTrue();
         assertThat(of("ok\\.com").blocks("ok.com.attacker.net")).isTrue();
     }
+
+    /**
+     * A pattern that can match empty produced a zero-length match at the end of the host, and
+     * charAt(start) on it threw straight out of blocks() -- a 502 on the CONNECT path and a
+     * Jetty 500 on the others, for any request, from a trailing "|" typo.
+     */
+    @Test
+    void anExceptionThatCanMatchEmptyDoesNotThrow() {
+        assertThat(of(".*", "!(ok\\.com)?").blocks("bar.net")).isTrue();
+        assertThat(of(".*", "!ok\\.com|").blocks("bar.net")).isTrue();
+        assertThat(of(".*", "!x*").blocks("bar.net")).isTrue();
+        assertThat(of(".*", "!$").blocks("bar.net")).isTrue();
+    }
+
+    /** The valid boundary match must not be hidden by a longer leftmost one that fails it. */
+    @Test
+    void aLaterBoundaryMatchIsStillFound() {
+        FastFailPolicy policy = of(".*", "!(www\\.)?ok\\.com");
+
+        assertThat(policy.blocks("xwww.ok.com")).isFalse();
+        assertThat(policy.blocks("www.ok.com")).isFalse();
+        assertThat(policy.blocks("ok.com")).isFalse();
+        // Still not the suffix trick.
+        assertThat(policy.blocks("ok.com.attacker.net")).isTrue();
+    }
 }

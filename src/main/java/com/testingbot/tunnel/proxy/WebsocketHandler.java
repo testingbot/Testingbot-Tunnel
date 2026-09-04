@@ -171,20 +171,28 @@ public class WebsocketHandler extends ConnectHandler {
     /** Honours --dns for the WebSocket relay's outbound connection. */
     @Override
     protected InetSocketAddress newConnectAddress(String host, int port) {
+        ConnectToMap.Target target = connectTo.remap(host, port);
+        return refuseLoopback(target.host(), resolveAddress(target));
+    }
+
+    /**
+     * Resolves a dial target without applying {@code --localhost-policy}; see
+     * CustomConnectHandler.resolveAddress. Used for the upstream proxy, which is not a
+     * destination and is commonly on loopback.
+     */
+    private InetSocketAddress resolveAddress(ConnectToMap.Target target) {
         // --connect-to decides where to dial; --dns then resolves that name. The upgrade
         // request replayed to the target still carries the original Host header.
-        ConnectToMap.Target target = connectTo.remap(host, port);
         String dialHost = target.host();
         int dialPort = target.port();
         if (dnsResolver != null) {
             try {
-                return refuseLoopback(dialHost,
-                        new InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort));
+                return new InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort);
             } catch (java.net.UnknownHostException ex) {
                 LOG.warn("Custom DNS could not resolve {}: {}", dialHost, ex.getMessage());
             }
         }
-        return refuseLoopback(dialHost, super.newConnectAddress(dialHost, dialPort));
+        return super.newConnectAddress(dialHost, dialPort);
     }
 
     /**
@@ -346,7 +354,7 @@ public class WebsocketHandler extends ConnectHandler {
             // the request line, which is why --connect-to and --dns are not applied to it here.
             channel.connect(upstream == null
                     ? newConnectAddress(host, port)
-                    : newConnectAddress(upstream.getHost(), upstream.getPort()));
+                    : resolveAddress(connectTo.remap(upstream.getHost(), upstream.getPort())));
             promise.succeeded(channel);
         } catch (Throwable x) {
             close(channel);

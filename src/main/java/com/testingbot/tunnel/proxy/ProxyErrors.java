@@ -119,6 +119,12 @@ public final class ProxyErrors {
     }
 
     private static Reason classifyOne(Throwable t) {
+        if (t instanceof LocalhostPolicy.Denied) {
+            // The dial-time half of --localhost-policy. Without this it fell through to
+            // TUNNEL_ERROR, so a refusal the name check reports as 403 denied-localhost came
+            // back as a 502 tunnel-error depending only on which of the two checks caught it.
+            return Reason.DENIED_LOCALHOST;
+        }
         if (t instanceof UnknownHostException || t instanceof UnresolvedAddressException) {
             return Reason.DNS_ERROR;
         }

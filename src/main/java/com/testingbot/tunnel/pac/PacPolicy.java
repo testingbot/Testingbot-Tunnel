@@ -102,6 +102,10 @@ public final class PacPolicy {
     }
 
     private static String read(String location, String expectedSha256) {
+        // Before anything is fetched. A pin that cannot match is a configuration error, and
+        // discovering it only after the document has been pulled over cleartext means the
+        // request went out anyway -- to exactly the network this pin exists to distrust.
+        requireWellFormedDigest(expectedSha256);
         if (location.startsWith("http://") || location.startsWith("https://")) {
             boolean plaintext = location.startsWith("http://");
             if (plaintext && expectedSha256 == null) {
@@ -179,11 +183,7 @@ public final class PacPolicy {
         if (expectedSha256 == null) {
             return;
         }
-        String expected = expectedSha256.trim().toLowerCase(java.util.Locale.ROOT);
-        if (!expected.matches("[0-9a-f]{64}")) {
-            throw new PacException("--pac-local-sha256 must be 64 hex characters (a SHA-256), "
-                    + "got: " + expectedSha256);
-        }
+        String expected = requireWellFormedDigest(expectedSha256);
         String actual = sha256Hex(body);
         if (!actual.equals(expected)) {
             throw new PacException("PAC file " + location + " does not match --pac-local-sha256."
@@ -191,6 +191,24 @@ public final class PacPolicy {
                     + ". Refusing to use it: the document decides where traffic and upstream"
                     + " proxy credentials are sent.");
         }
+    }
+
+    /**
+     * @return the normalised digest, or null when none was configured
+     * @throws PacException if it is not a SHA-256 at all -- a malformed pin can never match, and
+     *         accepting it would leave the operator believing the document is checked when
+     *         nothing could ever pass
+     */
+    private static String requireWellFormedDigest(String expectedSha256) {
+        if (expectedSha256 == null) {
+            return null;
+        }
+        String expected = expectedSha256.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!expected.matches("[0-9a-f]{64}")) {
+            throw new PacException("--pac-local-sha256 must be 64 hex characters (a SHA-256), "
+                    + "got: " + expectedSha256);
+        }
+        return expected;
     }
 
     static String sha256Hex(byte[] body) {

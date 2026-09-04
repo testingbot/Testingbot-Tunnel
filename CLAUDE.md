@@ -82,7 +82,11 @@ java -jar testingbot-tunnel.jar --doctor
 - `--se-port`: Local Selenium port (default 4445)
 - `--localproxy`: Local HTTP proxy port (default 8087)
 - `--bind-address`: Interface for every local listener -- the Selenium relay, the local proxy,
-  the insight endpoints and `--web`. Default `127.0.0.1`. These listeners do not authenticate:
+  the insight endpoints and `--web`. Either `127.0.0.1` (default) or `0.0.0.0`, and nothing
+  else: this process reaches its own listeners over IPv4 loopback -- the reverse SSH forward
+  delivers to `127.0.0.1:<localproxy>`, and the forwarding monitor, `testProxy` and `--ready`
+  dial it -- so any other address is refused rather than accepted and silently carrying no
+  traffic. These listeners do not authenticate:
   the relay attaches the account key and secret to everything it forwards, and the proxy will
   connect anywhere this machine can, including its own loopback. `0.0.0.0` hands both to any
   host that can route here, so it is opt-in and logs a warning. The reverse SSH forward
