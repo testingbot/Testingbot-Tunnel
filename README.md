@@ -9,7 +9,7 @@ traffic to TestingBot and routes the browser's web requests back through your ne
 
 > **Running tunnel 4.x or older?** This page documents **5.0**, which needs Java 17 and changes
 > a few defaults. The 4.x source and its documentation stay on the
-> [`v4.x` branch](https://github.com/testingbot/testingbot-tunnel/tree/v4.x). If you are upgrading, read
+> [`v4.x` branch](https://github.com/testingbot/Testingbot-Tunnel/tree/v4.x). If you are upgrading, read
 > [Upgrading from 4.x](#upgrading-from-4x) first — it is short, and two of the changes are
 > ones you will notice immediately.
 
