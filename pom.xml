@@ -57,7 +57,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
-        <version>3.15.0</version>
+        <version>3.16.0</version>
         <executions>
           <!-- The launcher is compiled by the execution below instead, at an older release.
                Excluded here rather than recompiled afterwards: the default compile would write
@@ -163,7 +163,7 @@
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
-        <version>3.5.6</version>
+        <version>3.6.0</version>
         <configuration>
           <includes>
             <include>**/*Test.java</include>
@@ -408,7 +408,7 @@
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
-      <version>5.11.4</version>
+      <version>5.14.4</version>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -443,7 +443,7 @@
     <dependency>
       <groupId>org.apache.sshd</groupId>
       <artifactId>sshd-core</artifactId>
-      <version>2.18.0</version>
+      <version>2.19.0</version>
       <scope>test</scope>
     </dependency>
 
