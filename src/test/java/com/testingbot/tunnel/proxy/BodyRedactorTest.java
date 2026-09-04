@@ -169,4 +169,66 @@ class BodyRedactorTest {
         assertThat(BodyRedactor.isSensitiveKey("browserName")).isFalse();
         assertThat(BodyRedactor.isSensitiveKey("passenger")).isFalse();
     }
+
+    // ------------------------------------------------------------ TB-389 / F17
+
+    /**
+     * A log line the reader believes came from this process is exactly what an attacker wants to
+     * write. Form segments are split on {@code &} and appended as text, so a literal CR/LF in a
+     * value used to reach the log intact and start a line of the attacker's choosing.
+     */
+    @Test
+    void formValuesCannotForgeALogRecord() {
+        String body = "name=harmless\r\n2026-01-01 ERROR forged line";
+
+        String rendered = BodyRedactor.render("application/x-www-form-urlencoded",
+                body.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(rendered).doesNotContain("\r").doesNotContain("\n");
+        assertThat(rendered).contains("%0D%0A");
+        // Encoded, not stripped: a request that tried this stays visible afterwards.
+        assertThat(rendered).contains("forged line");
+    }
+
+    @Test
+    void formNamesAreEscapedTheSameWay() {
+        String body = "na\nme=value";
+
+        String rendered = BodyRedactor.render("application/x-www-form-urlencoded",
+                body.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(rendered).doesNotContain("\n").contains("%0A");
+    }
+
+    @Test
+    void ordinaryFormBodiesAreUnchanged() {
+        String body = "browser=chrome&version=120";
+
+        String rendered = BodyRedactor.render("application/x-www-form-urlencoded",
+                body.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(rendered).isEqualTo(body);
+    }
+
+    @Test
+    void escapeControlsLeavesOrdinaryTextAlone() {
+        assertThat(BodyRedactor.escapeControls("plain-value")).isEqualTo("plain-value");
+        assertThat(BodyRedactor.escapeControls("")).isEmpty();
+        assertThat(BodyRedactor.escapeControls("tab\there")).isEqualTo("tab%09here");
+        assertThat(BodyRedactor.escapeControls("del\u007fhere")).isEqualTo("del%7Fhere");
+    }
+
+    /**
+     * The JSON path re-serialises through Jackson, which escapes control characters on the way
+     * out. Asserted so the difference between the two paths stays deliberate.
+     */
+    @Test
+    void jsonBodiesCannotForgeALogRecordEither() {
+        String body = "{\"name\":\"harmless\\r\\n2026-01-01 ERROR forged\"}";
+
+        String rendered = BodyRedactor.render("application/json",
+                body.getBytes(StandardCharsets.UTF_8));
+
+        assertThat(rendered).doesNotContain("\r").doesNotContain("\n");
+    }
 }

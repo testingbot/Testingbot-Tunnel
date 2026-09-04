@@ -5,4 +5,15 @@ scrape_configs:
   - job_name: testingbot-tunnel
     scrape_interval: 5s
     static_configs:
-      - targets: ["host.docker.internal:8003"]
+      # Two ways to run the tunnel, so two targets. Exactly one of them answers and the
+      # other shows as DOWN in Prometheus, which is expected rather than a fault:
+      #
+      #   host.docker.internal:8003  a tunnel running natively on the host
+      #   testingbot-tunnel:8003     the bundled service, with `--profile tunnel`
+      #
+      # The bundled one is reached over the compose network rather than through a
+      # published port, so its metrics endpoint -- which is unauthenticated unless
+      # --metrics-auth is set -- is never exposed on the host at all.
+      - targets:
+          - "host.docker.internal:8003"
+          - "testingbot-tunnel:8003"

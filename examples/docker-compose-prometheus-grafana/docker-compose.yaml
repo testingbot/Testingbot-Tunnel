@@ -10,13 +10,17 @@ services:
     environment:
       TESTINGBOT_KEY: ${TESTINGBOT_KEY:-}
       TESTINGBOT_SECRET: ${TESTINGBOT_SECRET:-}
-    # Local proxy + Selenium ports are not required for metrics collection,
-    # but exposing them lets you drive traffic through the tunnel. Port 8003
-    # is published so Prometheus (scraping host.docker.internal:8003) reaches it.
+    # Published on loopback only. 4445 is the Selenium relay, which attaches this
+    # account's TestingBot key and secret to every request it forwards, and 8087 is
+    # an unauthenticated forward proxy into whatever this host can reach, its own
+    # loopback included. Bound to every interface -- and published Docker ports
+    # bypass the host firewall on Linux -- either one hands that to the network.
+    #
+    # 8003 is not published at all: Prometheus reaches it as "testingbot-tunnel:8003"
+    # over the compose network, so the metrics endpoint never touches the host.
     ports:
-      - "4445:4445"
-      - "8087:8087"
-      - "8003:8003"
+      - "127.0.0.1:4445:4445"
+      - "127.0.0.1:8087:8087"
     command: >
       --localproxy 8087
       --metrics-port 8003
@@ -36,8 +40,9 @@ services:
       - '--storage.tsdb.path=/prometheus'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
+    # Loopback: the query API answers anything about this stack to anyone who asks.
     ports:
-      - "9090:9090"
+      - "127.0.0.1:9090:9090"
 
   grafana:
     image: grafana/grafana:10.4.3
@@ -49,9 +54,16 @@ services:
       - ./grafana/provisioning/:/etc/grafana/provisioning/
     env_file:
       - ./grafana/config.monitoring
+    environment:
+      # No default on purpose: compose refuses to start until one is supplied, so the
+      # stack cannot come up with a password that is published in this repository.
+      # Set it in .env next to this file, or export it before `docker compose up`.
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?set GRAFANA_ADMIN_PASSWORD to a password of your own}
+    # Loopback: an admin session here can add a datasource pointing at any address
+    # this container can reach, and Grafana will fetch it server-side.
     ports:
       # Override the host port if 3000 is taken: GRAFANA_PORT=3001 docker compose up
-      - "${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
 
 volumes:
   prometheus_data:

@@ -1,3 +1,10 @@
 GF_SECURITY_ADMIN_USER=admin
-GF_SECURITY_ADMIN_PASSWORD=admin
+# No GF_SECURITY_ADMIN_PASSWORD here. It used to be "admin", which -- with port 3000
+# published on every interface -- meant anyone who could reach this host was a Grafana
+# administrator, able to read the dashboards, mint API tokens, and add a datasource
+# pointing into the private network for Grafana to fetch server-side.
+#
+# It now comes from GRAFANA_ADMIN_PASSWORD via docker-compose.yaml, which has no default,
+# so the stack refuses to start until you set one. env_file does no shell expansion, which
+# is why it cannot live in this file.
 GF_USERS_ALLOW_SIGN_UP=false

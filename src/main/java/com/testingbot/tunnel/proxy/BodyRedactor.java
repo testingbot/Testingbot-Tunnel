@@ -192,12 +192,44 @@ public final class BodyRedactor {
                 // The name goes too: a name long enough to hold a credential often is one.
                 out.append(REDACTED);
             } else {
-                out.append(name).append('=').append(pair.substring(equals + 1));
+                out.append(escapeControls(name)).append('=')
+                        .append(escapeControls(pair.substring(equals + 1)));
             }
         }
         return out.length() == 0
                 ? describe(contentType, body.length, "declared as form encoding but empty")
                 : out.toString();
+    }
+
+    /**
+     * Percent-encodes control characters so a body cannot forge log records.
+     *
+     * <p>Form segments are split on {@code &} and appended as text, so a value containing a
+     * literal CR/LF used to reach the log intact -- and a log line the reader believes came from
+     * this process is exactly what an attacker wants to write. A well-formed client already
+     * sends these percent-encoded; this only makes it true of every client.
+     *
+     * <p>Encoded rather than stripped, so the bytes that were actually sent remain visible: a
+     * request that tried this is worth being able to see afterwards. The JSON path needs none of
+     * this because it re-serialises through Jackson, which escapes control characters on the way
+     * out; this one concatenates strings, which is the whole difference.
+     */
+    static String escapeControls(String value) {
+        StringBuilder out = null;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c < 0x20 || c == 0x7F) {
+                if (out == null) {
+                    out = new StringBuilder(value.length() + 8).append(value, 0, i);
+                }
+                out.append('%');
+                out.append(Character.toUpperCase(Character.forDigit((c >> 4) & 0xf, 16)));
+                out.append(Character.toUpperCase(Character.forDigit(c & 0xf, 16)));
+            } else if (out != null) {
+                out.append(c);
+            }
+        }
+        return out == null ? value : out.toString();
     }
 
     private static String describe(String contentType, int length, String why) {

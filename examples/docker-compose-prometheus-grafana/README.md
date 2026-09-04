@@ -27,13 +27,42 @@ The stack runs:
 
 | Service | Port | Always on? | What it does |
 |---------|------|-----------|--------------|
-| `prometheus` | `9090` | yes | Scrapes `host.docker.internal:8003` every 5s |
+| `prometheus` | `9090` | yes | Scrapes the tunnel every 5s |
 | `grafana` | `3000` | yes | Pre-provisioned with the Prometheus datasource and the **TestingBot Tunnel** dashboard |
-| `testingbot-tunnel` | `4445` (Selenium), `8087` (local proxy), `8003` (metrics) | only with `--profile tunnel` | A tunnel running inside the compose stack |
+| `testingbot-tunnel` | `4445` (Selenium), `8087` (local proxy) | only with `--profile tunnel` | A tunnel running inside the compose stack |
+
+Every port is published on `127.0.0.1` only, so nothing here is reachable from
+other machines. That is deliberate and worth keeping:
+
+- **4445** is the Selenium relay, and it attaches your TestingBot key and secret to
+  every request it forwards. Anyone who can reach it can start browser sessions on
+  your account and drive them at whatever the tunnel can reach.
+- **8087** is a forward proxy with no authentication, into whatever this host can
+  reach — including its own loopback.
+- **9090** answers any query about this stack, and **3000** is a Grafana admin login.
+
+Published Docker ports bypass the host firewall on Linux, so `"4445:4445"` really
+does mean the whole network. If you need access from another machine, put it behind
+something that authenticates rather than widening these.
+
+The tunnel's metrics port is not published at all — Prometheus reaches it as
+`testingbot-tunnel:8003` over the compose network. The scrape config also lists
+`host.docker.internal:8003` for a tunnel running natively on your host, so whichever
+way you run it, one of those two targets is DOWN in Prometheus. That is expected.
 
 ## Open the dashboard
 
-Browse to <http://localhost:3000/d/testingbot-tunnel/testingbot-tunnel>. Default login is `admin` / `admin` (override in `grafana/config.monitoring`).
+Set a Grafana admin password first — the stack will not start without one, and there
+is no default:
+
+```sh
+export GRAFANA_ADMIN_PASSWORD=<something of your own>
+```
+
+(Or put it in a `.env` file next to `docker-compose.yaml`.)
+
+Then browse to <http://localhost:3000/d/testingbot-tunnel/testingbot-tunnel> and log in
+as `admin` with that password.
 
 If port 3000 is taken on your machine, override the host port: `GRAFANA_PORT=3001 docker compose up`, then open <http://localhost:3001>.
 
@@ -49,7 +78,7 @@ The dashboard has five rows:
 
 - [`docker-compose.yaml`](./docker-compose.yaml) — the three services
 - [`prometheus/prometheus.yaml`](./prometheus/prometheus.yaml) — scrape config
-- [`grafana/config.monitoring`](./grafana/config.monitoring) — Grafana admin credentials
+- [`grafana/config.monitoring`](./grafana/config.monitoring) — Grafana admin user and sign-up policy (the password comes from `GRAFANA_ADMIN_PASSWORD`)
 - [`grafana/provisioning/datasources/datasource.yml`](./grafana/provisioning/datasources/datasource.yml) — Prometheus datasource
 - [`grafana/provisioning/dashboards/dashboard.yml`](./grafana/provisioning/dashboards/dashboard.yml) — dashboard provider
 - [`grafana/provisioning/dashboards/testingbot_tunnel.json`](./grafana/provisioning/dashboards/testingbot_tunnel.json) — the dashboard
