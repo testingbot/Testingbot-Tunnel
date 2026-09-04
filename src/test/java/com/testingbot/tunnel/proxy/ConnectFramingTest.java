@@ -57,6 +57,13 @@ class ConnectFramingTest {
         }
         if (pool != null) {
             pool.shutdownNow();
+            // Clear a stale interrupt before waiting. MINA's and JSch's shutdown run
+            // inline on this thread and can leave the flag set, which makes
+            // awaitTermination throw immediately and fail teardown for a test that had
+            // nothing to do with it -- seen in CI on
+            // aLocalPortAlreadyInUseIsReportedAndLeavesForwardingIncomplete. A leftover
+            // flag here is finished-test state, not a cancellation of the suite.
+            Thread.interrupted();
             pool.awaitTermination(5, TimeUnit.SECONDS);
         }
     }
