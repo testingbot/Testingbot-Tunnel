@@ -17,10 +17,18 @@ import java.util.Locale;
  * the tunnel can also address services bound to loopback -- admin panels, databases, metadata
  * endpoints -- that are otherwise unreachable from outside.
  *
- * <p>This checks the host the request names, resolving it when it is not already an IP literal.
- * It is not a defence against DNS rebinding, where a name resolves to something harmless when
- * checked and to loopback when dialled a moment later; blocking that reliably means pinning the
- * checked address through to the connection.
+ * <p>Enforced twice, and the second time is the one that counts. {@link #blocks(String,
+ * HostResolver)} runs before the request is accepted, resolving the name so a refusal can be
+ * reported as a policy error rather than a connection failure. {@link #blocksAddress} then runs
+ * on the address actually about to be dialled.
+ *
+ * <p>The early check alone was not a defence against DNS rebinding: the dial resolved the name a
+ * second time, from scratch, so an attacker-controlled name could answer with a routable address
+ * when checked and loopback when dialled. With {@code --dns} set, {@code CustomDnsResolver}
+ * disables its cache outright, which made the two lookups independent by construction and the
+ * bypass deterministic rather than a race. Checking the dialled address closes the window
+ * because there is no second lookup between the decision and the connection -- it is the same
+ * address.
  */
 public enum LocalhostPolicy {
 
@@ -51,6 +59,38 @@ public enum LocalhostPolicy {
             return false;
         }
         return isLoopback(FastFailPolicy.normalise(target), resolver);
+    }
+
+    /**
+     * True when an address about to be dialled must be refused.
+     *
+     * <p>No resolution: the caller has already resolved, and re-resolving here would reopen the
+     * very gap this exists to close. Also covers {@code --connect-to}, whose remapping happens
+     * after the name check, so its target is judged as what gets dialled rather than as what the
+     * client asked for.
+     */
+    public boolean blocksAddress(InetAddress address) {
+        if (this == ALLOW || address == null) {
+            return false;
+        }
+        return address.isLoopbackAddress() || address.isAnyLocalAddress();
+    }
+
+    /**
+     * Refuses a dial that {@link #blocksAddress} rejects.
+     *
+     * <p>Unchecked because it is thrown from Jetty callbacks that declare no exception. Both
+     * {@code ConnectHandler.connectToServer} and the WebSocket dial run their address lookup
+     * inside a try/catch that fails the connection, so this surfaces as a failed connect rather
+     * than as a crash.
+     */
+    public static final class Denied extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+
+        public Denied(String host, InetAddress address) {
+            super("--localhost-policy deny: " + host + " resolved to " + address.getHostAddress()
+                    + " at dial time");
+        }
     }
 
     static boolean isLoopback(String host) {

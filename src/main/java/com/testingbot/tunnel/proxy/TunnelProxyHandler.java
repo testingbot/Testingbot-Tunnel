@@ -361,7 +361,25 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                                     org.eclipse.jetty.util.Promise<List<InetSocketAddress>> promise) {
                     ConnectToMap.Target target = connectTo.remap(host, port);
                     if (dnsResolver == null) {
-                        platformResolver().resolve(target.host(), target.port(), context, promise);
+                        // Wrap the promise rather than the resolver: the platform resolver is
+                        // what produces the addresses, so the check has to sit between it and
+                        // the dial, on what it actually returned.
+                        platformResolver().resolve(target.host(), target.port(), context,
+                                new org.eclipse.jetty.util.Promise<List<InetSocketAddress>>() {
+                                    @Override
+                                    public void succeeded(List<InetSocketAddress> addresses) {
+                                        try {
+                                            promise.succeeded(refuseLoopback(target.host(), addresses));
+                                        } catch (Throwable denied) {
+                                            promise.failed(denied);
+                                        }
+                                    }
+
+                                    @Override
+                                    public void failed(Throwable x) {
+                                        promise.failed(x);
+                                    }
+                                });
                         return;
                     }
                     client.getExecutor().execute(() -> {
@@ -370,11 +388,34 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                             for (InetAddress address : dnsResolver.resolve(target.host())) {
                                 resolved.add(new InetSocketAddress(address, target.port()));
                             }
-                            promise.succeeded(resolved);
+                            promise.succeeded(refuseLoopback(target.host(), resolved));
                         } catch (Throwable x) {
                             promise.failed(x);
                         }
                     });
+                }
+
+                /**
+                 * Enforces {@code --localhost-policy} on the addresses about to be dialled.
+                 *
+                 * <p>Every address, not just the first: jetty-client falls through the list, so
+                 * letting a loopback entry ride along behind a routable one would still reach
+                 * loopback whenever the first failed to connect.
+                 *
+                 * @throws LocalhostPolicy.Denied if any resolved address is loopback
+                 */
+                private List<InetSocketAddress> refuseLoopback(String host,
+                                                               List<InetSocketAddress> addresses) {
+                    if (addresses != null) {
+                        for (InetSocketAddress address : addresses) {
+                            if (localhostPolicy.blocksAddress(address.getAddress())) {
+                                LOG.log(Level.INFO, "Localhost policy: refusing dial to {0} ({1})",
+                                        new Object[]{host, address.getAddress().getHostAddress()});
+                                throw new LocalhostPolicy.Denied(host, address.getAddress());
+                            }
+                        }
+                    }
+                    return addresses;
                 }
 
                 private org.eclipse.jetty.util.SocketAddressResolver platformResolver() {

@@ -99,6 +99,10 @@ public class CustomConnectHandler extends ConnectHandler {
      * Resolves the CONNECT target through the configured DNS server when there is one.
      * ConnectHandler calls this for every tunnel it opens, so it is the single place the
      * CONNECT path needs to honour --dns.
+     *
+     * <p>Also where {@code --localhost-policy} is finally enforced: {@link #validateDestination}
+     * judged a name, this judges the address that name turned into here, and there is no third
+     * lookup between the two for a rebinding answer to slip into.
      */
     @Override
     protected java.net.InetSocketAddress newConnectAddress(String host, int port) {
@@ -110,12 +114,28 @@ public class CustomConnectHandler extends ConnectHandler {
         int dialPort = target.port();
         if (dnsResolver != null) {
             try {
-                return new java.net.InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort);
+                return refuseLoopback(dialHost,
+                        new java.net.InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort));
             } catch (java.net.UnknownHostException ex) {
                 LOG.warn("Custom DNS could not resolve {}: {}", dialHost, ex.getMessage());
             }
         }
-        return super.newConnectAddress(dialHost, dialPort);
+        return refuseLoopback(dialHost, super.newConnectAddress(dialHost, dialPort));
+    }
+
+    /**
+     * @throws LocalhostPolicy.Denied when the resolved address is this machine's loopback and
+     *         {@code --localhost-policy deny} is set
+     */
+    private java.net.InetSocketAddress refuseLoopback(String dialHost,
+                                                      java.net.InetSocketAddress address) {
+        if (address != null && localhostPolicy.blocksAddress(address.getAddress())) {
+            JUL.log(Level.INFO, "Localhost policy: refusing dial to {0} ({1})",
+                     new Object[]{dialHost, address.getAddress().getHostAddress()});
+            TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels("denied_localhost").inc();
+            throw new LocalhostPolicy.Denied(dialHost, address.getAddress());
+        }
+        return address;
     }
 
     /**

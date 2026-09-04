@@ -147,7 +147,10 @@ java -jar testingbot-tunnel.jar --doctor
   to 443. Squid needs `http_upgrade_request_protocols` for `get` to work at all. Does not affect
   `wss://`, which arrives as a CONNECT and never reaches this decision
 - `--localhost-policy`: `allow` (default) or `deny` for tunnel traffic reaching this machine's
-  loopback interface
+  loopback interface. Enforced twice: on the name before the request is accepted, so a refusal
+  reads as a policy error, and again on the address about to be dialled. The second is the one
+  that counts -- the name check alone resolved once to decide and the dial resolved again to
+  connect, so a rebinding name was judged on one answer and connected on another
 - `--pac-local`: Evaluate a PAC file locally to choose egress per destination. Distinct from
   `--pac`, which forwards a PAC URL to the remote browser
 - `--pac-test`: Evaluate `--pac-local` against one URL and exit

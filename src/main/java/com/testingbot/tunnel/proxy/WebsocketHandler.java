@@ -172,12 +172,30 @@ public class WebsocketHandler extends ConnectHandler {
         int dialPort = target.port();
         if (dnsResolver != null) {
             try {
-                return new InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort);
+                return refuseLoopback(dialHost,
+                        new InetSocketAddress(dnsResolver.resolve(dialHost)[0], dialPort));
             } catch (java.net.UnknownHostException ex) {
                 LOG.warn("Custom DNS could not resolve {}: {}", dialHost, ex.getMessage());
             }
         }
-        return super.newConnectAddress(dialHost, dialPort);
+        return refuseLoopback(dialHost, super.newConnectAddress(dialHost, dialPort));
+    }
+
+    /**
+     * Enforces {@code --localhost-policy} on the address actually being dialled.
+     *
+     * <p>The name was judged earlier, in the upgrade check; this judges what it resolved to,
+     * with no further lookup in between for a rebinding answer to occupy.
+     *
+     * @throws LocalhostPolicy.Denied when the resolved address is this machine's loopback
+     */
+    private InetSocketAddress refuseLoopback(String dialHost, InetSocketAddress address) {
+        if (address != null && localhostPolicy.blocksAddress(address.getAddress())) {
+            LOG.info("Localhost policy: refusing WebSocket dial to {} ({})",
+                    dialHost, address.getAddress().getHostAddress());
+            throw new LocalhostPolicy.Denied(dialHost, address.getAddress());
+        }
+        return address;
     }
 
     public void setConnectTo(ConnectToMap connectTo) {
