@@ -133,4 +133,58 @@ class FastFailPolicyTest {
         assertThat(policy.blocks("example.com.")).isTrue();
         assertThat(policy.blocks("example.com.:443")).isTrue();
     }
+
+    // ---------------------------------------------------------------- TB-387 / F6
+
+    /**
+     * The bypass: exceptions used to match as substrings, so a catch-all deny plus
+     * {@code !ok\.com} -- the form --help advertises -- excepted any name an attacker could
+     * register that merely contained it. Pointing that name at a private address reached
+     * internal services through the same hole.
+     */
+    @Test
+    void exception_isNotSatisfiedByASuffixAttack() {
+        FastFailPolicy policy = of(".*", "!ok\\.com");
+
+        assertThat(policy.blocks("ok.com")).isFalse();
+        assertThat(policy.blocks("ok.com.attacker.net")).isTrue();
+        assertThat(policy.blocks("ok.com.evil")).isTrue();
+    }
+
+    /** A different registrable name that happens to end with the excepted text. */
+    @Test
+    void exception_doesNotLeakToANameEndingWithIt() {
+        FastFailPolicy policy = of(".*", "!ok\\.com");
+
+        assertThat(policy.blocks("notok.com")).isTrue();
+        assertThat(policy.blocks("lookok.com")).isTrue();
+    }
+
+    /** Subdomains of the excepted host are still excepted -- that is the common intent. */
+    @Test
+    void exception_coversSubdomainsOfTheNamedHost() {
+        FastFailPolicy policy = of(".*", "!ok\\.com");
+
+        assertThat(policy.blocks("www.ok.com")).isFalse();
+        assertThat(policy.blocks("deep.nested.ok.com")).isFalse();
+    }
+
+    /** An anchored exception must not match a longer label ending in the same text. */
+    @Test
+    void anchoredException_doesNotMatchMidLabel() {
+        FastFailPolicy policy = of(".*", "!(^|\\.)staging\\.example\\.com$");
+
+        assertThat(policy.blocks("evilstaging.example.com")).isTrue();
+    }
+
+    /**
+     * Deny patterns keep substring matching. Narrowing them would silently unblock destinations
+     * that existing configurations refuse today -- the one direction this check must not move on
+     * its own.
+     */
+    @Test
+    void denyPatterns_stillMatchAsSubstrings() {
+        assertThat(of("facebook").blocks("www.facebook.com")).isTrue();
+        assertThat(of("ok\\.com").blocks("ok.com.attacker.net")).isTrue();
+    }
 }

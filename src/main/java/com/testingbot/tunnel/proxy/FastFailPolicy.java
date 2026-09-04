@@ -21,6 +21,12 @@ import java.util.regex.PatternSyntaxException;
  * <p>A host is refused when some deny pattern matches it and no exception does. Exceptions win,
  * so order does not matter. Lists without {@code !} behave exactly as before.
  *
+ * <p>The two halves match differently, on purpose. A deny pattern matches anywhere in the host,
+ * so it errs towards refusing; an exception must cover a whole host or a whole subdomain of one,
+ * so it errs towards refusing too. Both asymmetries point the same way -- the reachable set only
+ * ever shrinks when a pattern is ambiguous -- which is why {@code !ok\.com} excepts
+ * {@code ok.com} and {@code www.ok.com} but not {@code ok.com.attacker.net}.
+ *
  * <p>Both the plain-HTTP and CONNECT paths share this, so a pattern cannot mean one thing for
  * {@code http://} and another for {@code https://}.
  */
@@ -91,16 +97,65 @@ public final class FastFailPolicy {
             return false;
         }
         String host = normalise(target);
-        if (!matchesAny(deny, host)) {
+        if (!matchesAnyDeny(deny, host)) {
             return false;
         }
-        return !matchesAny(allow, host);
+        return !matchesAnyException(allow, host);
     }
 
-    private static boolean matchesAny(List<Pattern> patterns, String host) {
+    /**
+     * Deny patterns match as substrings, the behaviour this list has always had.
+     *
+     * <p>{@code --fast-fail-regexps facebook} refusing {@code www.facebook.com} is the whole
+     * point of the option. Narrowing this would silently unblock destinations existing
+     * configurations refuse today, which is the one direction a security check must never move
+     * on its own.
+     */
+    private static boolean matchesAnyDeny(List<Pattern> patterns, String host) {
         for (Pattern p : patterns) {
             if (p.matcher(host).find()) {
                 return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Exception patterns must match a whole host or a whole subdomain of one.
+     *
+     * <p>Substring matching here is the opposite direction and is a hole: with
+     * {@code '.*,!ok\.com'} -- the form the {@code --help} text advertises -- a substring match
+     * excepted {@code ok.com.attacker.net}, so the catch-all deny that was supposed to leave
+     * exactly one origin reachable let an attacker choose any name they could register. Pointing
+     * that name at a private address reached internal services too.
+     *
+     * <p>The rule is that the match must run to the end of the host and begin on a label
+     * boundary: the start of the string, just after a dot, or on the dot itself (so a pattern
+     * written as {@code (^|\.)staging\.example\.com$} still covers its subdomains). That keeps
+     * both documented spellings working and refuses only the suffix trick -- {@code ok\.com}
+     * excepts {@code ok.com} and {@code www.ok.com}, but neither {@code ok.com.attacker.net} nor
+     * {@code notok.com}.
+     *
+     * <p>Not simply {@code matches()}: that would demand the pattern describe the entire host,
+     * which breaks every exception written to cover a domain and its subdomains.
+     */
+    private static boolean matchesAnyException(List<Pattern> patterns, String host) {
+        for (Pattern p : patterns) {
+            java.util.regex.Matcher m = p.matcher(host);
+            while (m.find()) {
+                if (m.end() != host.length()) {
+                    // Something follows the match, so the pattern named a prefix of some other
+                    // name rather than this host. This is the suffix trick.
+                    continue;
+                }
+                int start = m.start();
+                if (start == 0
+                        || host.charAt(start - 1) == '.'
+                        || host.charAt(start) == '.') {
+                    return true;
+                }
+                // Otherwise the match began mid-label ("staging.example.com" inside
+                // "evilstaging.example.com"), which is a different name.
             }
         }
         return false;

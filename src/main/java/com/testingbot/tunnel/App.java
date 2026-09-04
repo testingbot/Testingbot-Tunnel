@@ -306,7 +306,9 @@ public class App {
         Option fastFail = new Option("F", "fast-fail-regexps", true,
             "Specify domains you don't want to proxy, comma separated. "
             + "Prefix an entry with ! to make it an exception, so '.*,!ok\\.com' blocks "
-            + "everything except ok.com.");
+            + "everything except ok.com and its subdomains. An exception must cover a whole "
+            + "host or subdomain, so it cannot be satisfied by a name that merely ends with "
+            + "something else -- ok.com.attacker.net is not excepted by !ok\\.com.");
         fastFail.setArgName("OPTIONS");
         options.addOption(fastFail);
 
