@@ -132,7 +132,8 @@ classify_tunnel_failure() {
   if grep -qE "tunnels active|Too many tunnels" "$TUNNEL_LOG" 2>/dev/null; then
     echo "    tunnel quota reached:"
     grep -m1 -E "tunnels active|Too many tunnels" "$TUNNEL_LOG" | sed 's/^/    | /'
-    echo "    | active: curl -u KEY:SECRET https://api.testingbot.com/v1/tunnel/list"
+    echo "    | active: printf 'user = \"KEY:SECRET\"\\n' | curl -K - https://api.testingbot.com/v1/tunnel/list"
+    echo "    |   (-K - keeps the credentials out of ps; -u would not)"
     echo "    | tip: run fewer scenarios, or raise E2E_PACE_SECONDS"
     QUOTA_HIT=1
     return 0
@@ -163,7 +164,10 @@ api_credentials() {
 active_tunnel_count() {
   local creds; creds="$(api_credentials)"
   [ -z "$creds" ] && return 0
-  curl -s --max-time 15 -u "$creds" https://api.testingbot.com/v1/tunnel/list 2>/dev/null \
+  # Credentials on stdin, not in argv: -u puts them in the process table, where any other
+  # user on the machine can read them out of ps for as long as the request runs.
+  printf 'user = "%s"\n' "$creds" \
+    | curl -s --max-time 15 -K - https://api.testingbot.com/v1/tunnel/list 2>/dev/null \
     | python3 -c 'import json,sys
 try:
     print(len(json.load(sys.stdin)))
