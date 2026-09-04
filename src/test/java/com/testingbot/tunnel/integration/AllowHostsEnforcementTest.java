@@ -224,7 +224,11 @@ class AllowHostsEnforcementTest {
     void anUnlistedHostIsRefusedOverConnect() throws Exception {
         start("only.this.example");
 
-        assertThat(connect("127.0.0.1")).doesNotContain("200");
+        // 403 specifically, not merely "not 200": a 502 or a DNS failure satisfied that just as
+        // well, so the test passed for a proxy broken in any way. CONNECT answers with a bare
+        // status and no body, which is why the reason phrase the plain-HTTP path carries is
+        // not asserted here.
+        assertThat(connect("127.0.0.1")).contains("403");
     }
 
     @Test

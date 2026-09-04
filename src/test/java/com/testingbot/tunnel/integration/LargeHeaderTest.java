@@ -162,6 +162,8 @@ class LargeHeaderTest {
         // The limit is raised, not removed: an unbounded allowance is a memory attack.
         String response = send(requestWithHeaders(64 * 1024));
 
-        assertThat(response).doesNotStartWith("HTTP/1.1 200");
+        assertThat(response)
+                .as("refused for being too large, not failed for some other reason")
+                .startsWith("HTTP/1.1 431");
     }
 }

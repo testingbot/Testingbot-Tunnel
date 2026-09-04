@@ -22,16 +22,6 @@ class HttpProxyTest {
         app.setClientSecret("test_secret");
     }
     
-    @Test
-    void constructor_withValidApp_shouldCreateHttpProxy() {
-        // Given & When
-        assertThatCode(() -> {
-            httpProxy = new HttpProxy(app);
-        }).doesNotThrowAnyException();
-        
-        // Then
-        assertThat(httpProxy).isNotNull();
-    }
     
     @Test
     void start_shouldStartHttpProxyServer() throws Exception {
@@ -57,17 +47,6 @@ class HttpProxyTest {
             .doesNotThrowAnyException();
     }
     
-    @Test
-    void testProxy_shouldValidateProxyFunctionality() {
-        // Given
-        httpProxy = new HttpProxy(app);
-        
-        // When
-        boolean result = httpProxy.testProxy();
-        
-        // Then
-        assertThat(result).isFalse(); // Expected in test environment
-    }
     
     @Test
     void start_whenPortAlreadyBound_throwsHttpProxyStartException() throws Exception {

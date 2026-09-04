@@ -90,13 +90,4 @@ class HandshakeSettleOnceTest {
         return null;
     }
 
-    @Test
-    void aSecondClaimOnTheSameGuardIsRefused() {
-        // The property the production code now relies on, stated directly: whichever thread
-        // arrives second must be told it lost, so only one outcome is ever recorded.
-        AtomicBoolean settled = new AtomicBoolean();
-
-        assertThat(settled.compareAndSet(false, true)).isTrue();
-        assertThat(settled.compareAndSet(false, true)).isFalse();
-    }
 }

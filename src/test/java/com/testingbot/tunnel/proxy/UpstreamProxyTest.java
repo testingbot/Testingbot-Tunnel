@@ -161,84 +161,11 @@ class UpstreamProxyTest {
         }
     }
 
-    @Test
-    void httpsConnect_shouldConfigureCustomConnectHandler() throws Exception {
-        // Given: App configured with upstream proxy for HTTPS
-        app.setProxy("proxy.example.com:8080");
 
-        // When: Creating CustomConnectHandler
-        CustomConnectHandler handler = new CustomConnectHandler(app);
 
-        // Then: Handler should be configured for CONNECT tunneling through upstream
-        assertThat(handler).isNotNull();
 
-        // This handler will forward CONNECT requests to the upstream proxy
-        // In real usage: client -> local proxy (CustomConnectHandler) -> upstream proxy -> target
-    }
 
-    @Test
-    void httpsConnect_withProxyAuth_shouldSendAuthInConnect() throws Exception {
-        // Given: Upstream proxy requiring auth for CONNECT
-        String expectedAuth = "Basic " + Base64.getEncoder().encodeToString("user:pass".getBytes());
 
-        upstreamProxy.stubFor(request("CONNECT", urlMatching(".*"))
-                .withHeader("Proxy-Authorization", equalTo(expectedAuth))
-                .willReturn(aResponse().withStatus(200)));
-
-        upstreamProxy.stubFor(request("CONNECT", urlMatching(".*"))
-                .withHeader("Proxy-Authorization", absent())
-                .willReturn(aResponse()
-                        .withStatus(407)
-                        .withHeader("Proxy-Authenticate", "Basic realm=\"secure\"")));
-
-        // And: Local proxy with auth
-        app.setProxy("localhost:" + upstreamProxy.port());
-        app.setProxyAuth("user:pass");
-        CustomConnectHandler handler = new CustomConnectHandler(app);
-
-        // Then: Handler should be configured with auth for CONNECT requests
-        assertThat(handler).isNotNull();
-    }
-
-    @Test
-    void proxyConfiguration_shouldHandleHostnameWithoutPort() {
-        // Given: Proxy hostname without port
-        app.setProxy("proxy.example.com");
-        CustomConnectHandler handler = new CustomConnectHandler(app);
-
-        // Then: Should default to port 80
-        assertThat(handler).isNotNull();
-        assertThat(app.getProxy()).isEqualTo("proxy.example.com");
-    }
-
-    @Test
-    void proxyConfiguration_shouldHandleIPv4Address() throws Exception {
-        // Given: IPv4 address as proxy
-        startLocalProxyWithUpstream("127.0.0.1:" + upstreamProxy.port(), null);
-
-        // Then: Should configure successfully
-        assertThat(localProxyPort).isGreaterThan(0);
-    }
-
-    @Test
-    void proxyConfiguration_shouldStoreCredentialsSeparately() {
-        // Given: App with proxy and auth
-        app.setProxy("proxy.example.com:8080");
-        app.setProxyAuth("myuser:mypassword");
-
-        // Then: Both should be stored independently
-        assertThat(app.getProxy()).isEqualTo("proxy.example.com:8080");
-        assertThat(app.getProxyAuth()).isEqualTo("myuser:mypassword");
-    }
-
-    @Test
-    void customConnectHandler_shouldInitializeWithoutProxy() {
-        // Given: No proxy configured
-        CustomConnectHandler handler = new CustomConnectHandler(app);
-
-        // Then: Handler should initialize successfully
-        assertThat(handler).isNotNull();
-    }
 
     @Test
     void multipleRequests_shouldReuseUpstreamProxyConnection() throws Exception {

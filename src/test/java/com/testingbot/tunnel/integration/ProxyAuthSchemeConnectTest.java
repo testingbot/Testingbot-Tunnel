@@ -170,6 +170,9 @@ class ProxyAuthSchemeConnectTest {
 
         connectThroughTunnel();
 
+        assertThat(connectHeaders)
+                .as("the CONNECT must have reached the proxy, or the absence below means nothing")
+                .anyMatch(h -> h.startsWith("CONNECT target.example.com:443"));
         assertThat(connectHeaders).noneMatch(h -> h.startsWith("Proxy-Authorization: Basic"));
     }
 }

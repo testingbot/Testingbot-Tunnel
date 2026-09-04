@@ -20,11 +20,6 @@ class TunnelProxyHandlerTest {
         handler = new TunnelProxyHandler();
     }
 
-    @Test
-    void constructor_shouldCreateForwardProxyHandler() {
-        assertThat(handler).isNotNull();
-        assertThat(handler).isInstanceOf(org.eclipse.jetty.proxy.ProxyHandler.Forward.class);
-    }
 
     @Test
     void lifecycle_startAndStopShouldNotThrow() throws Exception {

@@ -194,7 +194,11 @@ class SshThroughProxyTest {
 
         assertThatThrownBy(() -> new SSHTunnel(app, "127.0.0.1", sshd.getPort(), "127.0.0.1"))
                 .isInstanceOf(Exception.class)
-                .hasMessageContaining("Connection failed");
+                .hasMessageContaining("Connection failed")
+                // The specifics, not just the wrapper: "Connection failed" prefixes every
+                // JSchException, so on its own it held for any failure at all.
+                .hasMessageContaining("407")
+                .hasMessageContaining("--proxy-auth-scheme");
         assertThat(proxyRequests.get(0)).doesNotContain("Proxy-Authorization");
     }
 

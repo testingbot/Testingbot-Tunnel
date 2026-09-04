@@ -303,18 +303,6 @@ class ApiTest {
             .withHeader("accept", equalTo("application/json")));
     }
 
-    @Test
-    void setTunnelID_shouldUpdateTunnelId() {
-        // Given
-        api = new Api(app);
-        int expectedTunnelId = 456;
-
-        // When
-        api.setTunnelID(expectedTunnelId);
-
-        // Then: Should not throw
-        assertThat(api).isNotNull();
-    }
 
     @Test
     void createTunnel_shouldHandleJsonWithEscapedCharacters() throws Exception {
@@ -437,30 +425,7 @@ class ApiTest {
         assertThat(result.get("port").asInt()).isEqualTo(2010);
     }
 
-    @Test
-    void api_shouldAcceptProxyConfiguration() {
-        // Given: App with proxy configured
-        app.setProxy("proxy.example.com:8080");
 
-        // When: Creating Api
-        api = new Api(app);
-
-        // Then: Should not throw - proxy configuration is stored
-        assertThat(app.getProxy()).isEqualTo("proxy.example.com:8080");
-    }
-
-    @Test
-    void api_shouldAcceptProxyAuthConfiguration() {
-        // Given: App with proxy auth configured
-        app.setProxy("proxy.example.com:8080");
-        app.setProxyAuth("user:password");
-
-        // When: Creating Api
-        api = new Api(app);
-
-        // Then: Should not throw - proxy auth configuration is stored
-        assertThat(app.getProxyAuth()).isEqualTo("user:password");
-    }
 
     @Test
     void destroyTunnel_with404Response_shouldNotThrow() throws Exception {

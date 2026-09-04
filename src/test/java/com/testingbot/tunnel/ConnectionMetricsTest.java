@@ -67,14 +67,18 @@ class ConnectionMetricsTest {
     void totalBytesSumsEveryListener() {
         // Statistics.getBytesTransferred() reads this, so it must not report one listener.
         ConnectionMetrics metrics = new ConnectionMetrics();
-        ConnectionStatistics proxy = new ConnectionStatistics();
-        ConnectionStatistics selenium = new ConnectionStatistics();
+        SettableStats proxy = new SettableStats();
+        SettableStats selenium = new SettableStats();
         metrics.add(ConnectionMetrics.PROXY, proxy);
         metrics.add(ConnectionMetrics.SELENIUM, selenium);
 
-        // Fresh statistics report zero; the contract under test is that it aggregates rather
-        // than picking one.
-        assertThat(metrics.totalBytes()).isEqualTo(0);
+        // Distinct non-zero values, because two fresh (zero) statistics cannot tell summing
+        // apart from returning a constant or reading only one listener -- which is the entire
+        // contract here, since Statistics.getBytesTransferred() reads it.
+        proxy.set(100, 7, 1);
+        selenium.set(20, 3, 1);
+
+        assertThat(metrics.totalBytes()).isEqualTo(130);
         assertThat(metrics.collect()).isNotEmpty();
     }
 
@@ -94,5 +98,26 @@ class ConnectionMetricsTest {
 
         assertThat(metrics.collect()).allSatisfy(f -> assertThat(f.samples).isEmpty());
         assertThat(metrics.totalBytes()).isEqualTo(0);
+    }
+
+    /** Statistics with settable totals; the real ones are driven by actual connections. */
+    private static final class SettableStats extends org.eclipse.jetty.io.ConnectionStatistics {
+        private long received;
+        private long sent;
+
+        @Override
+        public long getReceivedBytes() {
+            return received;
+        }
+
+        @Override
+        public long getSentBytes() {
+            return sent;
+        }
+
+        void set(long received, long sent, long ignoredConnections) {
+            this.received = received;
+            this.sent = sent;
+        }
     }
 }

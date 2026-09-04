@@ -19,12 +19,6 @@ class DoctorTest {
         app.setJettyPort(findFreePort());
     }
 
-    @Test
-    void constructor_shouldInitializeAndPerformChecks() {
-        assertThatCode(() -> {
-            Doctor doctor = new Doctor(app);
-        }).doesNotThrowAnyException();
-    }
 
     private int findFreePort() {
         try (ServerSocket socket = new ServerSocket(0)) {

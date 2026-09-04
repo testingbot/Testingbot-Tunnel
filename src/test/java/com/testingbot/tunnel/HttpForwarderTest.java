@@ -20,18 +20,6 @@ class HttpForwarderTest {
         app.setClientSecret("test_secret");
     }
     
-    @Test
-    void constructor_withValidApp_shouldCreateHttpForwarder() {
-        // Given & When & Then
-        assertThatCode(() -> {
-            httpForwarder = new HttpForwarder(app);
-        }).doesNotThrowAnyException();
-        
-        assertThat(httpForwarder).isNotNull();
-        
-        // Clean up
-        httpForwarder.stop();
-    }
     
     @Test
     void stop_shouldStopForwarder() {
@@ -43,17 +31,4 @@ class HttpForwarderTest {
             .doesNotThrowAnyException();
     }
     
-    @Test
-    void testForwarding_withRunningForwarder_shouldExecuteWithoutException() {
-        // Given: HttpForwarder with running Jetty server
-        httpForwarder = new HttpForwarder(app);
-
-        // When: Testing if forwarder is responding
-        // Then: Should not throw exception (result depends on SSH tunnel availability)
-        assertThatCode(() -> httpForwarder.testForwarding())
-            .doesNotThrowAnyException();
-
-        // Clean up
-        httpForwarder.stop();
-    }
 }

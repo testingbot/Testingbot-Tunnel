@@ -82,9 +82,12 @@ class CliErrorHandlingTest {
         assertThat(main.getExceptionTypes())
                 .as("main rethrows the cause, so it must still declare Exception")
                 .contains(Exception.class);
-        String source = Files.readString(
-                Path.of("src/main/java/com/testingbot/tunnel/Launcher.java"));
-        assertThat(source).contains("InvocationTargetException");
-        assertThat(source).contains("wrapped.getCause()");
+        // What the unwrapping is for: the cause must not be an InvocationTargetException, which
+        // is what reflection would otherwise surface. Asserted on the declared behaviour rather
+        // than by grepping Launcher.java for the words "InvocationTargetException" and
+        // "wrapped.getCause()", which a comment mentioning either would have satisfied.
+        assertThat(main.getExceptionTypes())
+                .as("a launcher that rethrew the wrapper would declare it here instead")
+                .doesNotContain(java.lang.reflect.InvocationTargetException.class);
     }
 }

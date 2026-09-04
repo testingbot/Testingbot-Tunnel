@@ -173,26 +173,19 @@ class CommandLineTest {
     }
 
     @Test
-    void getServerIP_shouldReturnValue() {
-        // Given: Fresh App instance
-        // When: Getting server IP
-        String serverIP = app.getServerIP();
-
-        // Then: Should return a value or null
-        // Just verify the method exists and doesn't throw
-        // (serverIP can be null initially)
+    void getServerIP_isNullUntilATunnelIsReady() {
+        // It is set from the API response in tunnelReady(); before that there is no server.
+        assertThat(app.getServerIP()).isNull();
     }
 
     @Test
-    void setBasicAuth_shouldStoreAuth() {
-        // Given: Basic auth array
-        String[] basicAuth = {"localhost:8080", "user", "pass"};
+    void setBasicAuth_storesWhatItWasGiven() {
+        String[] basicAuth = {"localhost:8080:user:pass", "example.com:443:u2:p2"};
 
-        // When: Setting basic auth
         app.setBasicAuth(basicAuth);
 
-        // Then: Method should execute without exception
-        // (We can't verify the internal state without a getter)
+        assertThat(app.getBasicAuth()).containsExactly(
+                "localhost:8080:user:pass", "example.com:443:u2:p2");
     }
 
     @Test
@@ -216,17 +209,15 @@ class CommandLineTest {
     }
 
     @Test
-    void getApi_shouldReturnApiInstance() {
-        // Given: App with credentials
+    void getApi_isNullUntilBootCreatesIt() {
+        // The field is assigned in boot(), not by the constructor or by the credentials.
+        // Asserting this rather than "returns an instance or null" -- which the previous version
+        // of this test did, without an assertion at all -- pins the actual lifecycle: anything
+        // reaching for getApi() before boot() gets null and must cope with it.
         app.setClientKey("key");
         app.setClientSecret("secret");
 
-        // When: Getting API
-        Api api = app.getApi();
-
-        // Then: Should return an API instance or null
-        // (depends on App initialization state)
-        // Just verify method exists and doesn't throw
+        assertThat(app.getApi()).isNull();
     }
 
     @Test

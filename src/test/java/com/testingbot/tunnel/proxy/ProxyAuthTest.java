@@ -24,18 +24,6 @@ class ProxyAuthTest {
                 "http", "", null, null, Authenticator.RequestorType.PROXY);
     }
 
-    @Test
-    void constructor_withValidCredentials_shouldCreateAuth() {
-        // Given: Valid credentials
-        String username = "testuser";
-        String password = "testpass";
-
-        // When: Creating ProxyAuth
-        ProxyAuth auth = new ProxyAuth(username, password);
-
-        // Then: Should be created successfully
-        assertThat(auth).isNotNull();
-    }
 
     @Test
     void getPasswordAuthentication_shouldReturnCredentials() {
