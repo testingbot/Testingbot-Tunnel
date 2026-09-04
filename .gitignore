@@ -31,3 +31,6 @@ dist/*.zip
 
 # Serena MCP local state (cache + memories)
 .serena/
+
+# Local agent/project notes, not shipped
+CLAUDE.md
