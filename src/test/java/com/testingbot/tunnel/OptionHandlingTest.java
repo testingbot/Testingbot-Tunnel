@@ -145,11 +145,11 @@ class OptionHandlingTest {
                 }
                 """);
 
-        assertThat(App.pacTest(file.toString(), "http://a.corp/x")).isZero();
-        assertThat(App.pacTest(file.toString(), "https://elsewhere.com/")).isZero();
+        assertThat(App.pacTest(file.toString(), null, "http://a.corp/x")).isZero();
+        assertThat(App.pacTest(file.toString(), null, "https://elsewhere.com/")).isZero();
         // A URL with no host cannot be evaluated.
-        assertThat(App.pacTest(file.toString(), "not-a-url")).isEqualTo(1);
-        assertThat(App.pacTest(tmp.resolve("absent.pac").toString(), "http://x/")).isEqualTo(1);
+        assertThat(App.pacTest(file.toString(), null, "not-a-url")).isEqualTo(1);
+        assertThat(App.pacTest(tmp.resolve("absent.pac").toString(), null, "http://x/")).isEqualTo(1);
     }
 
     /* ------------------------------------------------------------------- --header */

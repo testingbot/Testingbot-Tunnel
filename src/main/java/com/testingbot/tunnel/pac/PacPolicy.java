@@ -73,11 +73,20 @@ public final class PacPolicy {
     }
 
     /**
-     * @param location a file path, or an http(s) URL
+     * @param location a file path, or an https URL
      * @throws PacException if it cannot be read or does not parse
      */
     public static PacPolicy load(String location) {
-        String text = read(location);
+        return load(location, null);
+    }
+
+    /**
+     * @param location a file path, or an http(s) URL
+     * @param expectedSha256 the hex SHA-256 the fetched document must have, or null
+     * @throws PacException if it cannot be read, fails its digest, or does not parse
+     */
+    public static PacPolicy load(String location, String expectedSha256) {
+        String text = read(location, expectedSha256);
         try {
             return new PacPolicy(new PacInterpreter(text), location);
         } catch (PacException invalid) {
@@ -92,14 +101,38 @@ public final class PacPolicy {
         return new PacPolicy(new PacInterpreter(script), description);
     }
 
-    private static String read(String location) {
+    private static String read(String location, String expectedSha256) {
         if (location.startsWith("http://") || location.startsWith("https://")) {
+            boolean plaintext = location.startsWith("http://");
+            if (plaintext && expectedSha256 == null) {
+                // This document decides where every byte of egress goes, and on the CONNECT path
+                // it decides who receives the --proxy-userpwd credential. Fetched in cleartext it
+                // is whatever the network says it is, and the classic position for that attack --
+                // owning the WPAD name on a corporate LAN -- is exactly where --pac-local is
+                // used. Refused rather than warned about: a warning on a startup line nobody
+                // reads is not a decision the operator made.
+                throw new PacException("Refusing to fetch PAC file " + location
+                        + " over plain HTTP: its contents decide where traffic and upstream "
+                        + "proxy credentials are sent, and nothing authenticates them. Use an "
+                        + "https:// URL or a local file path, or pin the document with "
+                        + "--pac-local-sha256 if the http URL cannot be changed.");
+            }
             HttpURLConnection connection = null;
             try {
                 connection = (HttpURLConnection) URI.create(location).toURL().openConnection();
                 connection.setConnectTimeout(FETCH_TIMEOUT_MS);
                 connection.setReadTimeout(FETCH_TIMEOUT_MS);
+                // Not followed: HttpURLConnection follows by default and will not carry an
+                // https:// fetch down to http://, but it will happily follow one https host to
+                // another. Either way the document would come from somewhere other than the
+                // place the operator named, which is the thing being established here.
+                connection.setInstanceFollowRedirects(false);
                 int status = connection.getResponseCode();
+                if (status >= 300 && status < 400) {
+                    throw new PacException("PAC file " + location + " answered HTTP " + status
+                            + " (a redirect). Name the final URL directly, so what is fetched is "
+                            + "what was configured.");
+                }
                 if (status != 200) {
                     throw new PacException("Could not fetch PAC file " + location
                             + ": HTTP " + status);
@@ -110,6 +143,7 @@ public final class PacPolicy {
                     throw new PacException("PAC file " + location + " is larger than "
                             + MAX_PAC_BYTES + " bytes; refusing to load it");
                 }
+                verifyDigest(location, body, expectedSha256);
                 return new String(body, StandardCharsets.UTF_8);
             } catch (IOException unreachable) {
                 throw new PacException("Could not fetch PAC file " + location + ": "
@@ -121,12 +155,57 @@ public final class PacPolicy {
             }
         }
         try {
-            return Files.readString(Path.of(location), StandardCharsets.UTF_8);
+            byte[] body = Files.readAllBytes(Path.of(location));
+            // A digest given for a local file is checked too. It is not defending against the
+            // network here, but it is the operator saying "this exact document", and silently
+            // ignoring that would be worse than refusing it.
+            verifyDigest(location, body, expectedSha256);
+            return new String(body, StandardCharsets.UTF_8);
         } catch (java.nio.file.NoSuchFileException missing) {
             throw new PacException("PAC file not found: " + location);
         } catch (IOException unreadable) {
             throw new PacException("Could not read PAC file " + location + ": "
                     + unreadable, unreadable);
+        }
+    }
+
+    /**
+     * @param expectedSha256 hex SHA-256, case and whitespace insensitive; null skips the check
+     * @throws PacException if the document does not have that digest, or the value is not a
+     *         SHA-256 at all -- a malformed pin can never match, and accepting it would leave
+     *         the operator believing the document is checked when nothing could ever pass
+     */
+    private static void verifyDigest(String location, byte[] body, String expectedSha256) {
+        if (expectedSha256 == null) {
+            return;
+        }
+        String expected = expectedSha256.trim().toLowerCase(java.util.Locale.ROOT);
+        if (!expected.matches("[0-9a-f]{64}")) {
+            throw new PacException("--pac-local-sha256 must be 64 hex characters (a SHA-256), "
+                    + "got: " + expectedSha256);
+        }
+        String actual = sha256Hex(body);
+        if (!actual.equals(expected)) {
+            throw new PacException("PAC file " + location + " does not match --pac-local-sha256."
+                    + " Expected " + expected + ", got " + actual
+                    + ". Refusing to use it: the document decides where traffic and upstream"
+                    + " proxy credentials are sent.");
+        }
+    }
+
+    static String sha256Hex(byte[] body) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(body);
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xf, 16));
+                hex.append(Character.forDigit(b & 0xf, 16));
+            }
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException impossible) {
+            // Failing closed is the only safe answer: the alternative is treating an unverified
+            // document as verified.
+            throw new PacException("SHA-256 unavailable, cannot verify the PAC file", impossible);
         }
     }
 
@@ -139,7 +218,15 @@ public final class PacPolicy {
             return PacResult.direct();
         }
         long now = clock.getAsLong();
-        CachedResult cached = cache.get(host);
+        // Keyed by the whole evaluation input, not by host. FindProxyForURL is handed url and
+        // host, and a PAC file may branch on either; caching by host alone let the first
+        // decision for a host stand in for every other, so a client could choose which one
+        // applied by arranging which request arrived first. Callers pass a synthetic
+        // "scheme://host:port/", so this stays one entry per scheme and port rather than
+        // growing per path -- a CONNECT to host:443 and a ws:// upgrade to host:80 are
+        // different questions and no longer share an answer.
+        String key = cacheKey(url, host);
+        CachedResult cached = cache.get(key);
         if (cached != null && now - cached.decidedAtMs() < CACHE_TTL_MS) {
             return cached.result();
         }
@@ -154,8 +241,19 @@ public final class PacPolicy {
         if (cache.size() >= MAX_CACHE_ENTRIES) {
             cache.clear();
         }
-        cache.put(host, new CachedResult(result, now));
+        cache.put(key, new CachedResult(result, now));
         return result;
+    }
+
+    /**
+     * The cache key: both arguments the interpreter is given.
+     *
+     * <p>{@code url} alone would be enough for every current caller, since each builds it from
+     * the host it is about to reach. Including the host as well costs nothing and keeps the key
+     * honest if a caller ever passes a url whose authority differs from the host it asks about.
+     */
+    private static String cacheKey(String url, String host) {
+        return (url == null ? "" : url) + ' ' + host;
     }
 
     /** Evaluates without consulting or filling the cache; used by --pac-test. */

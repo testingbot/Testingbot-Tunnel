@@ -152,7 +152,14 @@ java -jar testingbot-tunnel.jar --doctor
   that counts -- the name check alone resolved once to decide and the dial resolved again to
   connect, so a rebinding name was judged on one answer and connected on another
 - `--pac-local`: Evaluate a PAC file locally to choose egress per destination. Distinct from
-  `--pac`, which forwards a PAC URL to the remote browser
+  `--pac`, which forwards a PAC URL to the remote browser. Accepts a path or an `https` URL; a
+  plain `http://` URL is refused unless pinned with `--pac-local-sha256`, because the document
+  chooses where traffic and the upstream-proxy credential go and cleartext makes it whatever
+  the network says it is. Redirects are refused rather than followed, so what is fetched is
+  what was configured
+- `--pac-local-sha256`: The SHA-256 the `--pac-local` document must have, 64 hex characters.
+  Required to use a plain `http://` PAC URL and usable with any source, including a local file;
+  a malformed value is refused rather than accepted and never matched
 - `--pac-test`: Evaluate `--pac-local` against one URL and exit
 - `--metrics-port`: Port for the insight endpoints (default 8003)
 - `--ready`: Query a running tunnel's `/readyz` and exit 0 (ready) or 1 (not ready)

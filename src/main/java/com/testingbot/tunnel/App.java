@@ -42,6 +42,7 @@ public class App {
     private String wsProxyMode = "connect";
     private InsightServer insightServer;
     private String pacLocal;
+    private String pacLocalSha256;
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
     private String proxyAuthScheme;
     private String proxySpn;
@@ -197,12 +198,21 @@ public class App {
         // evaluated here, by this process, to pick the tunnel's own egress.
         Option pacLocal = new Option(null, "pac-local", true,
             "Choose this tunnel's egress per destination from a proxy auto-config file. Accepts "
-            + "a path or an http(s) URL. Evaluated locally by a restricted interpreter -- no "
+            + "a path or an https URL; a plain http:// URL is refused unless pinned with "
+            + "--pac-local-sha256, because the file decides where traffic and upstream proxy "
+            + "credentials go. Evaluated locally by a restricted interpreter -- no "
             + "JavaScript engine is embedded -- so unsupported syntax is reported rather than "
             + "guessed at. Overrides --proxy for hosts the file routes. Unrelated to --pac, "
             + "which tells the remote browser which PAC to use.");
         pacLocal.setArgName("FILE|URL");
         options.addOption(pacLocal);
+
+        Option pacLocalSha256 = new Option(null, "pac-local-sha256", true,
+            "The SHA-256 the --pac-local document must have, as 64 hex characters. Required to "
+            + "use a plain http:// PAC URL, and usable with any source. The tunnel refuses to "
+            + "start if the document does not match. Env: TESTINGBOT_PAC_LOCAL_SHA256.");
+        pacLocalSha256.setArgName("HEX");
+        options.addOption(pacLocalSha256);
 
         Option pacTest = new Option(null, "pac-test", true,
             "Evaluate --pac-local against a URL and print the result, then exit. "
@@ -834,6 +844,9 @@ public class App {
                     throw new ParseException("--pac-test also needs --pac-local.");
                 }
                 System.exit(pacTest(commandLine.getOptionValue("pac-local").trim(),
+                        commandLine.hasOption("pac-local-sha256")
+                                ? commandLine.getOptionValue("pac-local-sha256").trim()
+                                : null,
                         commandLine.getOptionValue("pac-test").trim()));
             } else if (commandLine.hasOption("ready")) {
                 // Queries a tunnel running in another process, so it needs no credentials and
@@ -1238,10 +1251,12 @@ public class App {
      * wrong is that some requests quietly take the wrong route. Being able to ask directly turns
      * that into a one-line check.
      */
-    static int pacTest(String location, String url) {
+    static int pacTest(String location, String expectedSha256, String url) {
         try {
+            // Loaded exactly as the tunnel will load it, digest and all: a --pac-test that
+            // accepted a document the tunnel would refuse is worse than no check at all.
             com.testingbot.tunnel.pac.PacPolicy policy =
-                    com.testingbot.tunnel.pac.PacPolicy.load(location);
+                    com.testingbot.tunnel.pac.PacPolicy.load(location, expectedSha256);
             String host = java.net.URI.create(url).getHost();
             if (host == null) {
                 System.err.println("Could not read a host from " + url
@@ -1337,6 +1352,10 @@ public class App {
                     throw new ParseException(invalid.getMessage());
                 }
         }
+        if (commandLine.hasOption("pac-local-sha256")) {
+            app.setPacLocalSha256(commandLine.getOptionValue("pac-local-sha256").trim());
+        }
+
         if (commandLine.hasOption("pac-local")) {
             app.setPacLocal(commandLine.getOptionValue("pac-local").trim());
         }
@@ -1497,10 +1516,20 @@ public class App {
         this.pacPolicy = null;
     }
 
+    /** @return the digest --pac-local must have, or null when none was configured */
+    public String getPacLocalSha256() {
+        return pacLocalSha256;
+    }
+
+    public void setPacLocalSha256(String pacLocalSha256) {
+        this.pacLocalSha256 = pacLocalSha256;
+        this.pacPolicy = null;
+    }
+
     /** Loaded once and shared; null when --pac-local was not given. */
     public synchronized com.testingbot.tunnel.pac.PacPolicy getPacPolicy() {
         if (pacPolicy == null && pacLocal != null) {
-            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(pacLocal);
+            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(pacLocal, pacLocalSha256);
         }
         return pacPolicy;
     }

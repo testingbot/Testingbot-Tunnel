@@ -11,6 +11,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
@@ -22,6 +23,13 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * the tunnel down.
  */
 class PacPolicyTest {
+
+    /**
+     * A well-formed pin that no document will match. These tests are about fetch failures --
+     * 404, unreachable, oversized -- which all happen before any digest is compared, so the pin
+     * only has to get past the refusal of unpinned http:// URLs.
+     */
+    private static final String ANY_PIN = "0".repeat(64);
 
     private static final String SIMPLE = """
             function FindProxyForURL(url, host) {
@@ -53,8 +61,12 @@ class PacPolicyTest {
         });
         server.start();
         try {
+            // Pinned, because a plain http:// PAC URL is refused without one. The digest is
+            // computed from the same bytes the server serves, so this still tests the fetch
+            // rather than the pin -- the pin has its own tests below.
             PacPolicy policy = PacPolicy.load(
-                    "http://127.0.0.1:" + server.getAddress().getPort() + "/proxy.pac");
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/proxy.pac",
+                    PacPolicy.sha256Hex(SIMPLE.getBytes(StandardCharsets.UTF_8)));
 
             assertThat(policy.resolve("http://a.corp/", "a.corp").isDirect()).isTrue();
         } finally {
@@ -73,7 +85,7 @@ class PacPolicyTest {
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/missing.pac";
 
-            assertThatThrownBy(() -> PacPolicy.load(url))
+            assertThatThrownBy(() -> PacPolicy.load(url, ANY_PIN))
                     .isInstanceOf(PacException.class)
                     .hasMessageContaining("404");
         } finally {
@@ -88,7 +100,7 @@ class PacPolicyTest {
             int free = probe.getLocalPort();
             probe.close();
 
-            assertThatThrownBy(() -> PacPolicy.load("http://127.0.0.1:" + free + "/proxy.pac"))
+            assertThatThrownBy(() -> PacPolicy.load("http://127.0.0.1:" + free + "/proxy.pac", ANY_PIN))
                     .isInstanceOf(PacException.class)
                     .hasMessageContaining("Could not fetch PAC file");
         }
@@ -117,7 +129,7 @@ class PacPolicyTest {
         try {
             String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/huge.pac";
 
-            assertThatThrownBy(() -> PacPolicy.load(url))
+            assertThatThrownBy(() -> PacPolicy.load(url, ANY_PIN))
                     .isInstanceOf(PacException.class)
                     .hasMessageContaining("larger than");
         } finally {
@@ -157,14 +169,43 @@ class PacPolicyTest {
     }
 
     @Test
-    void repeatedLookupsForTheSameHostAreCached() {
+    void repeatedIdenticalLookupsAreCached() {
+        // The reason the cache exists: every request through the tunnel asks again.
         PacPolicy policy = PacPolicy.of(SIMPLE, "inline");
 
         policy.resolve("http://a.corp/", "a.corp");
-        policy.resolve("http://a.corp/other", "a.corp");
+        policy.resolve("http://a.corp/", "a.corp");
         policy.resolve("http://b.com/", "b.com");
 
         assertThat(policy.cacheSize()).isEqualTo(2);
+    }
+
+    /**
+     * The cache is keyed by what the interpreter was asked, not by host alone.
+     *
+     * <p>FindProxyForURL receives url as well as host and may branch on it. Keyed by host, the
+     * first decision for a host stood in for every later one, so whichever request arrived first
+     * chose the route for the rest -- a CONNECT to host:443 and a ws:// upgrade to host:80 are
+     * different questions and used to share one answer.
+     */
+    @Test
+    void aDecisionForOneSchemeDoesNotStandInForAnother() {
+        String byScheme = """
+                function FindProxyForURL(url, host) {
+                    if (shExpMatch(url, "https:*")) return "PROXY secure:8443";
+                    return "PROXY plain:8080";
+                }
+                """;
+        PacPolicy policy = PacPolicy.of(byScheme, "inline");
+
+        // The https answer first, so a host-keyed cache would serve it to the http question too.
+        assertThat(policy.resolve("https://x.com:443/", "x.com").first().toProxySpec())
+                .contains("secure");
+        assertThat(policy.resolve("http://x.com:80/", "x.com").first().toProxySpec())
+                .contains("plain");
+        // And the other way round, so neither order hides the bug.
+        assertThat(policy.resolve("https://x.com:443/", "x.com").first().toProxySpec())
+                .contains("secure");
     }
 
     @Test
@@ -306,6 +347,102 @@ class PacPolicyTest {
             throw new AssertionError("expected a failure");
         } catch (RuntimeException expected) {
             return expected.getMessage();
+        }
+    }
+
+    // ------------------------------------------------------- TB-388 / F4: fetch integrity
+
+    /**
+     * The document decides where every byte of egress goes, and on the CONNECT path who receives
+     * the --proxy-userpwd credential. Fetched in cleartext it is whatever the network says it is,
+     * and owning the WPAD name on a corporate LAN -- the classic position for that -- is exactly
+     * where --pac-local gets used.
+     */
+    @Test
+    void aPlainHttpUrlIsRefusedWhenNotPinned() {
+        assertThatThrownBy(() -> PacPolicy.load("http://wpad.corp/proxy.pac"))
+                .isInstanceOf(PacException.class)
+                .hasMessageContaining("plain HTTP")
+                .hasMessageContaining("--pac-local-sha256");
+    }
+
+    /** The refusal is about authenticity, so it fires before anything is fetched. */
+    @Test
+    void thePlainHttpRefusalDoesNotEvenConnect() throws Exception {
+        java.net.ServerSocket probe = new java.net.ServerSocket(0);
+        int free = probe.getLocalPort();
+        probe.close();
+
+        // Nothing is listening, yet the message is about http, not about a failed connection.
+        assertThatThrownBy(() -> PacPolicy.load("http://127.0.0.1:" + free + "/proxy.pac"))
+                .isInstanceOf(PacException.class)
+                .hasMessageContaining("plain HTTP");
+    }
+
+    @Test
+    void aPinnedDocumentThatMatchesIsAccepted(@TempDir Path tmp) throws Exception {
+        Path file = tmp.resolve("corp.pac");
+        Files.writeString(file, SIMPLE);
+        String digest = PacPolicy.sha256Hex(Files.readAllBytes(file));
+
+        PacPolicy policy = PacPolicy.load(file.toString(), digest);
+
+        assertThat(policy.resolve("http://a.corp/", "a.corp").isDirect()).isTrue();
+    }
+
+    @Test
+    void aPinnedDocumentThatDoesNotMatchIsRefused(@TempDir Path tmp) throws Exception {
+        Path file = tmp.resolve("corp.pac");
+        Files.writeString(file, SIMPLE);
+
+        assertThatThrownBy(() -> PacPolicy.load(file.toString(), ANY_PIN))
+                .isInstanceOf(PacException.class)
+                .hasMessageContaining("does not match");
+    }
+
+    /** A pin that could never match is a pin that is not doing anything; say so at startup. */
+    @Test
+    void aMalformedPinIsRefusedRatherThanNeverMatching(@TempDir Path tmp) throws Exception {
+        Path file = tmp.resolve("corp.pac");
+        Files.writeString(file, SIMPLE);
+
+        assertThatThrownBy(() -> PacPolicy.load(file.toString(), "not-a-digest"))
+                .isInstanceOf(PacException.class)
+                .hasMessageContaining("64 hex characters");
+    }
+
+    @Test
+    void theDigestIsCaseAndWhitespaceInsensitive(@TempDir Path tmp) throws Exception {
+        Path file = tmp.resolve("corp.pac");
+        Files.writeString(file, SIMPLE);
+        String digest = PacPolicy.sha256Hex(Files.readAllBytes(file));
+
+        assertThatCode(() -> PacPolicy.load(file.toString(),
+                "  " + digest.toUpperCase(java.util.Locale.ROOT) + "  "))
+                .doesNotThrowAnyException();
+    }
+
+    /**
+     * A redirect means the document came from somewhere other than the place that was
+     * configured, which is the thing being established.
+     */
+    @Test
+    void aRedirectIsRefusedRatherThanFollowed() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/proxy.pac", exchange -> {
+            exchange.getResponseHeaders().add("Location", "http://elsewhere.invalid/other.pac");
+            exchange.sendResponseHeaders(302, -1);
+            exchange.close();
+        });
+        server.start();
+        try {
+            String url = "http://127.0.0.1:" + server.getAddress().getPort() + "/proxy.pac";
+
+            assertThatThrownBy(() -> PacPolicy.load(url, ANY_PIN))
+                    .isInstanceOf(PacException.class)
+                    .hasMessageContaining("redirect");
+        } finally {
+            server.stop(0);
         }
     }
 }
