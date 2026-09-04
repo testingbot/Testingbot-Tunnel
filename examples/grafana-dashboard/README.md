@@ -20,7 +20,7 @@ The dashboard expects the metric series exposed by TestingBot Tunnel 4.8+:
 - `testingbot_errors_total`
 - Standard `jvm_*` and `process_*` exposed by the bundled Prometheus hotspot collectors
 
-See the [main README → Monitoring](../../README.markdown#monitoring) for the full reference.
+See the [main README → Monitoring](../../README.md#monitoring) for the full reference.
 
 ## Metrics used
 

@@ -7,6 +7,12 @@ cloud reach websites that only your machine or network can see — a development
 Tests run against `localhost:4445` as if the grid were local; the tunnel forwards Selenium
 traffic to TestingBot and routes the browser's web requests back through your network.
 
+> **Running tunnel 4.x or older?** This page documents **5.0**, which needs Java 17 and changes
+> a few defaults. The 4.x source and its documentation stay on the
+> [`v4.x` branch](https://github.com/testingbot/testingbot-tunnel/tree/v4.x). If you are upgrading, read
+> [Upgrading from 4.x](#upgrading-from-4x) first — it is short, and two of the changes are
+> ones you will notice immediately.
+
 ## Requirements
 
 | Tunnel version | Minimum JDK | Notes |
@@ -15,8 +21,38 @@ traffic to TestingBot and routes the browser's web requests back through your ne
 | 4.x | 11 | Jetty 11, which is end-of-life and no longer receives security fixes. |
 | 3.x and earlier | 8 | Unsupported. |
 
-Upgrading from 4.x to 5.0 requires a Java 17 runtime. The jar's class files cannot be loaded by
-an older JVM, so the tunnel reports the problem and exits rather than failing obscurely.
+## Upgrading from 4.x
+
+5.0 adds 28 options and removes none, so existing command lines keep working. Six things do
+change, and the first three are the ones people notice:
+
+| | 4.x | 5.0 | To keep the 4.x behaviour |
+|---|---|---|---|
+| **Java** | 11 | **17** | — (hard requirement) |
+| **What the listeners bind** | every interface | `127.0.0.1` | `--bind-address 0.0.0.0` |
+| **Per-request logging** | one `INFO` line per request | only failures and 5xx | `--log-http url` |
+| **Selenium relay logging** | always logged | honours `--log-http` | `--log-http forwarder:url` |
+| **Docker image** | — | sets `TESTINGBOT_BIND_ADDRESS=0.0.0.0` | — (published ports keep working) |
+| **Embedding the jar** | Jetty 11 + Servlet API | Jetty 12 core handlers | — (source change) |
+
+**Java 17.** The jar's classes cannot be loaded by an older JVM. The tunnel checks the version
+itself and says so plainly, rather than failing as `A JNI error has occurred`.
+
+**Listeners bind loopback.** In 4.x the Selenium relay (`4445`), the local proxy (`8087`), the
+insight endpoints (`8003`) and `--web` (`8080`) accepted connections from any machine that could
+route to yours. None of them authenticates: the relay attaches your TestingBot key and secret to
+everything it forwards, and the proxy will connect anywhere your machine can, including its own
+loopback. They now bind `127.0.0.1`.
+
+If your tests run on the same machine as the tunnel — the normal case — nothing changes. If they
+run elsewhere, add `--bind-address 0.0.0.0` and restrict the port with a firewall. The Docker
+image sets that for you, because a loopback bind inside a container makes published ports
+unreachable; narrow it there on the host side of the publish instead
+(`-p 127.0.0.1:4445:4445`).
+
+**Quieter logs.** 4.x logged a line for every proxied request. 5.0 logs failures and 5xx only.
+`--log-http url` restores a line per request, and `--log-http` takes a level per module —
+`--log-http proxy:url,forwarder:none`.
 
 ## Getting started
 
@@ -62,6 +98,26 @@ echo "se-port = 4446" > tunnel.conf && java -jar testingbot-tunnel.jar --config 
 TESTINGBOT_SE_PORT=4446 java -jar testingbot-tunnel.jar
 ```
 
+### Keeping credentials out of the process list
+
+Anything on the command line is visible to other users of the machine in `ps`. Every long option
+has a `TESTINGBOT_*` alias derived from its name, so the ones carrying a secret can be set in the
+environment instead:
+
+| Option | Environment variable | Format |
+|---|---|---|
+| `--auth` | `TESTINGBOT_AUTH` | `host:port:user:password`, comma-separated for several |
+| `--proxy-userpwd` | `TESTINGBOT_PROXY_USERPWD` | `user:password` |
+| `--proxy-testingbot-userpwd` | `TESTINGBOT_PROXY_TESTINGBOT_USERPWD` | `user:password` |
+| `--metrics-auth` | `TESTINGBOT_METRICS_AUTH` | `user:password` |
+
+The API key and secret can come from `TESTINGBOT_KEY` / `TESTINGBOT_SECRET` or from
+`~/.testingbot` instead of being passed as arguments. The flag always wins over the variable.
+
+> The positional `API_KEY API_SECRET` form shown above is still supported, but it does put the
+> secret in `ps` for as long as the tunnel runs. On a shared machine, prefer the environment
+> variables or `~/.testingbot`.
+
 `--help` lists everything. The options people reach for most:
 
 | Option | Purpose |
@@ -70,7 +126,8 @@ TESTINGBOT_SE_PORT=4446 java -jar testingbot-tunnel.jar
 | `--localproxy` | Local HTTP proxy port (default 8087) |
 | `--tunnel-identifier` | Name this tunnel, so several can run at once |
 | `--allow-hosts` | Reach only these hosts; everything else gets 403 |
-| `--fast-fail-regexps` | Refuse matching hosts. Prefix `!` for an exception: `.*,!ok\.com` blocks everything except `ok.com` |
+| `--fast-fail-regexps` | Refuse matching hosts. Prefix `!` for an exception: `.*,!ok\.com` blocks everything except `ok.com` and its subdomains |
+| `--bind-address` | Which interface the local listeners use: `127.0.0.1` (default) or `0.0.0.0` |
 | `--proxy` | Upstream proxy for egress — browser traffic and, unless `--proxy-testingbot` is set, the tunnel's own connection |
 | `--doctor` | Run diagnostics and exit |
 
@@ -123,7 +180,9 @@ java -jar testingbot-tunnel.jar --proxy 10.0.0.9:8080 \
 ```
 
 Credentials are deliberately not shared between the two: `--proxy-userpwd` belongs to one proxy
-operator and is not sent to another.
+operator and is not sent to another. The same rule applies to a proxy chosen by `--pac-local` —
+it receives no credentials, and the tunnel logs that it withheld them, so the resulting `407`
+explains itself.
 
 If a proxy intercepts TLS and re-signs it with an internal authority, the JVM will not trust it
 and the tunnel cannot even register itself. Point it at the authority:
@@ -144,6 +203,18 @@ whether to go direct or through a proxy:
 java -jar testingbot-tunnel.jar --pac-local /etc/corp.pac
 java -jar testingbot-tunnel.jar --pac-local https://corp.example/proxy.pac
 ```
+
+The file decides where traffic goes and, on the `CONNECT` path, which proxy receives
+`--proxy-userpwd`. Fetched over plain `http://` it is whatever the network says it is, so a
+plain `http://` URL is refused unless you pin the document:
+
+```bash
+java -jar testingbot-tunnel.jar --pac-local http://wpad.corp/proxy.pac \
+     --pac-local-sha256 3b1f...64hex
+```
+
+Use `https://` or a local file where you can. Redirects are refused rather than followed, so
+what is fetched is what you named.
 
 The file is evaluated by a restricted interpreter built for this purpose — **no JavaScript
 engine is embedded**. That keeps the dependency surface small for a process that already sits in

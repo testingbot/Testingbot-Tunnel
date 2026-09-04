@@ -1,3 +1,45 @@
+5.0
+
+Breaking changes from 4.x
+* Requires Java 17 (was 11). The tunnel checks the runtime version itself and reports it plainly instead of failing as "A JNI error has occurred"
+* Local listeners bind 127.0.0.1 instead of every interface: the Selenium relay (--se-port), the local proxy (--localproxy), the insight endpoints (--metrics-port) and --web. None of them authenticates, and the relay attaches the account key and secret to everything it forwards. Use `--bind-address 0.0.0.0` to accept connections from other machines
+* The Docker image sets TESTINGBOT_BIND_ADDRESS=0.0.0.0, because a loopback bind inside a container makes published ports unreachable; narrow it on the host side of the publish instead
+* Successful requests no longer produce a log line. `--log-http` defaults to `errors`; `--log-http url` restores a line per request
+* The Selenium relay honours `--log-http` too, where it previously logged every request unconditionally
+* Built on Jetty 12's core Handler API with no Servlet layer, which changes the internals for anyone embedding the jar
+
+Restricting what the tunnel can reach
+* `--allow-hosts`: name what the tunnel is for and refuse everything else, the inverse of --fast-fail-regexps. Supports `*.suffix` for subdomains
+* `--fast-fail-regexps` entries may be prefixed with `!` to make an exception, so `.*,!ok\.com` refuses everything but ok.com and its subdomains. An exception must cover a whole host, so it cannot be satisfied by a name that merely ends with one
+* `--localhost-policy deny`: refuse tunnel traffic reaching this machine's loopback. Enforced on the address actually dialled, not only on the name, so a rebinding answer cannot walk past it
+* All three are enforced on every way out: plain HTTP, CONNECT and WebSocket upgrades
+
+Egress and upstream proxies
+* `--pac-local`: choose egress per destination from a proxy auto-config file, evaluated by a restricted interpreter written for this purpose -- no JavaScript engine is embedded, and unsupported syntax is refused with its line number rather than approximated. `--pac-test` evaluates one URL and exits
+* `--pac-local-sha256`: pin the PAC document. A plain http:// PAC URL is refused unless pinned, since its contents decide where traffic and proxy credentials go; redirects are refused rather than followed
+* `--proxy-auth-scheme negotiate` with `--proxy-spn`, `--krb5-keytab` and `--krb5-principal`: SPNEGO/Kerberos to the upstream proxy, on all three egress paths
+* `--krb5-hosts`: send SPNEGO to named origins as well, for intranet sites that authenticate with Kerberos. An allowlist, never wildcarded
+* `--proxy-testingbot` and `--proxy-testingbot-userpwd`: a separate proxy for reaching TestingBot itself. Credentials are not inherited from --proxy-userpwd, and are never sent to a proxy they were not issued for -- including one named by a PAC file
+* `--cacert-file`: trust an additional certificate authority, for networks where a proxy intercepts TLS
+* `--ws-proxy-mode`: how a ws:// upgrade traverses --proxy, `connect` (default, per RFC 6455) or `get`
+* `--connect-to`: dial one host:port for requests naming another, leaving the URL, Host header and TLS SNI untouched
+* `--dns-timeout`, `--dns-round-robin`: per-server timeout and round-robin across the --dns list
+* `--http-dial-timeout`, `--http-idle-timeout`
+
+Observability
+* `--log-http`: per-request logging at `none`, `url`, `headers` or `errors`, settable per module (`proxy:`, `forwarder:`). `forwarder:body` logs the Selenium relay's request body with credentials redacted by key
+* `--log-format json`: one object per record, so a collector need not guess where a stack trace ends
+* `--request-id-header`: correlation id on every request, reusing an incoming value
+* `/healthz` and `/readyz` on the metrics port, and `--ready` to query a running tunnel and exit 0 or 1
+* `--doctor` diagnoses the configuration it was actually given, including the whole Kerberos chain and any --cacert-file subjects
+
+Other
+* `--config`: read options from a file. Every long option also has a TESTINGBOT_* environment alias derived from its name; precedence is command line, then config file, then environment
+* `--header` and `--response-header`: add, replace or remove headers on plain HTTP
+* `--nobump-domains`: disable SSL bumping for named hosts only
+* The tunnel server's SSH host key is verified when the API supplies its fingerprint. Without one the connection is unverified, as before, but says so on every connect and in --doctor
+* Example Prometheus + Grafana stack publishes on loopback and requires an admin password to be supplied
+
 4.8
 * Prometheus `/metrics` endpoint on the existing metrics port, exposing HTTP request rate/duration/size histograms, HTTPS CONNECT counters + handshake duration, SSH tunnel state and reconnects, active connections, error counters, and bundled JVM/process metrics
 * New `--metrics-auth user:password` flag (and `TESTINGBOT_METRICS_AUTH` env var) for optional HTTP Basic auth on `/metrics`
