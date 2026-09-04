@@ -142,9 +142,31 @@ class ForwarderBodyLoggingTest {
             while ((n = socket.getInputStream().read(buffer)) > 0) {
                 response.append(new String(buffer, 0, n, StandardCharsets.UTF_8));
             }
-            Thread.sleep(200);
             return response.toString();
         }
+    }
+
+    /**
+     * Waits for the relay to have logged {@code fragment}, up to two seconds.
+     *
+     * <p>The log record is written after the response has been relayed, so a test that reads the
+     * response and asserts immediately is racing it. This used to be a fixed 200ms sleep in
+     * post(), which held on a developer machine and failed on two of the three JDKs in CI --
+     * the body was logged there too, just after the assertion had already run.
+     *
+     * @return every captured message, joined, so the caller can assert on the content
+     */
+    private String awaitLog(String fragment) throws InterruptedException {
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        String log = "";
+        while (System.nanoTime() < deadline) {
+            log = String.join("\n", captured.messages());
+            if (log.contains(fragment)) {
+                return log;
+            }
+            Thread.sleep(20);
+        }
+        return log;
     }
 
     private static final String CAPABILITIES =
@@ -164,7 +186,7 @@ class ForwarderBodyLoggingTest {
                 .as("the body must reach the hub byte for byte")
                 .containsExactly(CAPABILITIES);
 
-        String log = String.join("\n", captured.messages());
+        String log = awaitLog("body:");
         assertThat(log).contains("body:");
         assertThat(log)
                 .as("credentials from the capabilities must not reach the log")
@@ -184,7 +206,7 @@ class ForwarderBodyLoggingTest {
 
         post(relayPort, CAPABILITIES);
 
-        String log = String.join("\n", captured.messages());
+        String log = awaitLog("body:");
         assertThat(log).contains("Content-Type: application/json");
         assertThat(log).contains("body:");
     }
@@ -196,7 +218,11 @@ class ForwarderBodyLoggingTest {
         post(relayPort, CAPABILITIES);
 
         assertThat(received).containsExactly(CAPABILITIES);
-        assertThat(String.join("\n", captured.messages()))
+        // Wait for the record this level *does* emit before asserting what is missing from it.
+        // Asserting on an empty capture would pass for the wrong reason -- and keep passing if
+        // body logging were switched on for every level.
+        String log = awaitLog("/wd/hub/session");
+        assertThat(log)
                 .as("a body should never appear unless it was asked for")
                 .doesNotContain("body:")
                 .doesNotContain("REAL-KEY-abc");
