@@ -90,7 +90,7 @@ class SshHttpProxyTest {
     void sendsBasicCredentialsWhenConfigured() throws Exception {
         AtomicReference<List<String>> seen = startProxy("HTTP/1.1 200 OK\r\n\r\n");
         client = new SshHttpProxy("127.0.0.1", proxy.getLocalPort(),
-                ProxyAuthenticator.basic("user:secret"));
+                ProxyAuthenticator.basic("user:secret", null));
 
         client.connect(null, "hub.testingbot.com", 443, 5_000);
 

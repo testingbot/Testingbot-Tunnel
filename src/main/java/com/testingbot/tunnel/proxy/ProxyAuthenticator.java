@@ -38,38 +38,61 @@ public final class ProxyAuthenticator {
     private final Scheme scheme;
     private final String basicToken;
     private final SpnegoClient spnego;
+    /**
+     * The one host these credentials belong to, or null for "any".
+     *
+     * <p>They were issued for a named proxy, and a proxy the client happens to dial is not
+     * automatically that proxy. Nothing bound them before, so
+     * {@code authorizationValue(proxyHost)} ignored its argument and handed the token to
+     * whoever was being connected to -- and with {@code --pac-local} the PAC file chooses that
+     * host per destination.
+     *
+     * <p>Matched on host, not host:port, because that is all the dial sites know at the point
+     * they ask. A different port on the same proxy host is the same proxy in every deployment
+     * this has, and narrowing further would refuse credentials to a proxy that should have them.
+     */
+    private final String authorizedHost;
 
-    private ProxyAuthenticator(Scheme scheme, String basicToken, SpnegoClient spnego) {
+    private ProxyAuthenticator(Scheme scheme, String basicToken, SpnegoClient spnego,
+                               String authorizedHost) {
         this.scheme = scheme;
         this.basicToken = basicToken;
         this.spnego = spnego;
+        this.authorizedHost = authorizedHost == null || authorizedHost.isBlank()
+                ? null
+                : authorizedHost.trim().toLowerCase(Locale.ROOT);
     }
 
     /** No upstream authentication configured. */
     public static ProxyAuthenticator none() {
-        return new ProxyAuthenticator(Scheme.BASIC, null, null);
+        return new ProxyAuthenticator(Scheme.BASIC, null, null, null);
     }
 
-    public static ProxyAuthenticator basic(String userPassword) {
+    /**
+     * @param authorizedHost the proxy these credentials are for; null means any host, which is
+     *                       only appropriate in tests
+     */
+    public static ProxyAuthenticator basic(String userPassword, String authorizedHost) {
         if (userPassword == null || userPassword.isEmpty()) {
             return none();
         }
         return new ProxyAuthenticator(Scheme.BASIC,
                 Base64.getEncoder().encodeToString(userPassword.getBytes(StandardCharsets.UTF_8)),
-                null);
+                null, authorizedHost);
     }
 
-    public static ProxyAuthenticator negotiate(SpnegoClient spnego) {
-        return new ProxyAuthenticator(Scheme.NEGOTIATE, null, spnego);
+    public static ProxyAuthenticator negotiate(SpnegoClient spnego, String authorizedHost) {
+        return new ProxyAuthenticator(Scheme.NEGOTIATE, null, spnego, authorizedHost);
     }
 
     /** Chooses from the parsed command line. */
     public static ProxyAuthenticator create(Scheme scheme, String userPassword,
-                                            String servicePrincipal, Path keyTab, String principal) {
+                                            String servicePrincipal, Path keyTab, String principal,
+                                            String authorizedHost) {
         if (scheme == Scheme.NEGOTIATE) {
-            return negotiate(new SpnegoClient(servicePrincipal, keyTab, principal));
+            return negotiate(new SpnegoClient(servicePrincipal, keyTab, principal), authorizedHost);
         }
-        return basic(userPassword);
+        return basic(userPassword, authorizedHost);
     }
 
     public Scheme getScheme() {
@@ -90,6 +113,16 @@ public final class ProxyAuthenticator {
      *         or null when nothing is configured or a token could not be obtained
      */
     public String authorizationValue(String proxyHost) {
+        if (!isAuthorizedPeer(proxyHost)) {
+            // Logged rather than silent: the request will come back as a 407 from a proxy the
+            // operator did not expect to be talking to, and "no credentials were sent, and why"
+            // is the only thing that makes that traceable.
+            LOG.log(Level.WARNING,
+                    "Not sending upstream proxy credentials to {0}: they are configured for {1}."
+                    + " A proxy chosen by --pac-local is not the proxy they were issued for.",
+                    new Object[]{proxyHost, authorizedHost});
+            return null;
+        }
         if (scheme == Scheme.NEGOTIATE) {
             if (spnego == null) {
                 return null;
@@ -107,6 +140,19 @@ public final class ProxyAuthenticator {
             }
         }
         return basicToken == null ? null : "Basic " + basicToken;
+    }
+
+    /**
+     * True when {@code proxyHost} is the peer these credentials were issued for.
+     *
+     * <p>An unconfigured authenticator has nothing to give away, so it is not restricted; a null
+     * {@code authorizedHost} means no peer was named, which only happens in tests.
+     */
+    public boolean isAuthorizedPeer(String proxyHost) {
+        if (!isConfigured() || authorizedHost == null) {
+            return true;
+        }
+        return proxyHost != null && authorizedHost.equals(proxyHost.trim().toLowerCase(Locale.ROOT));
     }
 
     /** The SPN that would be used, for diagnostics. Null unless Negotiate is configured. */

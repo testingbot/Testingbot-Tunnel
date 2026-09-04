@@ -115,7 +115,10 @@ java -jar testingbot-tunnel.jar --doctor
   TestingBot itself -- the API and the SSH control connection. For networks where the proxy
   allowed out to the internet is not the one that reaches internal test targets. Credentials are
   deliberately *not* inherited from `--proxy-userpwd`: they belong to a different proxy
-- `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy
+- `--proxy-auth-scheme`: `basic` (default) or `negotiate` (SPNEGO/Kerberos) for the upstream proxy.
+  Credentials are bound to the host `--proxy` names and are withheld from any other peer, so a
+  proxy chosen by `--pac-local` receives none and the request comes back as a 407 with a warning
+  saying why. The same rule applies to the SOCKS5 username and password
 - `--proxy-spn`, `--krb5-keytab`, `--krb5-principal`: Kerberos settings for `negotiate`
 - `--log-format`: `text` (default) or `json`. JSON emits one object per record, so a collector
   need not guess where a multi-line message or a stack trace ends

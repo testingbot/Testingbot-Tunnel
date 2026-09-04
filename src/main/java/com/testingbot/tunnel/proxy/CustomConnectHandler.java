@@ -96,6 +96,17 @@ public class CustomConnectHandler extends ConnectHandler {
     }
 
     /**
+     * True when {@code upstream} is the proxy {@code --proxy} named.
+     *
+     * <p>{@code --pac-local} picks the egress per destination, so the proxy being dialled is not
+     * necessarily the one the credentials were issued for.
+     */
+    private boolean isConfiguredProxy(ProxySpec upstream) {
+        return proxySpec != null && upstream != null
+                && proxySpec.getHost().equalsIgnoreCase(upstream.getHost());
+    }
+
+    /**
      * Resolves the CONNECT target through the configured DNS server when there is one.
      * ConnectHandler calls this for every tunnel it opens, so it is the single place the
      * CONNECT path needs to honour --dns.
@@ -578,7 +589,13 @@ public class CustomConnectHandler extends ConnectHandler {
 
         Socks5HandshakeConnection(EndPoint endPoint, ConnectContext context, ProxyTarget target) {
             super(endPoint, context, target);
-            String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
+            // Same rule as Proxy-Authorization: the username and password were issued for the
+            // configured --proxy, and a SOCKS proxy named by --pac-local is not that proxy.
+            // Checked against proxySpec rather than the authenticator, which is deliberately
+            // none() on the SOCKS path -- asking it would always answer "authorized".
+            String[] credentials = isConfiguredProxy(target.upstream())
+                    ? TunnelProxyHandler.splitCredentials(proxyUserPassword)
+                    : null;
             this.handshake = new Socks5Handshake(target.host(), target.port(),
                     credentials == null ? null : credentials[0],
                     credentials == null ? null : credentials[1]);

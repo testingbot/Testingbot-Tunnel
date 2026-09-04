@@ -1572,7 +1572,17 @@ public class App {
                 com.testingbot.tunnel.proxy.ProxyAuthenticator.Scheme.parse(proxyAuthScheme),
                 getProxyAuth(), proxySpn,
                 krb5KeyTab == null ? null : java.nio.file.Path.of(krb5KeyTab),
-                krb5Principal);
+                krb5Principal,
+                // Bound to the proxy the credentials were given for. --pac-local can name a
+                // different one per destination, and that proxy is not this one.
+                proxyHostOf(getProxy()));
+    }
+
+    /** @return the host part of a {@code host:port} proxy value, or null when unset */
+    static String proxyHostOf(String proxy) {
+        com.testingbot.tunnel.proxy.ProxySpec spec =
+                com.testingbot.tunnel.proxy.ProxySpec.parse(proxy);
+        return spec == null ? null : spec.getHost();
     }
 
     public String getLogHttp() {
@@ -1920,7 +1930,8 @@ public class App {
                 com.testingbot.tunnel.proxy.ProxyAuthenticator.Scheme.parse(proxyAuthScheme),
                 getControlProxyAuth(), proxySpn,
                 krb5KeyTab == null ? null : java.nio.file.Path.of(krb5KeyTab),
-                krb5Principal);
+                krb5Principal,
+                proxyHostOf(controlProxy));
     }
 
     /** Per-query timeout for the {@code --dns} servers. */

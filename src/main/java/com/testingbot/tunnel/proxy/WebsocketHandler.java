@@ -102,6 +102,12 @@ public class WebsocketHandler extends ConnectHandler {
         this.proxyUserPassword = proxyUserPassword;
     }
 
+    /** True when {@code upstream} is the proxy {@code --proxy} named; see CustomConnectHandler. */
+    private boolean isConfiguredProxy(ProxySpec upstream) {
+        return proxySpec != null && upstream != null
+                && proxySpec.getHost().equalsIgnoreCase(upstream.getHost());
+    }
+
     /**
      * The proxy to route this destination through, or null to dial it directly.
      *
@@ -439,7 +445,10 @@ public class WebsocketHandler extends ConnectHandler {
             this.context = context;
             this.proxyTarget = proxyTarget;
             if (proxyTarget != null && proxyTarget.upstream().isSocks5()) {
-                String[] credentials = TunnelProxyHandler.splitCredentials(proxyUserPassword);
+                // Same rule as Proxy-Authorization; see CustomConnectHandler.isConfiguredProxy.
+                String[] credentials = isConfiguredProxy(proxyTarget.upstream())
+                        ? TunnelProxyHandler.splitCredentials(proxyUserPassword)
+                        : null;
                 this.socks = new Socks5Handshake(proxyTarget.host(), proxyTarget.port(),
                         credentials == null ? null : credentials[0],
                         credentials == null ? null : credentials[1]);

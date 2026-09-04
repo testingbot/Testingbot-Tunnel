@@ -155,6 +155,21 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         return proxyAuthHeaderValue;
     }
 
+    /**
+     * True when this request will travel inside a CONNECT tunnel rather than to the proxy.
+     *
+     * <p>jetty-client tunnels whenever the origin is secure and an HTTP proxy is configured
+     * ({@code HttpProxy.requiresTunnel}), and everything put in the request headers then goes to
+     * the origin. With no upstream proxy there is no tunnel and nothing to withhold.
+     */
+    boolean isTunnelledToOrigin(org.eclipse.jetty.client.Request proxyToServerRequest) {
+        return upstreamHttpProxyHost != null
+                && org.eclipse.jetty.http.HttpScheme.HTTPS.is(
+                        proxyToServerRequest.getURI() == null
+                                ? proxyToServerRequest.getScheme()
+                                : proxyToServerRequest.getURI().getScheme());
+    }
+
     /** Splits "user:password"; the password may itself contain colons. */
     static String[] splitCredentials(String userPassword) {
         if (userPassword == null || userPassword.isEmpty()) {
@@ -696,9 +711,18 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         super.addProxyHeaders(clientToProxyRequest, proxyToServerRequest);
 
         proxyToServerRequest.headers(fields -> {
-            String upstreamAuthorization = upstreamAuthorization();
-            if (upstreamAuthorization != null) {
-                fields.put(HttpHeader.PROXY_AUTHORIZATION, upstreamAuthorization);
+            // Only when this request will actually be sent to the proxy in the clear. For a
+            // secure origin jetty-client asks the proxy for a CONNECT tunnel and then sends the
+            // request *inside* it, so these headers reach the origin instead -- and the upstream
+            // proxy credential would be read out of an arbitrary internet host's access log. An
+            // https absolute-form request reaches here whenever a client sends one to this port,
+            // and also with no attacker at all where a bumping upstream Squid re-issues requests
+            // in that shape. Mirrors jetty-client's own HttpProxy.requiresTunnel test.
+            if (!isTunnelledToOrigin(proxyToServerRequest)) {
+                String upstreamAuthorization = upstreamAuthorization();
+                if (upstreamAuthorization != null) {
+                    fields.put(HttpHeader.PROXY_AUTHORIZATION, upstreamAuthorization);
+                }
             }
             // Site credentials, sent pre-emptively. Never over one the client supplied: it
             // meant what it sent, and overwriting it would be a surprising thing for a proxy

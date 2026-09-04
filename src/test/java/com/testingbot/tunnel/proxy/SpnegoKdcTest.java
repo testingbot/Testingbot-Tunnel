@@ -146,7 +146,7 @@ class SpnegoKdcTest {
         // What actually goes on the wire.
         ProxyAuthenticator authenticator = ProxyAuthenticator.create(
                 ProxyAuthenticator.Scheme.NEGOTIATE, null, SERVICE_PRINCIPAL, keyTab,
-                CLIENT_PRINCIPAL + "@" + REALM);
+                CLIENT_PRINCIPAL + "@" + REALM, null);
 
         String value = authenticator.authorizationValue(PROXY_HOST);
 
@@ -244,7 +244,7 @@ class SpnegoKdcTest {
         // connect path; --doctor is where the explanation lives.
         ProxyAuthenticator authenticator = ProxyAuthenticator.create(
                 ProxyAuthenticator.Scheme.NEGOTIATE, null,
-                "HTTP/not-registered.testingbot.test", keyTab, CLIENT_PRINCIPAL + "@" + REALM);
+                "HTTP/not-registered.testingbot.test", keyTab, CLIENT_PRINCIPAL + "@" + REALM, null);
 
         assertThat(authenticator.authorizationValue("not-registered.testingbot.test")).isNull();
     }
