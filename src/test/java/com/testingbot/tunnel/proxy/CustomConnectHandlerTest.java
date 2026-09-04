@@ -77,17 +77,29 @@ class CustomConnectHandlerTest {
     @Test
     void setBlackList_silentlyIgnoresInvalidRegex() {
         handler = new CustomConnectHandler(app);
-        // Should not throw on a regex with an unclosed group; just logs and drops it.
-        assertThatCode(() -> handler.setBlackList(new String[]{"valid\\.com", "(unclosed"}))
-            .doesNotThrowAnyException();
+        handler.setBlackList(new String[]{"valid\\.com", "(unclosed"});
+
+        // Not just "did not throw", which held if the bad entry took the good one down with it
+        // or if setBlackList did nothing at all. The valid pattern must survive its neighbour.
+        assertThat(handler.validateDestination("valid.com", 443)).isFalse();
+        assertThat(handler.validateDestination("elsewhere.com", 443)).isTrue();
     }
 
     @Test
     void setBlackList_handlesNullAndEmpty() {
         handler = new CustomConnectHandler(app);
-        assertThatCode(() -> handler.setBlackList(null)).doesNotThrowAnyException();
-        assertThatCode(() -> handler.setBlackList(new String[]{})).doesNotThrowAnyException();
-        assertThatCode(() -> handler.setBlackList(new String[]{"", null, "  "})).doesNotThrowAnyException();
+
+        // Each of these must leave the handler permitting everything, rather than merely not
+        // throwing -- a blank entry compiled into a pattern would match every host and refuse
+        // the lot, which "did not throw" could never have detected.
+        handler.setBlackList(null);
+        assertThat(handler.validateDestination("anything.com", 443)).isTrue();
+
+        handler.setBlackList(new String[]{});
+        assertThat(handler.validateDestination("anything.com", 443)).isTrue();
+
+        handler.setBlackList(new String[]{"", null, "  "});
+        assertThat(handler.validateDestination("anything.com", 443)).isTrue();
     }
 
     @Test

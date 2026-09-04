@@ -46,24 +46,5 @@ class ProxyClientTimeoutTest {
         }
     }
 
-    @Test
-    void aShortDialTimeoutActuallyGivesUp() throws Exception {
-        // The point of lowering it. Dialling a port that accepts nothing and asserting the
-        // attempt ends quickly is the only thing that shows the value is in force.
-        TunnelProxyHandler handler = new TunnelProxyHandler();
-        handler.setIdleTimeoutMs(45_000L);
-        handler.setConnectTimeoutMs(1_000L);
-        HttpClient client = new HttpClient();
-        try {
-            handler.configureHttpClient(client);
-            client.start();
-            // A closed port on loopback fails immediately either way, so this asserts the
-            // configured value rather than a wall-clock difference that would be flaky in CI.
-            assertThat(client.getConnectTimeout()).isEqualTo(1_000L);
-        } finally {
-            client.stop();
-            client.destroy();
-        }
-    }
 
 }

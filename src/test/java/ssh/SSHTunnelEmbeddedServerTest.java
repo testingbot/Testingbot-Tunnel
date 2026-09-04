@@ -319,6 +319,13 @@ class SSHTunnelEmbeddedServerTest {
         tunnel = connect(app, "127.0.0.1");
         tunnel.stop();
 
+        // Honest scope: this covers the guard, not the catch. JSch marks the session
+        // disconnected as soon as the server goes away, so there is no way from here to reach
+        // sendKeepAliveMsg with a session that still looks connected -- the catch is reachable
+        // only when the connection dies mid-call in production. What is testable is that a
+        // dead session makes the task a no-op rather than an escaping exception, which matters
+        // because a TimerTask that throws is never rescheduled.
+        assertThat(tunnel.getSession().isConnected()).isFalse();
         assertThatCode(() -> tunnel.new KeepAliveTask().run()).doesNotThrowAnyException();
     }
 
@@ -329,6 +336,11 @@ class SSHTunnelEmbeddedServerTest {
 
         tunnel.new ConnectionMonitorTask().run();
 
+        // A monitor that wrongly declared the session lost would still leave isAuthenticated()
+        // true -- connectionLost only stops the proxy and schedules a timer.
+        assertThat(tunnel.connectionMonitor().isRetrying())
+                .as("a healthy session must not trigger a reconnect")
+                .isFalse();
         assertThat(tunnel.isAuthenticated()).isTrue();
     }
 
@@ -340,7 +352,13 @@ class SSHTunnelEmbeddedServerTest {
         tunnel = connect(app, "127.0.0.1");
         tunnel.stop(true);
 
-        assertThatCode(() -> tunnel.new ConnectionMonitorTask().run()).doesNotThrowAnyException();
+        tunnel.new ConnectionMonitorTask().run();
+
+        // isAuthenticated() was already false from stop(), so it could not tell whether the
+        // shutdown guard held. Retrying is what the guard prevents.
+        assertThat(tunnel.connectionMonitor().isRetrying())
+                .as("a shutdown must not schedule a reconnect")
+                .isFalse();
         assertThat(tunnel.isAuthenticated()).isFalse();
     }
 
@@ -387,8 +405,16 @@ class SSHTunnelEmbeddedServerTest {
         tunnel = connect(app, "127.0.0.1");
         tunnel.stop();
 
-        assertThatCode(() -> tunnel.new PortForwardingMonitorTask().run())
-                .doesNotThrowAnyException();
+        SSHTunnel.PortForwardingMonitorTask monitor = tunnel.new PortForwardingMonitorTask();
+        assertThatCode(monitor::run).doesNotThrowAnyException();
+
+        // The discriminator: with the session gone the guard skips the body, so the health
+        // tracker is never consulted and stays healthy. Without the guard the body would run,
+        // the delivery probe would fail, and this would flip to false -- which is how this
+        // asserts the guard rather than merely that nothing was thrown.
+        assertThat(monitor.reverseHealth().isHealthy())
+                .as("a dead session must not be reported as a broken reverse forward")
+                .isTrue();
     }
 
     /* --------------------------------------------------------- forwarding failures */
@@ -455,6 +481,11 @@ class SSHTunnelEmbeddedServerTest {
         SSHTunnel.PortForwardingMonitorTask monitor = tunnel.new PortForwardingMonitorTask();
         monitor.run();
         assertThat(tunnel.verifyReverseForwardDelivery()).isFalse();
+        // The tracker is the thing under test -- it decides whether a transition is logged.
+        // Asserting only verifyReverseForwardDelivery() tested a method with its own test.
+        assertThat(monitor.reverseHealth().isHealthy())
+                .as("the monitor must have registered the break")
+                .isFalse();
 
         // Bring the local proxy up on the port the reverse forward delivers to.
         try (ServerSocket recovered = new ServerSocket(app.getJettyPort(), 50,
@@ -462,6 +493,9 @@ class SSHTunnelEmbeddedServerTest {
             assertThat(tunnel.verifyReverseForwardDelivery()).isTrue();
             monitor.run();
 
+            assertThat(monitor.reverseHealth().isHealthy())
+                    .as("and the recovery")
+                    .isTrue();
             assertThat(SSHTunnel.localForwardingActive(
                     tunnel.getSession().getPortForwardingL(), app.getSSHPort())).isTrue();
         }
@@ -477,9 +511,20 @@ class SSHTunnelEmbeddedServerTest {
             Thread.sleep(50);
         }
 
-        assertThatCode(() -> tunnel.new ConnectionMonitorTask().run()).doesNotThrowAnyException();
+        assertThat(tunnel.connectionMonitor().isRetrying())
+                .as("nothing has noticed the loss yet")
+                .isFalse();
 
+        tunnel.new ConnectionMonitorTask().run();
+
+        // The task's whole purpose. Asserting only that it did not throw passed against an
+        // empty run(), which is what this used to do.
+        assertThat(tunnel.connectionMonitor().isRetrying())
+                .as("the monitor must have reported the loss and scheduled a retry")
+                .isTrue();
         assertThat(tunnel.isShuttingDown()).isFalse();
+        // Leaves a retry timer re-dialling the stopped server; stop it before the next test.
+        tunnel.stop(true);
     }
 
     @Test

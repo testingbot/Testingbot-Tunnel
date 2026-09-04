@@ -382,8 +382,24 @@ public class SSHTunnel implements ReconnectableTunnel {
         }
     }
 
+    /**
+     * The monitor the connection task drives.
+     *
+     * <p>Exposed for tests: the task's whole purpose is to call {@code connectionLost} when the
+     * session goes away, and without this they could only assert that running it threw nothing,
+     * which an empty method body satisfies.
+     */
+    CustomConnectionMonitor connectionMonitor() {
+        return connectionMonitor;
+    }
+
     class PortForwardingMonitorTask extends TimerTask {
         private final ReverseHealthTracker reverseHealth = new ReverseHealthTracker();
+
+        /** Exposed for the same reason as {@link SSHTunnel#connectionMonitor()}. */
+        ReverseHealthTracker reverseHealth() {
+            return reverseHealth;
+        }
 
         @Override
         public void run() {

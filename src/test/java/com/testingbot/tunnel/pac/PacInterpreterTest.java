@@ -275,12 +275,14 @@ class PacInterpreterTest {
         assertThatThrownBy(() -> of("function FindProxyForURL(url, host) {\n"
                 + " if (/x/.test(host)) return 'DIRECT';\n}"))
                 .isInstanceOf(PacException.class)
-                .hasMessageContaining("Regular expressions");
+                .hasMessageContaining("Regular expressions")
+                .hasMessageContaining("line 2");
 
         assertThatThrownBy(() -> of("function FindProxyForURL(url, host) {\n"
                 + " var d = new Date();\n}"))
                 .isInstanceOf(PacException.class)
-                .hasMessageContaining("'new'");
+                .hasMessageContaining("'new'")
+                .hasMessageContaining("line 2");
     }
 
     @Test
@@ -301,7 +303,10 @@ class PacInterpreterTest {
     void unterminatedConstructsReportTheLine() {
         assertThatThrownBy(() -> of("function FindProxyForURL(url, host) {\n return 'unclosed;\n}"))
                 .isInstanceOf(PacException.class)
-                .hasMessageContaining("Unterminated string");
+                .hasMessageContaining("Unterminated string")
+                // The line is the whole point: "unsupported syntax" without a location is
+                // unactionable on a generated or decades-old PAC file.
+                .hasMessageContaining("line 2");
     }
 
     @Test

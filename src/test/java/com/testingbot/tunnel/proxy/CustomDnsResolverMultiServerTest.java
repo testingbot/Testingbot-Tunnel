@@ -309,4 +309,26 @@ class CustomDnsResolverMultiServerTest {
             return true;
         }
     }
+
+    /**
+     * An IP literal must not be sent to a DNS server at all.
+     *
+     * <p>Asserted by counting queries. The version of this test that lived in
+     * CustomDnsResolverTest pointed at a dead port and asserted the literal came back, which
+     * held with the shortcut deleted too: the query simply failed and the platform fallback
+     * returned the literal anyway. Verified by removing the shortcut -- that version stayed
+     * green, this one does not.
+     */
+    @Test
+    void ipLiteralsAreNeverQueried() throws Exception {
+        try (FakeDns dns = new FakeDns("irrelevant.example", "203.0.113.9", false)) {
+            CustomDnsResolver resolver = CustomDnsResolver.create("127.0.0.1:" + dns.port());
+
+            assertThat(resolver.resolve("198.51.100.4")[0].getHostAddress())
+                    .isEqualTo("198.51.100.4");
+            assertThat(dns.queryCount())
+                    .as("an IP literal needs no resolution")
+                    .isZero();
+        }
+    }
 }

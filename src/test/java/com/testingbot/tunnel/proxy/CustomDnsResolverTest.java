@@ -100,13 +100,6 @@ class CustomDnsResolverTest {
         assertThat(addresses[0].getHostAddress()).isEqualTo("203.0.113.7");
     }
 
-    @Test
-    void ipLiteralsSkipTheLookupEntirely() throws Exception {
-        // No server started: if a query were attempted this would fail.
-        CustomDnsResolver resolver = CustomDnsResolver.create("127.0.0.1:1");
-
-        assertThat(resolver.resolve("198.51.100.4")[0].getHostAddress()).isEqualTo("198.51.100.4");
-    }
 
     @Test
     void blankServer_yieldsNoResolver() {

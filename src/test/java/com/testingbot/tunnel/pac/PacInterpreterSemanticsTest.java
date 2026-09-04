@@ -289,6 +289,13 @@ class PacInterpreterSemanticsTest {
         assertThat(system.weekdayRange(List.of("SUN", "SAT"))).isTrue();
         assertThat(system.timeRange(List.of("0", "24"))).isTrue();
         assertThat(system.dateRange(List.of("1", "31"))).isTrue();
+
+        // Clock-independent negatives. Without these the environment could be wired to a stub
+        // that answers true to everything and this would still pass -- an always-true predicate
+        // routes every destination down whichever branch the PAC file guards with it.
+        assertThat(system.weekdayRange(List.of("FUNDAY"))).isFalse();
+        assertThat(system.timeRange(List.of("NOON"))).isFalse();
+        assertThat(system.dateRange(List.of("NOTADATE"))).isFalse();
     }
 
     @Test

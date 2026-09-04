@@ -325,7 +325,9 @@ class PacPolicyTest {
         // --pac-test must not warm a cache the running tunnel would then reuse.
         PacPolicy policy = PacPolicy.of(SIMPLE, "inline");
 
-        policy.evaluateUncached("http://a.corp/", "a.corp");
+        // The result matters as well as the empty cache: asserting only cacheSize() == 0 passed
+        // against an evaluateUncached that did nothing at all.
+        assertThat(policy.evaluateUncached("http://a.corp/", "a.corp").isDirect()).isTrue();
 
         assertThat(policy.cacheSize()).isZero();
     }

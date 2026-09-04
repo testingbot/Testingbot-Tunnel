@@ -41,11 +41,22 @@ class SchedulerTest {
     void cancelStopsFurtherRuns() throws Exception {
         Scheduler scheduler = Scheduler.timerBased();
         AtomicInteger runs = new AtomicInteger();
-        scheduler.scheduleRepeating("repeat", runs::incrementAndGet, 1, 5);
-        Thread.sleep(100);
+        CountDownLatch started = new CountDownLatch(1);
+        scheduler.scheduleRepeating("repeat", () -> {
+            runs.incrementAndGet();
+            started.countDown();
+        }, 1, 5);
+
+        // Wait for the task to have actually run, rather than sleeping and hoping. Without
+        // this the test passed against a scheduleRepeating that did nothing: 0 stays 0 across
+        // a cancel just as convincingly as a real count does.
+        assertThat(started.await(5, TimeUnit.SECONDS))
+                .as("the repeating task must run before cancelling proves anything")
+                .isTrue();
 
         scheduler.cancel();
         int afterCancel = runs.get();
+        assertThat(afterCancel).isPositive();
         Thread.sleep(100);
 
         assertThat(runs.get()).isEqualTo(afterCancel);
@@ -107,10 +118,17 @@ class SchedulerTest {
         AtomicInteger first = new AtomicInteger();
         CountDownLatch second = new CountDownLatch(1);
         try {
-            scheduler.scheduleRepeating("first", first::incrementAndGet, 1, 5);
-            Thread.sleep(50);
+            CountDownLatch firstRan = new CountDownLatch(1);
+            scheduler.scheduleRepeating("first", () -> {
+                first.incrementAndGet();
+                firstRan.countDown();
+            }, 1, 5);
+            // Same reasoning as cancelStopsFurtherRuns: the first task must be established
+            // before replacing it can be shown to have stopped it.
+            assertThat(firstRan.await(5, TimeUnit.SECONDS)).isTrue();
             scheduler.scheduleOnce("second", second::countDown, 1);
             int afterReplace = first.get();
+            assertThat(afterReplace).isPositive();
             assertThat(second.await(5, TimeUnit.SECONDS)).isTrue();
             Thread.sleep(50);
 

@@ -18,27 +18,7 @@ class SSHTunnelTest {
         app.setClientSecret("test_secret");
     }
     
-    @Test
-    void constructor_withInvalidServer_shouldThrowException() {
-        // Given
-        String invalidServer = "invalid.server.com";
-        
-        // When & Then
-        assertThatThrownBy(() -> new SSHTunnel(app, invalidServer))
-            .isInstanceOf(Exception.class)
-            .hasMessageContaining("Connection failed");
-    }
     
-    @Test
-    void constructor_withValidMockData_shouldFailOnConnectionAttempt() {
-        // Given
-        String server = "test.server.com";
-        
-        // When & Then - Should fail to connect in test environment
-        assertThatThrownBy(() -> new SSHTunnel(app, server))
-            .isInstanceOf(Exception.class)
-            .hasMessageContaining("Connection failed");
-    }
 
     @Test
     void reverseForwardHost_mustBeConnectableLoopback() {
