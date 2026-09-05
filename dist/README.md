@@ -51,6 +51,49 @@ check maps to a module that is easy to lose:
 Dropping `jdk.crypto.ec` and re-running the verifier is a quick way to confirm
 the checks still bite: the tunnel then fails to start at all.
 
+## macOS signing and notarization
+
+`dist/sign-macos.sh` signs the bundle, notarizes it, and repacks. The release job
+runs it automatically when `MACOS_CERTIFICATE_P12_BASE64` and
+`APPLE_APP_SPECIFIC_PASSWORD` are set; without them the bundle is still built and
+released, just unsigned, with a workflow warning. A release should not fail
+because a certificate expired.
+
+```bash
+SKIP_NOTARIZE=1 dist/sign-macos.sh testingbot-tunnel-macos-arm64   # sign only, locally
+dist/verify-runtime.sh dist/testingbot-tunnel-macos-arm64          # signed bundle still runs
+```
+
+Secrets, matching the names used elsewhere in the organisation:
+`MACOS_CERTIFICATE_P12_BASE64`, `MACOS_CERTIFICATE_PASSWORD`,
+`MACOS_KEYCHAIN_PASSWORD`, `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, and the
+`MACOS_TEAM_ID` variable.
+
+Three things about this bundle make it unlike signing a single binary:
+
+**Every Mach-O is signed, not just the launcher.** A jlink runtime is a directory
+of about twenty Mach-O files -- `bin/java`, `jspawnhelper`, and the dylibs. There
+is no enclosing `.app` whose signature would cover them, so each is signed on its
+own, deepest first, because signing a binary invalidates the signature of anything
+containing it. The launcher itself is a shell script and is not signed.
+
+**The JVM needs entitlements** (`dist/macos-entitlements.plist`). The hardened
+runtime, which notarization requires, forbids what HotSpot does: JIT compilation,
+writing unsigned executable memory, and loading the runtime's own dylibs. Without
+`disable-library-validation` in particular the signed bundle refuses to start.
+
+**Packing happens after signing.** codesign rewrites every binary, so an archive
+built beforehand -- and its checksum -- describes files that no longer exist.
+`build-runtime.sh` takes `SKIP_ARCHIVE=1` and `archive.sh` runs at the end
+instead.
+
+There is no `stapler staple`. A ticket can only be written into a container that
+has somewhere to put one -- `.app`, `.dmg`, `.pkg`, `.kext` -- and this ships as a
+tarball of plain binaries. Gatekeeper fetches the ticket from Apple on first run
+instead, which works but needs the machine online once. Shipping a `.pkg`
+alongside would make it offline-proof, and is the natural next step if that
+matters.
+
 ## Not done: a single native binary
 
 GraalVM `native-image` would produce one file with faster startup, closer to what

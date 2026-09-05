@@ -97,36 +97,11 @@ LAUNCH
   chmod +x "$OUT/bin/testingbot-tunnel"
 fi
 
-# SHA-256 beside the archive, in the "HASH  FILE" form `sha256sum -c` reads back.
-# Emitted here rather than in the release workflow so a local build and a released
-# artifact are checksummed the same way -- and because a Homebrew formula or a winget
-# manifest needs this value, and a hash produced by a different path is one more thing
-# that can disagree.
-#
-# The three tools are not interchangeable in output: sha256sum and `shasum -a 256` print
-# "HASH  FILE", while `openssl dgst -r` prints "HASH *FILE", so the last one is rewritten.
-checksum() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" > "$1.sha256"
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" > "$1.sha256"
-  elif command -v openssl >/dev/null 2>&1; then
-    openssl dgst -sha256 -r "$1" | sed 's/ \*/  /' > "$1.sha256"
-  else
-    echo "  !! no sha256 tool found; $1.sha256 not written" >&2
-    return 1
-  fi
-  echo "  -> dist/$1.sha256  $(cut -d' ' -f1 < "$1.sha256")"
-}
-
-cd "$ROOT/dist"
-if [ "$OS" = "windows" ]; then
-  zip -qr "$NAME.zip" "$NAME"
-  echo "  -> dist/$NAME.zip"
-  checksum "$NAME.zip"
-else
-  tar czf "$NAME.tar.gz" "$NAME"
-  echo "  -> dist/$NAME.tar.gz"
-  checksum "$NAME.tar.gz"
+# Packing and checksumming live in archive.sh: on macOS the release signs the bundle
+# between here and there, and an archive made before signing would describe files
+# codesign has since rewritten. Skippable so the signing path can pack afterwards.
+if [ "${SKIP_ARCHIVE:-}" != "1" ]; then
+  "$ROOT/dist/archive.sh" "$NAME"
 fi
+cd "$ROOT/dist"
 du -sh "$NAME" | awk '{print "  unpacked: "$1}'

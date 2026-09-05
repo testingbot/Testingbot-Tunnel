@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements for the bundled JVM under the hardened runtime.
+
+  Notarization requires the hardened runtime, which by default forbids exactly the
+  things a JVM does. Each of these is here because HotSpot needs it, not as a
+  convenience:
+
+    allow-jit                        the JIT compiler writes and then executes code
+    allow-unsigned-executable-memory HotSpot generates stubs and interpreter code
+                                     into memory that carries no signature
+    disable-library-validation       the runtime loads its own dylibs (libjvm,
+                                     libjava, libnio and the rest) from the bundle;
+                                     library validation would refuse any not signed
+                                     by the same team as the main binary
+
+  Nothing broader is granted: no network entitlement is needed for a CLI tool, and
+  no disable-executable-page-protection, which would weaken more than the JIT needs.
+-->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key>
+  <true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+  <true/>
+  <key>com.apple.security.cs.disable-library-validation</key>
+  <true/>
+</dict>
+</plist>

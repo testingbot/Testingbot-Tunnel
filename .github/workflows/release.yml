@@ -86,6 +86,12 @@ jobs:
           - os: windows-latest
             asset: testingbot-tunnel-windows-x64
     runs-on: ${{ matrix.os }}
+    env:
+      # secrets.* cannot be used in `if:`, so surface their presence as an env value.
+      # Without them the macOS bundle is still built and released, just unsigned --
+      # a release must not silently fail because a certificate expired.
+      HAS_SIGNING: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' }}
+      TEAM_ID: ${{ vars.MACOS_TEAM_ID }}
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -107,9 +113,62 @@ jobs:
       shell: bash
       run: mvn -B -DskipTests package
 
+    # SKIP_ARCHIVE on macOS when signing: codesign rewrites every binary, so the
+    # bundle is packed after signing instead. Every other platform packs here.
     - name: Build self-contained runtime
       shell: bash
+      env:
+        SKIP_ARCHIVE: ${{ runner.os == 'macOS' && env.HAS_SIGNING == 'true' && '1' || '0' }}
       run: dist/build-runtime.sh
+
+    # ---- macOS signing, only when the certificate secrets are configured ----
+
+    - name: Import signing certificate
+      if: runner.os == 'macOS' && env.HAS_SIGNING == 'true'
+      env:
+        P12_B64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+        P12_PASS: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+        KC_PASS: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+      run: |
+        set -euo pipefail
+        KEYCHAIN="$RUNNER_TEMP/testingbot-signing.keychain-db"
+        security create-keychain -p "$KC_PASS" "$KEYCHAIN"
+        security set-keychain-settings -lut 21600 "$KEYCHAIN"
+        security unlock-keychain -p "$KC_PASS" "$KEYCHAIN"
+        echo "$P12_B64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+        security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" \
+          -P "$P12_PASS" -T /usr/bin/codesign
+        # Default and searchable, so codesign and notarytool find the identity
+        # and the stored profile.
+        security list-keychains -d user -s "$KEYCHAIN" login.keychain-db
+        security default-keychain -s "$KEYCHAIN"
+        security set-key-partition-list -S apple-tool:,apple:,codesign: \
+          -s -k "$KC_PASS" "$KEYCHAIN" >/dev/null
+        rm -f "$RUNNER_TEMP/cert.p12"
+
+    - name: Set up notarytool credentials
+      if: runner.os == 'macOS' && env.HAS_SIGNING == 'true'
+      env:
+        APPLE_ID: ${{ secrets.APPLE_ID }}
+        APPLE_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      run: |
+        set -euo pipefail
+        # sign-macos.sh looks this profile up by name.
+        xcrun notarytool store-credentials testingbot-notary \
+          --apple-id "$APPLE_ID" \
+          --team-id "$TEAM_ID" \
+          --password "$APPLE_PASSWORD"
+
+    # Signs every Mach-O in the jlink runtime, notarizes, then packs and
+    # checksums the bundle.
+    - name: Sign and notarize the macOS bundle
+      if: runner.os == 'macOS' && env.HAS_SIGNING == 'true'
+      run: dist/sign-macos.sh "${{ matrix.asset }}" testingbot-notary
+
+    - name: Warn when the macOS bundle is unsigned
+      if: runner.os == 'macOS' && env.HAS_SIGNING != 'true'
+      run: |
+        echo "::warning::macOS bundle released unsigned -- Gatekeeper will quarantine it. Set MACOS_CERTIFICATE_P12_BASE64 and APPLE_APP_SPECIFIC_PASSWORD."
 
     # Without credentials this still covers the module set that matters most:
     # startup, TLS and DNS via --doctor. The live tunnel checks are skipped.
