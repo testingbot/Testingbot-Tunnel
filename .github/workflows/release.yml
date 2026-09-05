@@ -48,12 +48,19 @@ jobs:
         VERSION=${GITHUB_REF#refs/tags/v}
         mkdir -p release-assets
         cp target/TestingBotTunnel-${VERSION}-shaded.jar release-assets/TestingBotTunnel-${VERSION}.jar
+        # Same "HASH  FILE" form dist/build-runtime.sh writes, so every asset in a release
+        # is verified the same way. Relative to the file, so `sha256sum -c` works from the
+        # directory a user downloaded into.
+        cd release-assets
+        sha256sum "TestingBotTunnel-${VERSION}.jar" > "TestingBotTunnel-${VERSION}.jar.sha256"
 
     # Upload the runnable JAR as a release asset
     - name: Upload JAR to GitHub Releases
       uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
       with:
-        files: release-assets/TestingBotTunnel-*.jar
+        files: |
+          release-assets/TestingBotTunnel-*.jar
+          release-assets/TestingBotTunnel-*.jar.sha256
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -116,6 +123,8 @@ jobs:
         files: |
           dist/${{ matrix.asset }}.tar.gz
           dist/${{ matrix.asset }}.zip
+          dist/${{ matrix.asset }}.tar.gz.sha256
+          dist/${{ matrix.asset }}.zip.sha256
         fail_on_unmatched_files: false
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

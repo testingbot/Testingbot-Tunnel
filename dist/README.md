@@ -12,6 +12,19 @@ dist/verify-runtime.sh dist/testingbot-tunnel-macos-arm64
 Result: ~24 MB compressed, ~38 MB unpacked, launched with
 `bin/testingbot-tunnel` (`bin\testingbot-tunnel.cmd` on Windows).
 
+Each archive gets a `.sha256` beside it, in the `HASH  FILE` form `sha256sum -c`
+reads back:
+
+```bash
+cd dist && sha256sum -c testingbot-tunnel-linux-x64.tar.gz.sha256
+```
+
+Written here rather than in the release workflow so a local build and a released
+artifact are checksummed by the same code. The release job uploads these
+alongside the archives, and does the same for the runnable jar. A Homebrew
+formula or a winget manifest needs exactly this value, and one produced by a
+separate path is one more thing that can disagree.
+
 `jlink` emits a runtime for the platform and architecture it runs on, so each
 target is built on its own runner. The `native` job in
 `.github/workflows/release.yml` covers linux x64/arm64, macOS x64/arm64 and
