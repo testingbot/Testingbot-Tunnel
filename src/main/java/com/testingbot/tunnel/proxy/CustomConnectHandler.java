@@ -729,17 +729,10 @@ public class CustomConnectHandler extends ConnectHandler {
         return connect.toString();
     }
 
-    // Parse "HTTP/1.x NNN reason" and return true iff NNN is in [200, 299].
+    // Parse "HTTP/1.x NNN reason" and return true iff NNN is in [200, 299]. Kept as a method
+    // here because the framing tests address it by this name; the parsing itself is shared with
+    // the WebSocket relay, which had its own and looser version.
     static boolean isSuccessfulConnect(String statusLine) {
-        if (statusLine == null) return false;
-        String[] parts = statusLine.split(" ", 3);
-        if (parts.length < 2) return false;
-        if (!parts[0].startsWith("HTTP/")) return false;
-        try {
-            int code = Integer.parseInt(parts[1]);
-            return code >= 200 && code < 300;
-        } catch (NumberFormatException ex) {
-            return false;
-        }
+        return HttpStatusLine.isSuccessfulConnect(statusLine);
     }
 }

@@ -609,7 +609,10 @@ public class WebsocketHandler extends ConnectHandler {
                 }
 
                 String[] lines = response.substring(0, response.indexOf("\r\n\r\n")).split("\r\n");
-                if (lines.length == 0 || !lines[0].contains("101")) {
+                // Was contains("101"), which accepted "HTTP/1.1 2101" and any 500 whose reason
+                // phrase happened to mention 101 -- and then spliced the client to a target that
+                // had refused the upgrade.
+                if (lines.length == 0 || !HttpStatusLine.isSwitchingProtocols(lines[0])) {
                     String answered = lines.length > 0 ? lines[0] : "empty response";
                     // Naming the proxy matters here: in get mode the answer usually comes from
                     // the proxy declining to forward the upgrade, not from the target refusing
