@@ -44,8 +44,10 @@ jobs:
 
     # No versions:set: the tests do not depend on the version, and the smoke test
     # resolves the jar through ${project.build.finalName} rather than globbing.
+    # -Dgpg.skip: signing belongs to the `central` job, which has the key. maven-gpg-plugin
+    # binds to verify, so without this the gate fails on a missing key rather than on a test.
     - name: Verify
-      run: mvn -B verify
+      run: mvn -B verify -Dgpg.skip=true
 
   build:
     runs-on: ubuntu-latest
