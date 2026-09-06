@@ -162,13 +162,32 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <version>3.11.0</version>
+        <executions>
+          <!-- Defines ${org.mockito:mockito-core:jar}, which the surefire argLine below uses to
+               load Mockito as an explicit agent. Without this the property is not expanded and
+               the JVM fails to start with "Error opening zip file or JAR manifest missing". -->
+          <execution>
+            <id>resolve-agent-paths</id>
+            <phase>process-test-classes</phase>
+            <goals><goal>properties</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-surefire-plugin</artifactId>
         <version>3.5.6</version>
         <configuration>
           <includes>
             <include>**/*Test.java</include>
           </includes>
-          <argLine>@{argLine} --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</argLine>
+          <!-- Mockito as an explicit agent rather than self-attaching. It warns that dynamic
+               self-attachment will stop working in a future JDK, and when that happens every
+               test using the inline mock maker fails at once, on a JDK upgrade, with an error
+               that points at the JVM rather than at this line. -->
+          <argLine>@{argLine} -javaagent:${org.mockito:mockito-core:jar} --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED</argLine>
           <forkCount>1</forkCount>
           <reuseForks>false</reuseForks>
         </configuration>

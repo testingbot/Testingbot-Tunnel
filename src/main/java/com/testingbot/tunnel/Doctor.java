@@ -38,6 +38,16 @@ public final class Doctor {
     private boolean hasFailures = false;
 
     public Doctor(App app) {
+        this(app, defaultEndpoints());
+    }
+
+    /**
+     * @param uris what to reach; injected so the tests can exercise the configuration checks
+     *             without leaving the machine. The constructor runs the checks, so every test
+     *             that built a Doctor made four real internet requests -- slow, and failing in
+     *             a sandbox or on a plane for reasons that have nothing to do with the test.
+     */
+    Doctor(App app, ArrayList<URI> uris) {
         this.app = app;
         if (app.getJettyPort() <= 0) {
             // Only when none was configured. Overwriting it meant --doctor --localproxy 9999
@@ -45,18 +55,21 @@ public final class Doctor {
             // configured port being taken, or privileged -- was never tested.
             app.setFreeJettyPort();
         }
+        performChecks(uris);
+    }
+
+    /** The endpoints a real {@code --doctor} run checks. */
+    static ArrayList<URI> defaultEndpoints() {
         ArrayList<URI> uris = new ArrayList<>();
         try {
             uris.add(new URI("https://testingbot.com"));
             uris.add(new URI("http://hub.testingbot.com"));
             uris.add(new URI("https://api.testingbot.com/v1/browsers"));
             uris.add(new URI("https://www.google.com/"));
-        } catch (URISyntaxException e) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
-            hasFailures = true;
+        } catch (URISyntaxException impossible) {
+            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, impossible.getMessage());
         }
-
-        performChecks(uris);
+        return uris;
     }
 
     public boolean hasFailures() {

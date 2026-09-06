@@ -1021,7 +1021,10 @@ public class App {
             applyOptions(app, commandLine);
 
             if (commandLine.hasOption("web")) {
-                new LocalWebServer(commandLine.getOptionValue("web"), app.getBindAddress());
+                // Kept on the App so stop() can shut it down. It used to be constructed and
+                // dropped, which left it serving the directory for the life of the JVM.
+                app.localWebServer = new LocalWebServer(
+                        commandLine.getOptionValue("web"), app.getBindAddress());
             }
 
             app.init();
@@ -1071,6 +1074,8 @@ public class App {
      * installed and the stream already has a shape that must be respected.
      */
     private static volatile String activeLogFormat = "text";
+    /** The --web directory server, or null when --web was not given. */
+    private LocalWebServer localWebServer;
     private PidPoller pidPoller;
     private TunnelPoller poller;
     private HttpForwarder httpForwarder;
@@ -1251,6 +1256,11 @@ public class App {
         }
 
         stopInsightServer();
+
+        if (localWebServer != null) {
+            localWebServer.stop();
+            localWebServer = null;
+        }
 
         if (poller != null) {
             poller.cancel();

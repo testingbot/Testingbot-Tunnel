@@ -17,6 +17,18 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class DoctorScopeTest {
 
+    /**
+     * No endpoints, so these tests do not leave the machine.
+     *
+     * <p>Doctor's constructor runs the checks, so every test here used to make four real
+     * internet requests to assert something about port selection or Kerberos scope -- slow, and
+     * failing in a sandbox for reasons unrelated to what is being tested. The connectivity path
+     * itself is covered by DoctorEgressTest against a local server.
+     */
+    private static java.util.ArrayList<java.net.URI> noEndpoints() {
+        return new java.util.ArrayList<>();
+    }
+
     private static App configured() {
         App app = new App();
         app.setClientKey("test_key");
@@ -30,7 +42,7 @@ class DoctorScopeTest {
         app.setJettyPort(9999);
 
         // Doctor's constructor runs the checks; only the port selection matters here.
-        new Doctor(app);
+        new Doctor(app, noEndpoints());
 
         assertThat(app.getJettyPort())
                 .as("overwriting it meant --doctor reported on a port the user never chose")
@@ -41,7 +53,7 @@ class DoctorScopeTest {
     void withoutOneAFreePortIsStillChosen() {
         App app = configured();
 
-        new Doctor(app);
+        new Doctor(app, noEndpoints());
 
         assertThat(app.getJettyPort()).isGreaterThan(0);
     }
