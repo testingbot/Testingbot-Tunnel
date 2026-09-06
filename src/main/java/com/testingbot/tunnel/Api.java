@@ -112,6 +112,19 @@ public class Api {
      * could start -- so a SOCKS5 upstream proxy never worked at all. {@code http://host:port}
      * was broken the same way.
      */
+    /**
+     * The control-plane client builder, for callers outside a live Api.
+     *
+     * <p>{@code --doctor} runs before an Api exists but has to reach TestingBot the same way one
+     * would, or it reports a route nobody uses. It built its own client and got it partly wrong:
+     * no SOCKS5 support, and no credentials for an authenticated proxy -- so on those networks it
+     * said "can not be reached" and exited 1 while the tunnel started perfectly, or reached the
+     * API by a path the tunnel would not have taken.
+     */
+    static HttpClientBuilder controlPlaneBuilder(App app) {
+        return new Api(app).newBuilderWithProxy();
+    }
+
     private HttpClientBuilder newBuilderWithProxy() {
         HttpClientBuilder builder = httpClientBuilderSupplier.get();
         builder.setDefaultRequestConfig(defaultRequestConfig());
@@ -393,9 +406,23 @@ public class Api {
                 postRequest.setHeader("Authorization", "Basic " + encoding);
                 postRequest.setEntity(new UrlEncodedFormEntity(postData));
 
-                responseBody = httpClient.execute(postRequest, response ->
-                    EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8)
-                );
+                responseBody = httpClient.execute(postRequest, response -> {
+                    // The status, not just the body. Without this a 500 carrying
+                    // {"message":"failure"} parsed cleanly and was handed back as tunnel data,
+                    // so an API outage read as a malformed response -- or worse, as a tunnel
+                    // whose fields happened to be absent. _get has always checked; this is the
+                    // path that creates the tunnel.
+                    //
+                    // The body is read either way and included: the API says why it refused,
+                    // and the reason is the whole value of the message to the user.
+                    String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                    if (response.getCode() < 200 || response.getCode() >= 300) {
+                        throw new RuntimeException("Failed : HTTP error code : "
+                                + response.getCode()
+                                + (body == null || body.isBlank() ? "" : " - " + body));
+                    }
+                    return body;
+                });
             }
 
             try {

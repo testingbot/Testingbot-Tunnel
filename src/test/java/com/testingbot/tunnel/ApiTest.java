@@ -218,10 +218,63 @@ class ApiTest {
 
         api = createApiWithMockServer();
 
-        // When/Then: Should throw exception (JSON parsing fails on non-JSON response)
+        // Now fails on the status. It used to fail only because the body was not JSON, which is
+        // why the case below went unnoticed: this test looked like coverage of "the API
+        // returned 500" and was really coverage of "the API returned something unparseable".
         assertThatThrownBy(() -> api.createTunnel())
             .isInstanceOf(Exception.class)
             .hasMessageContaining("Could not start tunnel");
+    }
+
+    @Test
+    void createTunnel_withServerErrorCarryingValidJson_shouldThrowException() throws Exception {
+        // The gap. _post parsed the body without ever looking at the status, so a 500 whose
+        // body happened to be well-formed JSON was handed back as tunnel data. boot() then read
+        // fields off it -- state, id, ip -- and an API outage surfaced as a missing-field error
+        // somewhere further along, or as a tunnel that never came up for no stated reason.
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(500)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"message\":\"failure\"}")));
+
+        api = createApiWithMockServer();
+
+        assertThatThrownBy(() -> api.createTunnel())
+            .isInstanceOf(Exception.class)
+            .hasMessageContaining("500");
+    }
+
+    @Test
+    void createTunnel_withServerError_shouldReportWhatTheApiSaid() throws Exception {
+        // The body is read on the failure path too: the API states why it refused, and that
+        // reason is the entire value of the message to whoever has to act on it.
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(403)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"error\":\"concurrent tunnel limit reached\"}")));
+
+        api = createApiWithMockServer();
+
+        assertThatThrownBy(() -> api.createTunnel())
+            .hasMessageContaining("concurrent tunnel limit reached");
+    }
+
+    @Test
+    void createTunnel_with401_shouldThrowRatherThanReturnTheBody() throws Exception {
+        // Bad credentials are the most common real failure and the one most likely to return a
+        // tidy JSON envelope.
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(401)
+                .withHeader("Content-Type", "application/json")
+                .withBody("{\"error\":\"unauthorized\"}")));
+
+        api = createApiWithMockServer();
+
+        assertThatThrownBy(() -> api.createTunnel())
+            .hasMessageContaining("401");
     }
 
     @Test

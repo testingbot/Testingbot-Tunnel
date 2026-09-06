@@ -42,8 +42,32 @@ public class TunnelPoller {
         scheduler.cancel();
     }
 
+    /**
+     * Consecutive failed polls tolerated before the tunnel is given up on.
+     *
+     * <p>Not one. A poll is an HTTPS request to the API, and a single failed one means very
+     * little -- a DNS hiccup or a dropped connection while the tunnel server is still booting.
+     * Cancelling on the first exception turned any such blip into a process that stayed alive
+     * and never became ready. Five consecutive failures spans about 25 seconds, by which point
+     * it is not a blip.
+     */
+    static final int MAX_CONSECUTIVE_ERRORS = 5;
+
+    /**
+     * Stops polling and puts the app into its terminal failure state.
+     *
+     * <p>Cancelling the scheduler alone was the bug: it stopped the retries but told nothing
+     * else, so the process stayed up with a metrics server answering and a tunnel that would
+     * never be ready.
+     */
+    private void giveUp(String reason) {
+        scheduler.cancel();
+        app.setupFailed(reason, 1);
+    }
+
     class PollTask implements Runnable {
         int counter = 0;
+        int consecutiveErrors = 0;
 
         @Override
         public void run() {
@@ -53,10 +77,13 @@ public class TunnelPoller {
                 response = api.pollTunnel(tunnelID);
 
                 if (this.counter > 80) {
-                    Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, "Unable to create tunnel, waited for 400 seconds. Please try again or check https://status.testingbot.com");
-                    scheduler.cancel();
+                    giveUp("Unable to create tunnel, waited for 400 seconds. Please try again or check https://status.testingbot.com");
                     return;
                 }
+
+                // Reset only after a poll that actually returned: the count is of consecutive
+                // failures, and a run of them broken by one success is not the same thing.
+                this.consecutiveErrors = 0;
 
                 if (response.get("state").asText().equals("READY")) {
                    scheduler.cancel();
@@ -66,13 +93,22 @@ public class TunnelPoller {
                     Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.get("state").asText());
                 }
             } catch (TunnelFailedException tunnelFailedException) {
-                // the tunnel became ready but could not be set up; this runs on a
-                // timer thread so there is nobody to propagate to, report it here
-                scheduler.cancel();
-                Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, tunnelFailedException.getMessage());
+                // The tunnel became ready but could not be set up. Not retryable -- the failure
+                // is in our own setup, not in the poll -- and this runs on a timer thread with
+                // nobody to propagate to, so it ends the tunnel here.
+                giveUp(tunnelFailedException.getMessage());
             } catch (Exception ex) {
-                scheduler.cancel();
-                Logger.getLogger(TunnelPoller.class.getName()).log(Level.SEVERE, "Unable to poll for tunnel status.");
+                // A failed poll is not a failed tunnel. The scheduler keeps running so the next
+                // tick retries, and only a sustained run of failures gives up.
+                this.consecutiveErrors += 1;
+                Logger.getLogger(TunnelPoller.class.getName()).log(Level.WARNING,
+                        "Unable to poll for tunnel status ({0}/{1}): {2}",
+                        new Object[]{this.consecutiveErrors, MAX_CONSECUTIVE_ERRORS,
+                                     ex.getMessage()});
+                if (this.consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+                    giveUp("Unable to poll for tunnel status after "
+                            + MAX_CONSECUTIVE_ERRORS + " consecutive attempts: " + ex.getMessage());
+                }
             }
         }
     }

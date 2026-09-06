@@ -29,7 +29,18 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final Float VERSION = getVersionFromProperties();
+    /**
+     * The release version as written, e.g. {@code 5.0} or {@code 5.10.2}.
+     *
+     * <p>Was a {@code Float}, which could not represent this project's own version scheme:
+     * {@code 5.10} became {@code 5.1f} and sorted below {@code 5.9}, and {@code 5.0.1} did not
+     * parse at all and silently became {@code 0.0}. Every use of it here is display, so a
+     * string is what was wanted throughout; {@link #RELEASE} does the comparing.
+     */
+    public static final String VERSION = getVersionFromProperties();
+
+    /** {@link #VERSION} parsed for comparison, or null when the properties could not be read. */
+    static final Version RELEASE = Version.parse(VERSION);
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -120,22 +131,27 @@ public class App {
     private int sshPort = 0;
     private boolean shared = false;
 
-    private static Float getVersionFromProperties() {
+    private static String getVersionFromProperties() {
         try (InputStream input = App.class.getClassLoader().getResourceAsStream("version.properties")) {
             if (input == null) {
-                return 0.0f;
+                return "unknown";
             }
             Properties prop = new Properties();
             prop.load(input);
             String version = prop.getProperty("version");
-            if (version != null) {
-                String numericVersion = version.replaceAll("-SNAPSHOT", "").replaceAll("[^0-9.]", "");
-                return Float.parseFloat(numericVersion);
+            if (version != null && !version.isBlank()) {
+                // Returned as written. The stripping that used to happen here -- removing
+                // -SNAPSHOT and then every non-digit -- existed only to make Float.parseFloat
+                // accept the result, and it is what turned 5.0.1 into an unparseable "5.0.1"
+                // and then, via the catch below, into 0.0.
+                return version.trim();
             }
-        } catch (IOException | NumberFormatException ex) {
+        } catch (IOException ex) {
             Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not read version from properties, using fallback", ex);
         }
-        return 0.0f;
+        // Not "0.0": that is not "unknown", it is "older than every release", which is what made
+        // the upgrade notice fire on every startup once the version stopped parsing.
+        return "unknown";
     }
 
     /** Matches maven.compiler.release; the jar's class files cannot load below this. */
@@ -880,7 +896,8 @@ public class App {
             ConsoleHandler handler = new ConsoleHandler();
             // Read from the command line rather than the App, which does not exist yet: the
             // console handler is installed before anything is parsed into an App.
-            handler.setFormatter(logFormatterFor(requestedLogFormat(commandLine)));
+            activeLogFormat = requestedLogFormat(commandLine);
+            handler.setFormatter(logFormatterFor(activeLogFormat));
             logger.addHandler(handler);
             if ("json".equalsIgnoreCase(requestedLogFormat(commandLine))) {
                 // Sibling JUL loggers (HttpProxy, Doctor, SSHTunnel, the handlers) publish
@@ -891,6 +908,14 @@ public class App {
                         : Logger.getLogger("").getHandlers()) {
                     rootHandler.setFormatter(new JsonLogFormatter());
                 }
+                // And the other logging stack. This process logs through both: JUL for its own
+                // classes and SLF4J/logback for Jetty, Apache HC and the proxy handlers, and
+                // logback.xml pins its console appender to a text pattern. So --log-format json
+                // produced a stream that was JSON for some records and text for others -- which
+                // is not a format at all, and worse than plain text for the collector this
+                // option exists to serve. The file appender below already did this; the console
+                // is where almost every record actually goes.
+                jsonifyLogbackConsole((LoggerContext) LoggerFactory.getILoggerFactory());
             }
 
             App app = new App();
@@ -978,20 +1003,32 @@ public class App {
                 return;
             }
 
-            System.out.println("----------------------------------------------------------------");
-            System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
-            System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
-            System.out.println("----------------------------------------------------------------");
+            // Suppressed under --log-format json: four lines of ASCII art on stdout is four
+            // parse failures for a collector reading one object per line, and it is the very
+            // first thing it would meet.
+            if (!"json".equalsIgnoreCase(requestedLogFormat(commandLine))) {
+                System.out.println("----------------------------------------------------------------");
+                System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
+                System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
+                System.out.println("----------------------------------------------------------------");
+            } else {
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "TestingBot Tunnel {0}", App.VERSION);
+            }
 
             applyCredentials(app, commandLine);
 
             applyOptions(app, commandLine);
 
             if (commandLine.hasOption("web")) {
-                new LocalWebServer(commandLine.getOptionValue("web"), app.getBindAddress());
+                // Kept on the App so stop() can shut it down. It used to be constructed and
+                // dropped, which left it serving the directory for the life of the JVM.
+                app.localWebServer = new LocalWebServer(
+                        commandLine.getOptionValue("web"), app.getBindAddress());
             }
 
             app.init();
+            app.commandLineClient = true;
             app.boot();
             // The pid file lets an external supervisor stop this process; it is
             // only meaningful when running as a command line client.
@@ -1011,10 +1048,34 @@ public class App {
             System.err.println(parseException.getMessage());
             System.exit(2);
         } catch (TunnelFailedException tunnelFailedException) {
-            System.err.println(tunnelFailedException.getMessage());
+            // Under json this goes through the logger instead: JUL's console handler writes to
+            // stderr, so printing here would put a bare multi-line message in the middle of the
+            // JSON stream -- and this is a multi-line message, so it is several parse failures.
+            if ("json".equalsIgnoreCase(activeLogFormat)) {
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE,
+                        tunnelFailedException.getMessage());
+            } else {
+                System.err.println(tunnelFailedException.getMessage());
+            }
             System.exit(tunnelFailedException.getExitCode());
         }
     }
+    /**
+     * True only for the {@code main()} client. An embedder's JVM is not ours to exit, so a
+     * terminal setup failure stops the tunnel and reports itself for them to observe, while the
+     * command line client exits with a status a supervisor can act on.
+     */
+    private volatile boolean commandLineClient;
+    /**
+     * The format the console log stream is using, for code outside the parse block.
+     *
+     * <p>Static because the fatal-error path in main() runs from a catch that encloses argument
+     * parsing, so the CommandLine may not exist by then -- but the formatter has already been
+     * installed and the stream already has a shape that must be respected.
+     */
+    private static volatile String activeLogFormat = "text";
+    /** The --web directory server, or null when --web was not given. */
+    private LocalWebServer localWebServer;
     private PidPoller pidPoller;
     private TunnelPoller poller;
     private HttpForwarder httpForwarder;
@@ -1056,7 +1117,8 @@ public class App {
                 }
                 TunnelMetrics.setTunnelUp(false);
                 try {
-                    System.out.println("Shutting down your personal Tunnel Server.");
+                    Logger.getLogger(App.class.getName()).log(Level.INFO,
+                            "Shutting down your personal Tunnel Server.");
                     api.destroyTunnel();
                 } catch (Exception ex) {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
@@ -1106,8 +1168,12 @@ public class App {
 
         TunnelMetrics.setTunnelInfo(App.VERSION, this.tunnelID, this.tunnelIdentifier);
 
-        if (Float.parseFloat(tunnelData.get("version").asText()) > App.VERSION) {
-            System.err.println("A new version (" + tunnelData.get("version").asText() + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
+        // Both sides have to parse before anyone is told to upgrade. An unreadable local
+        // version used to compare as 0.0 and so nagged on every single startup, and an
+        // unexpected value from the API would have thrown out of boot() entirely.
+        Version latest = Version.parse(tunnelData.path("version").asText(null));
+        if (latest != null && RELEASE != null && RELEASE.isOlderThan(latest)) {
+            System.err.println("A new version (" + latest + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
 
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
@@ -1137,6 +1203,38 @@ public class App {
         pidPoller = new PidPoller(this);
     }
 
+    /**
+     * Gives up on a tunnel that cannot be set up, from a thread with nobody to throw to.
+     *
+     * <p>The poller and {@link #tunnelReady} both run on timer threads, so a failure there used
+     * to be logged and dropped: the scheduler stopped, but the metrics server kept answering and
+     * the process stayed alive forever, never ready and no longer trying. Neither a supervisor
+     * nor a container could tell that from a tunnel still coming up.
+     *
+     * <p>Everything is released either way. The command line client then exits with a status;
+     * an embedder is left a stopped App whose {@code /readyz} says what happened.
+     */
+    public void setupFailed(String reason, int exitCode) {
+        Logger.getLogger(App.class.getName()).log(Level.SEVERE, reason);
+        try {
+            stop();
+        } catch (Exception cleanupFailed) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "Cleanup after a failed setup did not complete", cleanupFailed);
+        }
+        // After stop(), which sets it false itself -- but stop() is also the ordinary teardown,
+        // so being explicit here keeps the reason for the gauge attached to this path.
+        TunnelMetrics.setTunnelUp(false);
+        if (commandLineClient) {
+            // Already logged above; printing it again would duplicate it under text and break
+            // the stream under json.
+            if (!"json".equalsIgnoreCase(activeLogFormat)) {
+                System.err.println(reason);
+            }
+            System.exit(exitCode);
+        }
+    }
+
     public void stop() {
         TunnelMetrics.setTunnelUp(false);
 
@@ -1159,6 +1257,11 @@ public class App {
 
         stopInsightServer();
 
+        if (localWebServer != null) {
+            localWebServer.stop();
+            localWebServer = null;
+        }
+
         if (poller != null) {
             poller.cancel();
         }
@@ -1166,6 +1269,19 @@ public class App {
         if (pidPoller != null) {
             pidPoller.cancel();
             pidPoller = null;
+        }
+
+        // The ready file says "this tunnel is forwarding", so it must not outlive the tunnel.
+        // The shutdown hook below removes it when the JVM exits, which covers the command line
+        // client but not an explicit stop(): an embedder running a tunnel per job left a stale
+        // file claiming the previous job's tunnel was ready, and the reconnect monitor's
+        // stop()/boot() rebuild left one across the window where nothing was forwarding.
+        if (readyFile != null) {
+            File f = new File(readyFile);
+            if (f.exists() && !f.delete()) {
+                Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                        "Could not delete ready file: {0}", readyFile);
+            }
         }
 
         // Without this, an embedder that starts a tunnel per job leaks one
@@ -1183,7 +1299,8 @@ public class App {
         // normal path for an embedder cleaning up in a finally block.
         if (api != null) {
             try {
-                System.out.println("Shutting down your personal Tunnel Server.");
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "Shutting down your personal Tunnel Server.");
                 api.destroyTunnel();
             } catch (Exception ex) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
@@ -1206,11 +1323,19 @@ public class App {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 boolean healthy = this.startProxies();
-                TunnelMetrics.setTunnelUp(true);
+                // Gated on the self-test, not merely on having got this far. /readyz means "the
+                // tunnel is forwarding", and every check startProxies() runs is a check that
+                // traffic will actually arrive -- the Selenium relay reaching the hub, the
+                // reverse forward reaching the local proxy, the proxy reaching the internet. A
+                // tunnel that failed one of those carries nothing, so reporting it ready told
+                // container probes and --readyfile integrations to send work to something that
+                // could not do any. It stays not-ready until a reconnect succeeds.
+                TunnelMetrics.setTunnelUp(healthy);
                 if (healthy) {
+                    writeReadyFile();
                     Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 } else {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "The Tunnel is up (ip: {0}) but its self-test failed; tests may not work until this is resolved.", _serverIP);
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "The Tunnel is up (ip: {0}) but its self-test failed, so it is not reporting ready; tests will not work until this is resolved.", _serverIP);
                 }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
             }
@@ -1219,12 +1344,15 @@ public class App {
             // client can exit and an embedder can handle it
             throw tunnelFailedException;
         } catch (Exception ex) {
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "Something went wrong while setting up the Tunnel.");
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            // Not merely logged: this runs on a timer thread when it is reached from the poller,
+            // so returning here left a process that was alive, unready and no longer trying.
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Something went wrong while setting up the Tunnel.", ex);
+            setupFailed("Could not set up the tunnel: " + ex.getMessage(), 1);
         }
     }
 
-    private boolean startProxies() {
+    /** Package-private so ReadinessGatingTest can drive a failing startup. */
+    boolean startProxies() {
         boolean healthy = true;
         httpForwarder = new HttpForwarder(this);
 
@@ -1249,21 +1377,41 @@ public class App {
             }
         }
 
-        if (this.readyFile != null) {
-            File f = new File(this.readyFile);
-            if (f.exists()) {
-                f.setLastModified(System.currentTimeMillis());
-            } else {
-                try (FileWriter fw = new FileWriter(f.getAbsoluteFile());
-                     BufferedWriter bw = new BufferedWriter(fw)) {
-                    bw.write("TestingBot Tunnel Ready");
-                } catch (IOException ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the directory exists and we have permission write to this directory." , ex);
-                }
-            }
-        }
-
         return healthy;
+    }
+
+    /**
+     * Touches {@code --readyfile}.
+     *
+     * <p>Only from the healthy path. It used to be written at the end of startProxies()
+     * regardless of what those checks found, so a tunnel whose forwarding test had just failed
+     * still announced itself ready to whatever was waiting on the file.
+     */
+    /** Package-private, for the readiness tests; the CLI assigns the field directly. */
+    void setNoProxy(boolean noProxy) {
+        this.noProxy = noProxy;
+    }
+
+    /** Package-private, for the readiness tests; the CLI assigns the field directly. */
+    void setReadyFile(String readyFile) {
+        this.readyFile = readyFile;
+    }
+
+    void writeReadyFile() {
+        if (this.readyFile == null) {
+            return;
+        }
+        File f = new File(this.readyFile);
+        if (f.exists()) {
+            f.setLastModified(System.currentTimeMillis());
+            return;
+        }
+        try (FileWriter fw = new FileWriter(f.getAbsoluteFile());
+             BufferedWriter bw = new BufferedWriter(fw)) {
+            bw.write("TestingBot Tunnel Ready");
+        } catch (IOException ex) {
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the directory exists and we have permission write to this directory." , ex);
+        }
     }
 
     /**
@@ -1407,15 +1555,14 @@ public class App {
     }
 
     static int readinessPort(CommandLine commandLine) throws ParseException {
-        String value = commandLine.getOptionValue("metrics-port");
-        if (value == null) {
+        if (commandLine.getOptionValue("metrics-port") == null) {
             return DEFAULT_METRICS_PORT;
         }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException notANumber) {
-            throw new ParseException("Invalid --metrics-port value: " + value);
-        }
+        // port(), like every other port option. This checked the syntax but not the range, so
+        // --ready --metrics-port 99999 got past it and died in ReadinessProbe with an uncaught
+        // IllegalArgumentException and a stack trace -- from the one command whose entire
+        // contract is to exit 0 or 1 for a container probe to read.
+        return port(commandLine, "metrics-port");
     }
 
     public void doctor() {
@@ -1551,9 +1698,44 @@ public class App {
     /** Loaded once and shared; null when --pac-local was not given. */
     public synchronized com.testingbot.tunnel.pac.PacPolicy getPacPolicy() {
         if (pacPolicy == null && pacLocal != null) {
-            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(pacLocal, pacLocalSha256);
+            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(
+                    pacLocal, pacLocalSha256, pacFetchOptions());
         }
         return pacPolicy;
+    }
+
+    /**
+     * How to reach a remote {@code --pac-local} document.
+     *
+     * <p>The fetch used to ignore both {@code --proxy} and {@code --cacert-file}, so on a
+     * proxy-only network the URL was unreachable and on a TLS-intercepting network the
+     * handshake failed against a CA the JVM has never seen -- the exact network
+     * {@code --cacert-file} exists for. Either way the tunnel refused to start over a document
+     * it had been told how to reach.
+     */
+    com.testingbot.tunnel.pac.PacPolicy.FetchOptions pacFetchOptions() {
+        java.net.Proxy proxy = null;
+        com.testingbot.tunnel.proxy.ProxySpec spec =
+                com.testingbot.tunnel.proxy.ProxySpec.parse(getProxy());
+        if (spec != null) {
+            proxy = new java.net.Proxy(
+                    spec.isSocks5() ? java.net.Proxy.Type.SOCKS : java.net.Proxy.Type.HTTP,
+                    new java.net.InetSocketAddress(spec.getHost(), spec.getPort()));
+        }
+        javax.net.ssl.SSLSocketFactory sslSocketFactory = null;
+        if (caCertificates != null) {
+            try {
+                sslSocketFactory = caCertificates.sslContext().getSocketFactory();
+            } catch (java.security.GeneralSecurityException ex) {
+                // Not fatal here: the fetch still runs against the platform trust store, and if
+                // that is not enough it fails with a certificate error naming the real problem.
+                Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                        "Could not apply --cacert-file to the PAC fetch", ex);
+            }
+        }
+        return proxy == null && sslSocketFactory == null
+                ? null
+                : new com.testingbot.tunnel.pac.PacPolicy.FetchOptions(proxy, sslSocketFactory);
     }
 
     public String getProxyAuthScheme() {
@@ -1618,6 +1800,33 @@ public class App {
 
     public void setLogFormat(String logFormat) {
         this.logFormat = logFormat == null ? "text" : logFormat;
+    }
+
+    /**
+     * Replaces the encoder on logback's console appender with the JSON one.
+     *
+     * <p>Reaches into the configured appenders rather than adding another: logback.xml's STDOUT
+     * appender is what Jetty, Apache HC and the SLF4J-using proxy handlers write through, and
+     * adding a second would duplicate every record rather than reformat it.
+     */
+    static void jsonifyLogbackConsole(LoggerContext loggerContext) {
+        ch.qos.logback.classic.Logger root =
+                loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+        for (java.util.Iterator<ch.qos.logback.core.Appender<ch.qos.logback.classic.spi.ILoggingEvent>>
+                     it = root.iteratorForAppenders(); it.hasNext(); ) {
+            ch.qos.logback.core.Appender<ch.qos.logback.classic.spi.ILoggingEvent> appender = it.next();
+            if (appender instanceof ch.qos.logback.core.ConsoleAppender<?> console) {
+                JsonLogbackEncoder json = new JsonLogbackEncoder();
+                json.setContext(loggerContext);
+                json.start();
+                @SuppressWarnings("unchecked")
+                ch.qos.logback.core.ConsoleAppender<ch.qos.logback.classic.spi.ILoggingEvent> typed =
+                        (ch.qos.logback.core.ConsoleAppender<ch.qos.logback.classic.spi.ILoggingEvent>) console;
+                typed.stop();
+                typed.setEncoder(json);
+                typed.start();
+            }
+        }
     }
 
     /** The formatter for {@code --log-format}, shared by the console and the log file. */

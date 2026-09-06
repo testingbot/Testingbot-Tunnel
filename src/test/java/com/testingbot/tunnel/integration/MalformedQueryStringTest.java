@@ -174,7 +174,13 @@ class MalformedQueryStringTest {
         String response = proxyGet("/?q=100%");
 
         assertThat(response).contains("400 Bad Request");
-        assertThat(response).doesNotContain("502");
+        // The status line, not the whole response. Jetty's error page echoes the request URI,
+        // which carries the proxy's randomly chosen port -- so doesNotContain("502") failed
+        // whenever that port happened to contain those digits (seen on port 50281). The same
+        // substring-on-a-variable-body mistake HttpStatusLine was introduced to remove.
+        assertThat(response.lines().findFirst().orElse(""))
+                .as("a 502 would blame the customer's website for a request we never sent")
+                .doesNotContain("502");
     }
 
     @Test

@@ -201,7 +201,12 @@ public class CustomConnectHandler extends ConnectHandler {
             return proxySpec;
         }
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolve("https://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull("https://" + host + ":" + port + "/", host);
+        if (result == null) {
+            // The file could not be evaluated. Falling through to --proxy rather than going
+            // direct: on a proxy-only network, direct is not a safe default, it is a bypass.
+            return proxySpec;
+        }
         if (result.first().isDirect()) {
             return null;
         }
@@ -380,8 +385,11 @@ public class CustomConnectHandler extends ConnectHandler {
             channel.socket().setTcpNoDelay(true);
             channel.configureBlocking(false);
             // resolveAddress, not newConnectAddress: this socket goes to the proxy, and the
-            // loopback policy is about destinations.
-            channel.connect(resolveAddress(connectTo.remap(upstream.getHost(), upstream.getPort())));
+            // loopback policy is about destinations. --connect-to is left out for the same
+            // reason -- it says where a named *destination* lives, so applying it here moved the
+            // proxy connection instead and left the destination alone; a wildcard rule pointed
+            // every request at one address while appearing to do nothing.
+            channel.connect(resolveAddress(new ConnectToMap.Target(upstream.getHost(), upstream.getPort())));
             promise.succeeded(channel);
         } catch (Throwable x) {
             closeQuietly(channel);
@@ -726,17 +734,10 @@ public class CustomConnectHandler extends ConnectHandler {
         return connect.toString();
     }
 
-    // Parse "HTTP/1.x NNN reason" and return true iff NNN is in [200, 299].
+    // Parse "HTTP/1.x NNN reason" and return true iff NNN is in [200, 299]. Kept as a method
+    // here because the framing tests address it by this name; the parsing itself is shared with
+    // the WebSocket relay, which had its own and looser version.
     static boolean isSuccessfulConnect(String statusLine) {
-        if (statusLine == null) return false;
-        String[] parts = statusLine.split(" ", 3);
-        if (parts.length < 2) return false;
-        if (!parts[0].startsWith("HTTP/")) return false;
-        try {
-            int code = Integer.parseInt(parts[1]);
-            return code >= 200 && code < 300;
-        } catch (NumberFormatException ex) {
-            return false;
-        }
+        return HttpStatusLine.isSuccessfulConnect(statusLine);
     }
 }

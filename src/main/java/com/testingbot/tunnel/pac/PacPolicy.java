@@ -73,11 +73,27 @@ public final class PacPolicy {
     }
 
     /**
+     * How to reach a PAC document that lives behind the network's own egress rules.
+     *
+     * <p>The fetch used a bare {@link HttpURLConnection}, so it ignored both {@code --proxy} and
+     * {@code --cacert-file}. On a proxy-only network the PAC URL was simply unreachable, and on
+     * a TLS-intercepting network -- which is the entire reason {@code --cacert-file} exists --
+     * an {@code https} PAC URL failed the handshake against a CA the JVM has never seen. Either
+     * way the tunnel refused to start over a document it had been told how to reach.
+     *
+     * @param proxy the upstream proxy to fetch through, or null for a direct fetch
+     * @param sslSocketFactory the factory carrying any extra CAs, or null for the platform's
+     */
+    public record FetchOptions(java.net.Proxy proxy,
+                               javax.net.ssl.SSLSocketFactory sslSocketFactory) {
+    }
+
+    /**
      * @param location a file path, or an https URL
      * @throws PacException if it cannot be read or does not parse
      */
     public static PacPolicy load(String location) {
-        return load(location, null);
+        return load(location, null, null);
     }
 
     /**
@@ -86,7 +102,15 @@ public final class PacPolicy {
      * @throws PacException if it cannot be read, fails its digest, or does not parse
      */
     public static PacPolicy load(String location, String expectedSha256) {
-        String text = read(location, expectedSha256);
+        return load(location, expectedSha256, null);
+    }
+
+    /**
+     * @param options how to reach a remote document, or null to fetch it directly
+     * @throws PacException if it cannot be read, fails its digest, or does not parse
+     */
+    public static PacPolicy load(String location, String expectedSha256, FetchOptions options) {
+        String text = read(location, expectedSha256, options);
         try {
             return new PacPolicy(new PacInterpreter(text), location);
         } catch (PacException invalid) {
@@ -101,7 +125,7 @@ public final class PacPolicy {
         return new PacPolicy(new PacInterpreter(script), description);
     }
 
-    private static String read(String location, String expectedSha256) {
+    private static String read(String location, String expectedSha256, FetchOptions options) {
         // Before anything is fetched. A pin that cannot match is a configuration error, and
         // discovering it only after the document has been pulled over cleartext means the
         // request went out anyway -- to exactly the network this pin exists to distrust.
@@ -123,7 +147,14 @@ public final class PacPolicy {
             }
             HttpURLConnection connection = null;
             try {
-                connection = (HttpURLConnection) URI.create(location).toURL().openConnection();
+                java.net.Proxy proxy = options == null ? null : options.proxy();
+                connection = (HttpURLConnection) (proxy == null
+                        ? URI.create(location).toURL().openConnection()
+                        : URI.create(location).toURL().openConnection(proxy));
+                if (options != null && options.sslSocketFactory() != null
+                        && connection instanceof javax.net.ssl.HttpsURLConnection https) {
+                    https.setSSLSocketFactory(options.sslSocketFactory());
+                }
                 connection.setConnectTimeout(FETCH_TIMEOUT_MS);
                 connection.setReadTimeout(FETCH_TIMEOUT_MS);
                 // Not followed: HttpURLConnection follows by default and will not carry an
@@ -159,7 +190,19 @@ public final class PacPolicy {
             }
         }
         try {
-            byte[] body = Files.readAllBytes(Path.of(location));
+            // The same cap the remote path applies. readAllBytes() had none, so a path that
+            // was not the small script it was meant to be -- a log, a device, the wrong file
+            // entirely -- was read into memory in full before anything looked at it. The limit
+            // is about what this process will hold, and that does not depend on where the
+            // bytes came from.
+            byte[] body;
+            try (java.io.InputStream in = Files.newInputStream(Path.of(location))) {
+                body = in.readNBytes(MAX_PAC_BYTES + 1);
+            }
+            if (body.length > MAX_PAC_BYTES) {
+                throw new PacException("PAC file " + location + " is larger than "
+                        + MAX_PAC_BYTES + " bytes; refusing to load it");
+            }
             // A digest given for a local file is checked too. It is not defending against the
             // network here, but it is the operator saying "this exact document", and silently
             // ignoring that would be worse than refusing it.
@@ -228,10 +271,30 @@ public final class PacPolicy {
     }
 
     /**
-     * @return where {@code host} should be reached, or {@link PacResult#direct()} if the file
-     *         fails at runtime -- a broken PAC file must not make the tunnel unusable
+     * @return where {@code host} should be reached, or null when the file could not be
+     *         evaluated -- see {@link #resolveOrNull} for why that is not DIRECT
      */
     public PacResult resolve(String url, String host) {
+        PacResult result = resolveOrNull(url, host);
+        return result == null ? PacResult.direct() : result;
+    }
+
+    /**
+     * As {@link #resolve}, but says when it does not know.
+     *
+     * <p>A failed evaluation used to become {@link PacResult#direct()}. That is not a neutral
+     * default: on a network whose only sanctioned egress is a proxy, it takes traffic the
+     * operator routed deliberately and sends it straight out instead -- and it did so past a
+     * configured {@code --proxy} as well, which no reading of "fallback" covers. The component
+     * whose entire job is deciding where traffic goes was failing open.
+     *
+     * <p>So the callers are told, and each falls back to the static {@code --proxy} when there
+     * is one. Going direct remains the answer only when nothing else was configured, because
+     * then there is genuinely nowhere else to send it.
+     *
+     * @return null when the file threw; a real result otherwise
+     */
+    public PacResult resolveOrNull(String url, String host) {
         if (host == null) {
             return PacResult.direct();
         }
@@ -252,9 +315,24 @@ public final class PacPolicy {
         try {
             result = PacResult.parse(interpreter.findProxyForUrl(url, host));
         } catch (RuntimeException failure) {
-            LOG.log(Level.WARNING, "PAC evaluation failed for {0} ({1}); going direct",
+            LOG.log(Level.WARNING,
+                    "PAC evaluation failed for {0} ({1}); falling back to the configured proxy, "
+                    + "or direct if there is none",
                     new Object[]{host, failure.getMessage()});
-            result = PacResult.direct();
+            // Deliberately not cached. A failure is usually about this evaluation -- a
+            // dnsResolve that timed out, say -- and caching it would hold the fallback route in
+            // place for a minute after the condition passed.
+            return null;
+        }
+        if (result.getEntries().size() > 1) {
+            // Said once per destination rather than silently: the list is a failover list, and
+            // only the first entry is used. An operator who wrote "PROXY a; PROXY b" is
+            // entitled to know that b will never be tried rather than discovering it during an
+            // outage of a.
+            LOG.log(Level.INFO,
+                    "PAC returned {0} directives for {1}; using {2}. Failover to the remaining "
+                    + "entries is not implemented.",
+                    new Object[]{result.getEntries().size(), host, result.first()});
         }
         if (cache.size() >= MAX_CACHE_ENTRIES) {
             cache.clear();

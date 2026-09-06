@@ -30,6 +30,8 @@ class HealthEndpointsTest {
         return TestPorts.free();
     }
 
+    private InsightServer insightServer;
+
     @BeforeEach
     void setUp() throws Exception {
         TunnelMetrics.setTunnelUp(false);
@@ -38,13 +40,20 @@ class HealthEndpointsTest {
         app.setClientKey("test_key");
         app.setClientSecret("test_secret");
         app.setMetricsPort(metricsPort);
-        new InsightServer(app);
+        insightServer = new InsightServer(app);
         waitForPort(metricsPort);
     }
 
     @AfterEach
     void tearDown() {
         TunnelMetrics.setTunnelUp(false);
+        // The server was constructed and dropped, so every test in this class left a Jetty
+        // server and a bound port behind for the rest of the JVM's life. Surefire forks per
+        // class here, which is the only reason it did not accumulate across the whole suite.
+        if (insightServer != null) {
+            insightServer.stop();
+            insightServer = null;
+        }
     }
 
     private static void waitForPort(int port) throws Exception {

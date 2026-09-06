@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -27,6 +28,7 @@ import org.eclipse.jetty.client.AuthenticationStore;
 import org.eclipse.jetty.client.BasicAuthentication;
 import org.eclipse.jetty.client.HttpClient;
 import org.eclipse.jetty.client.HttpProxy;
+import org.eclipse.jetty.client.Origin;
 import org.eclipse.jetty.client.ProxyConfiguration;
 import org.eclipse.jetty.client.Socks5;
 import org.eclipse.jetty.client.Socks5Proxy;
@@ -77,6 +79,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private String proxyAuthHeaderValue;
     /** Host of the upstream HTTP proxy, or null when there is not one. */
     private String upstreamHttpProxyHost;
+    /** The same proxy in full, so a chosen upstream can be compared against it. */
+    private ProxySpec upstreamHttpProxySpec;
     private String upstreamProxy;
     private String upstreamProxyAuth;
     private String[] basicAuth;
@@ -86,6 +90,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private ConnectToMap connectTo = ConnectToMap.none();
     private LocalhostPolicy localhostPolicy = LocalhostPolicy.ALLOW;
     private com.testingbot.tunnel.pac.PacPolicy pacPolicy;
+    /** One entry per proxy --pac-local has named so far; see registerPacProxy. */
+    private final Map<String, ProxyConfiguration.Proxy> pacProxies = new ConcurrentHashMap<>();
     private long idleTimeoutMs = 120_000L;
     private long connectTimeoutMs = -1;
 
@@ -126,6 +132,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         ProxySpec spec = ProxySpec.parse(hostPort);
         boolean httpProxy = spec != null && !spec.isSocks5();
         this.upstreamHttpProxyHost = httpProxy ? spec.getHost() : null;
+        this.upstreamHttpProxySpec = httpProxy ? spec : null;
         if (httpProxy && userPassword != null && !userPassword.isEmpty()) {
             this.proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(userPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -145,8 +152,16 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
      * never fire and every request through a Negotiate proxy failed. The CONNECT and SSH paths
      * were already pre-emptive; this makes the plain-HTTP path agree with them.
      */
-    private String upstreamAuthorization() {
+    private String upstreamAuthorization(org.eclipse.jetty.client.Request proxyToServerRequest) {
         if (upstreamHttpProxyHost == null) {
+            return null;
+        }
+        if (pacPolicy != null && !goesToTheConfiguredProxy(proxyToServerRequest)) {
+            // The credential names one specific proxy. Under a PAC file this request may be
+            // going to a different one, or -- for a DIRECT answer -- straight to the origin,
+            // where the customer's proxy password would land in an arbitrary internet host's
+            // access log. Withheld unless --proxy is genuinely the chosen upstream, which it
+            // still is when the file routes there and when a failed evaluation falls back to it.
             return null;
         }
         if (proxyAuthenticator.isNegotiate()) {
@@ -168,6 +183,23 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                         proxyToServerRequest.getURI() == null
                                 ? proxyToServerRequest.getScheme()
                                 : proxyToServerRequest.getURI().getScheme());
+    }
+
+    /** True when the upstream chosen for this request is the proxy {@code --proxy} names. */
+    private boolean goesToTheConfiguredProxy(org.eclipse.jetty.client.Request proxyToServerRequest) {
+        if (upstreamHttpProxySpec == null) {
+            return false;
+        }
+        String host = proxyToServerRequest.getHost();
+        int port = proxyToServerRequest.getPort();
+        if (port <= 0) {
+            port = HttpScheme.HTTPS.is(proxyToServerRequest.getScheme()) ? 443 : 80;
+        }
+        ProxySpec chosen = upstreamFor(host, port, proxyToServerRequest.getScheme());
+        return chosen != null
+                && !chosen.isSocks5()
+                && chosen.getPort() == upstreamHttpProxySpec.getPort()
+                && chosen.getHost().equalsIgnoreCase(upstreamHttpProxySpec.getHost());
     }
 
     /** Splits "user:password"; the password may itself contain colons. */
@@ -242,6 +274,140 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
     public void setPacPolicy(com.testingbot.tunnel.pac.PacPolicy pacPolicy) {
         this.pacPolicy = pacPolicy;
+    }
+
+    /**
+     * The upstream proxy for this destination, or null to go direct.
+     *
+     * <p>The same rule {@code CustomConnectHandler} follows: --pac-local wins over --proxy for
+     * every host, because a PAC file is per-destination by definition and a static --proxy
+     * cannot be. Only the first directive is used; honouring the failover list would need a
+     * retry loop around jetty-client's exchange.
+     */
+    ProxySpec upstreamFor(String host, int port, String scheme) {
+        if (pacPolicy == null) {
+            return ProxySpec.parse(upstreamProxy);
+        }
+        if (host == null) {
+            return null;
+        }
+        com.testingbot.tunnel.pac.PacResult result =
+                pacPolicy.resolveOrNull(scheme + "://" + host + ":" + port + "/", host);
+        if (result == null) {
+            // Could not evaluate: fall through to --proxy rather than direct, so a broken file
+            // does not silently bypass the network's only sanctioned egress.
+            return ProxySpec.parse(upstreamProxy);
+        }
+        if (result.first().isDirect()) {
+            return null;
+        }
+        return ProxySpec.parse(result.first().toProxySpec());
+    }
+
+    /**
+     * True when {@code host:port} is an upstream proxy rather than a destination.
+     *
+     * <p>jetty-client's resolver is handed whichever endpoint it is about to dial, and that is
+     * the proxy whenever one is in play. Two things have to know the difference: --connect-to,
+     * which describes destinations and must not move the proxy, and --localhost-policy, since a
+     * proxy on this machine's loopback is an ordinary setup and what it goes on to reach is its
+     * decision, not ours.
+     */
+    private boolean isUpstreamProxyEndpoint(String host, int port) {
+        if (host == null) {
+            return false;
+        }
+        if (pacPolicy == null) {
+            ProxySpec spec = ProxySpec.parse(upstreamProxy);
+            return spec != null && spec.getPort() == port && spec.getHost().equalsIgnoreCase(host);
+        }
+        // Under PAC the set is whatever the file has named so far, which registerPacProxy has
+        // already recorded by the time anything is dialled through it.
+        String http = "http://" + host + ":" + port;
+        String socks = "socks5://" + host + ":" + port;
+        return pacProxies.containsKey(http) || pacProxies.containsKey(socks);
+    }
+
+    /** The identity of a proxy for the registry below; null means DIRECT. */
+    private static String proxyKey(ProxySpec spec) {
+        return spec == null ? null
+                : (spec.isSocks5() ? "socks5://" : "http://") + spec.getHost() + ":" + spec.getPort();
+    }
+
+    /**
+     * Makes sure jetty-client knows about the proxy PAC chose for this destination.
+     *
+     * <p>jetty-client picks an upstream by walking {@link ProxyConfiguration}'s list and taking
+     * the first {@code Proxy} whose {@code matches(Origin)} answers true -- a fixed address per
+     * entry, which a PAC file is not. So each distinct proxy the file has named gets one entry
+     * whose {@code matches} re-asks the PAC and claims only the origins routed to itself; a host
+     * the file sends DIRECT is claimed by none of them and dialled directly.
+     *
+     * <p>Registration happens here, on the request thread before the exchange is created, rather
+     * than from inside {@code matches()}: {@code match()} iterates the list, and growing it
+     * during that walk is how this would become an intermittent failure under load.
+     *
+     * @return the proxy key for this destination, used as the request tag
+     */
+    private String registerPacProxy(String host, int port, String scheme) {
+        if (pacPolicy == null) {
+            return null;
+        }
+        ProxySpec chosen = upstreamFor(host, port, scheme);
+        String key = proxyKey(chosen);
+        if (key == null) {
+            return null;
+        }
+        pacProxies.computeIfAbsent(key, k -> {
+            ProxyConfiguration.Proxy proxy = chosen.isSocks5()
+                    ? new PacSocks5Proxy(chosen, k)
+                    : new PacHttpProxy(chosen, k);
+            // Credentials are deliberately not attached: --proxy-userpwd names a specific proxy,
+            // and a PAC file can name any host at all. Handing the customer's proxy password to
+            // whatever a fetched document nominates is the thing that check exists to prevent.
+            // The request comes back 407 and this line says why.
+            if (upstreamProxyAuth != null && !upstreamProxyAuth.isEmpty()) {
+                LOG.log(Level.WARNING,
+                        "PAC selected proxy {0}, which is not the --proxy the credentials belong "
+                        + "to; sending none. Expect 407 if it requires authentication.", k);
+            }
+            LOG.log(Level.INFO, "PAC routing plain HTTP via {0}", k);
+            getHttpClient().getProxyConfiguration().addProxy(proxy);
+            return proxy;
+        });
+        return key;
+    }
+
+    /** An HTTP proxy that claims exactly the origins the PAC file routes to it. */
+    private final class PacHttpProxy extends HttpProxy {
+        private final String key;
+
+        PacHttpProxy(ProxySpec spec, String key) {
+            super(spec.getHost(), spec.getPort());
+            this.key = key;
+        }
+
+        @Override
+        public boolean matches(Origin origin) {
+            return key.equals(proxyKey(upstreamFor(origin.getAddress().getHost(),
+                    origin.getAddress().getPort(), origin.getScheme())));
+        }
+    }
+
+    /** As {@link PacHttpProxy}, for a {@code SOCKS} directive. */
+    private final class PacSocks5Proxy extends Socks5Proxy {
+        private final String key;
+
+        PacSocks5Proxy(ProxySpec spec, String key) {
+            super(spec.getHost(), spec.getPort());
+            this.key = key;
+        }
+
+        @Override
+        public boolean matches(Origin origin) {
+            return key.equals(proxyKey(upstreamFor(origin.getAddress().getHost(),
+                    origin.getAddress().getPort(), origin.getScheme())));
+        }
     }
 
     public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {
@@ -377,7 +543,14 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                 @Override
                 public void resolve(String host, int port, java.util.Map<String, Object> context,
                                     org.eclipse.jetty.util.Promise<List<InetSocketAddress>> promise) {
-                    ConnectToMap.Target target = connectTo.remap(host, port);
+                    // Only a destination is remapped. With an upstream proxy jetty-client
+                    // resolves the *proxy's* address here, and --connect-to describes where a
+                    // named destination lives -- so applying it to the proxy pointed the
+                    // connection itself somewhere else and left the destination alone, which a
+                    // wildcard rule turned into "every request goes to this one address".
+                    boolean toProxy = isUpstreamProxyEndpoint(host, port);
+                    ConnectToMap.Target target =
+                            toProxy ? new ConnectToMap.Target(host, port) : connectTo.remap(host, port);
                     if (dnsResolver == null) {
                         // Wrap the promise rather than the resolver: the platform resolver is
                         // what produces the addresses, so the check has to sit between it and
@@ -387,7 +560,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                                     @Override
                                     public void succeeded(List<InetSocketAddress> addresses) {
                                         try {
-                                            promise.succeeded(refuseLoopback(target.host(), addresses));
+                                            promise.succeeded(refuseLoopback(target.host(), addresses, toProxy));
                                         } catch (Throwable denied) {
                                             promise.failed(denied);
                                         }
@@ -406,7 +579,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                             for (InetAddress address : dnsResolver.resolve(target.host())) {
                                 resolved.add(new InetSocketAddress(address, target.port()));
                             }
-                            promise.succeeded(refuseLoopback(target.host(), resolved));
+                            promise.succeeded(refuseLoopback(target.host(), resolved, toProxy));
                         } catch (Throwable x) {
                             promise.failed(x);
                         }
@@ -423,12 +596,13 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                  * @throws LocalhostPolicy.Denied if any resolved address is loopback
                  */
                 private List<InetSocketAddress> refuseLoopback(String host,
-                                                               List<InetSocketAddress> addresses) {
-                    // With an upstream proxy jetty-client resolves the *proxy's* origin here, not
-                    // the destination, and a proxy on this machine's loopback is an ordinary
-                    // setup. Judging that address refused every request under
+                                                               List<InetSocketAddress> addresses,
+                                                               boolean toProxy) {
+                    // Skipped for a proxy endpoint: jetty-client resolves the *proxy's* origin
+                    // here, not the destination, and a proxy on this machine's loopback is an
+                    // ordinary setup. Judging that address refused every request under
                     // --localhost-policy deny; what the proxy then reaches is its decision.
-                    if (addresses != null && upstreamProxy == null) {
+                    if (addresses != null && !toProxy) {
                         for (InetSocketAddress address : addresses) {
                             if (localhostPolicy.blocksAddress(address.getAddress())) {
                                 LOG.log(Level.INFO, "Localhost policy: refusing dial to {0} ({1})",
@@ -460,7 +634,18 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         client.setResponseBufferSize(CLIENT_BUFFER_SIZE);
 
         ProxySpec spec = ProxySpec.parse(upstreamProxy);
-        if (upstreamProxy != null && !upstreamProxy.isEmpty() && spec == null) {
+        if (pacPolicy != null) {
+            // --pac-local decides per destination, so nothing static is registered here: a
+            // --proxy entry added to this list would match every origin and be picked ahead of
+            // the PAC entries, which is exactly how the file gets ignored. upstreamFor() already
+            // treats --proxy as unreachable once a PAC file is loaded, matching the CONNECT
+            // path, so this is the same decision expressed in jetty-client's terms.
+            if (spec != null) {
+                LOG.log(Level.INFO,
+                        "--pac-local is set, so --proxy is not used for plain HTTP; the PAC file "
+                        + "decides per destination.");
+            }
+        } else if (upstreamProxy != null && !upstreamProxy.isEmpty() && spec == null) {
             LOG.log(Level.WARNING,
                     "Invalid proxy format ''{0}''; expected host:port, http://host:port or socks5://host:port",
                     upstreamProxy);
@@ -642,9 +827,20 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         if (pathQuery == null || pathQuery.isEmpty()) {
             pathQuery = "/";
         }
+        // Before the request is created, so the proxy PAC chose is already in the client's
+        // configuration when jetty-client resolves the destination and asks which one matches.
+        String pacTag = registerPacProxy(newHttpURI.getHost(), port, newHttpURI.getScheme());
+
         org.eclipse.jetty.client.Request proxyRequest =
                 getHttpClient().newRequest(newHttpURI.getHost(), port)
                         .scheme(newHttpURI.getScheme())
+                        // The upstream is part of this destination's identity. jetty-client
+                        // resolves the proxy once per Origin and caches the destination, and
+                        // Origin's equality includes the tag -- so without this a PAC answer
+                        // that changes (the file routes by time of day, and decisions expire
+                        // after a minute) would keep using the destination built from the
+                        // previous answer for as long as it stayed in the pool.
+                        .tag(pacTag)
                         .path(pathQuery)
                         // Deliberately no Request.timeout(): that is the TOTAL length of the
                         // request/response conversation, not an idle timeout, so it aborts a
@@ -726,7 +922,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             // and also with no attacker at all where a bumping upstream Squid re-issues requests
             // in that shape. Mirrors jetty-client's own HttpProxy.requiresTunnel test.
             if (!isTunnelledToOrigin(proxyToServerRequest)) {
-                String upstreamAuthorization = upstreamAuthorization();
+                String upstreamAuthorization = upstreamAuthorization(proxyToServerRequest);
                 if (upstreamAuthorization != null) {
                     fields.put(HttpHeader.PROXY_AUTHORIZATION, upstreamAuthorization);
                 }

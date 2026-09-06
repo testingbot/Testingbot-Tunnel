@@ -120,7 +120,12 @@ public class WebsocketHandler extends ConnectHandler {
         }
         // ws:// is carried over HTTP, so that is the scheme a PAC file is asked about.
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolve("http://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull("http://" + host + ":" + port + "/", host);
+        if (result == null) {
+            // Could not evaluate: fall through to --proxy rather than direct, so a broken file
+            // does not silently bypass the network's only sanctioned egress.
+            return proxySpec;
+        }
         if (result.first().isDirect()) {
             return null;
         }
@@ -350,11 +355,14 @@ public class WebsocketHandler extends ConnectHandler {
             // newConnectAddress() applies --dns and --connect-to. Dialling an InetSocketAddress
             // directly here is what once made the custom resolver dead code on this path.
             //
-            // With an upstream proxy the socket goes to the proxy; the target's name travels in
-            // the request line, which is why --connect-to and --dns are not applied to it here.
+            // With an upstream proxy the socket goes to the proxy and the target's name travels
+            // in the request line, so --connect-to is not applied: it says where a named
+            // *destination* lives, and applying it to the proxy moved this connection instead
+            // while leaving the destination alone. --dns still resolves the proxy's own name.
+            // --localhost-policy is skipped for the same reason: a proxy on loopback is ordinary.
             channel.connect(upstream == null
                     ? newConnectAddress(host, port)
-                    : resolveAddress(connectTo.remap(upstream.getHost(), upstream.getPort())));
+                    : resolveAddress(new ConnectToMap.Target(upstream.getHost(), upstream.getPort())));
             promise.succeeded(channel);
         } catch (Throwable x) {
             close(channel);
@@ -606,7 +614,10 @@ public class WebsocketHandler extends ConnectHandler {
                 }
 
                 String[] lines = response.substring(0, response.indexOf("\r\n\r\n")).split("\r\n");
-                if (lines.length == 0 || !lines[0].contains("101")) {
+                // Was contains("101"), which accepted "HTTP/1.1 2101" and any 500 whose reason
+                // phrase happened to mention 101 -- and then spliced the client to a target that
+                // had refused the upgrade.
+                if (lines.length == 0 || !HttpStatusLine.isSwitchingProtocols(lines[0])) {
                     String answered = lines.length > 0 ? lines[0] : "empty response";
                     // Naming the proxy matters here: in get mode the answer usually comes from
                     // the proxy declining to forward the upgrade, not from the target refusing

@@ -96,7 +96,14 @@ public class PidPoller {
                 Runtime.getRuntime().removeShutdownHook(cleanupThread);
             } catch (IllegalStateException alreadyShuttingDown) {
                 // The JVM is on its way down and will run the hook itself.
+                scheduler.cancel();
+                return;
             }
+            // The hook was this file's only deletion, so removing it and stopping there left the
+            // pid file behind for a process that no longer exists. The next run then finds a pid
+            // file naming a dead process, and an embedder that starts a tunnel per job
+            // accumulates one per job.
+            deleteQuietly(pidFile);
         }
         scheduler.cancel();
     }

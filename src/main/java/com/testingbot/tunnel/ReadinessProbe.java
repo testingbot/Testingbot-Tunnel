@@ -42,6 +42,12 @@ public final class ReadinessProbe {
                     ? "Tunnel is not ready yet."
                     : "Unexpected status " + status + " from /readyz on port " + port + ".");
             return 1;
+        } catch (IllegalArgumentException unusable) {
+            // A port outside 1-65535 makes URI.create throw, which is not an IOException. The
+            // CLI rejects that before reaching here, but this method is public and the whole
+            // point of it is to return an exit code rather than a stack trace.
+            System.err.println("Cannot probe port " + port + ": " + unusable.getMessage());
+            return 1;
         } catch (IOException unreachable) {
             System.err.println("Could not reach the tunnel's metrics port " + port + " on " + host
                     + ": " + unreachable.getMessage()

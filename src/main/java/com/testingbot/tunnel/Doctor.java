@@ -38,6 +38,16 @@ public final class Doctor {
     private boolean hasFailures = false;
 
     public Doctor(App app) {
+        this(app, defaultEndpoints());
+    }
+
+    /**
+     * @param uris what to reach; injected so the tests can exercise the configuration checks
+     *             without leaving the machine. The constructor runs the checks, so every test
+     *             that built a Doctor made four real internet requests -- slow, and failing in
+     *             a sandbox or on a plane for reasons that have nothing to do with the test.
+     */
+    Doctor(App app, ArrayList<URI> uris) {
         this.app = app;
         if (app.getJettyPort() <= 0) {
             // Only when none was configured. Overwriting it meant --doctor --localproxy 9999
@@ -45,18 +55,21 @@ public final class Doctor {
             // configured port being taken, or privileged -- was never tested.
             app.setFreeJettyPort();
         }
+        performChecks(uris);
+    }
+
+    /** The endpoints a real {@code --doctor} run checks. */
+    static ArrayList<URI> defaultEndpoints() {
         ArrayList<URI> uris = new ArrayList<>();
         try {
             uris.add(new URI("https://testingbot.com"));
             uris.add(new URI("http://hub.testingbot.com"));
             uris.add(new URI("https://api.testingbot.com/v1/browsers"));
             uris.add(new URI("https://www.google.com/"));
-        } catch (URISyntaxException e) {
-            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, e.getMessage());
-            hasFailures = true;
+        } catch (URISyntaxException impossible) {
+            Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE, impossible.getMessage());
         }
-
-        performChecks(uris);
+        return uris;
     }
 
     public boolean hasFailures() {
@@ -201,28 +214,13 @@ public final class Doctor {
             .setResponseTimeout(Timeout.of(3, TimeUnit.SECONDS))
             .build();
 
-        org.apache.hc.client5.http.impl.classic.HttpClientBuilder builder = HttpClients.custom();
-        com.testingbot.tunnel.proxy.ProxySpec spec =
-                com.testingbot.tunnel.proxy.ProxySpec.parse(app.getControlProxy());
-        if (spec != null && !spec.isSocks5()) {
-            builder.setProxy(new org.apache.hc.core5.http.HttpHost(
-                    "http", spec.getHost(), spec.getPort()));
-        }
-        if (app.getCaCertificates() != null) {
-            try {
-                builder.setConnectionManager(
-                        org.apache.hc.client5.http.impl.io
-                                .PoolingHttpClientConnectionManagerBuilder.create()
-                                .setTlsSocketStrategy(
-                                        new org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy(
-                                                app.getCaCertificates().sslContext()))
-                                .build());
-            } catch (java.security.GeneralSecurityException unusable) {
-                Logger.getLogger(Doctor.class.getName()).log(Level.WARNING,
-                        "Could not apply --cacert-file to the connectivity check: {0}",
-                        unusable.getMessage());
-            }
-        }
+        // The same builder Api uses, rather than a second one that has to be kept in step. This
+        // was a local reimplementation that had drifted: it skipped SOCKS5 entirely and never
+        // supplied credentials for an authenticated proxy, so on those networks --doctor tested
+        // a route the tunnel does not take -- reporting a failure the tunnel would not hit, or a
+        // success by a path it would not use.
+        org.apache.hc.client5.http.impl.classic.HttpClientBuilder builder =
+                Api.controlPlaneBuilder(app);
 
         try (CloseableHttpClient client = builder
             .setDefaultRequestConfig(cfg).build()) {

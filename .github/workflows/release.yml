@@ -5,18 +5,53 @@ on:
     tags:
       - '*'
 
-# Three independent channels. The GitHub release asset and the Docker image
-# must never be hostage to Maven Central: for 4.9 the Central publish queue
-# outlasted the plugin's poll window, the job "failed", and the release and
-# docker steps were skipped while Central went on to publish anyway.
+# Three independent publish channels, all gated on one `test` job.
+#
+# The independence is between the channels, not from the tests. The GitHub release
+# asset and the Docker image must never be hostage to Maven Central: for 4.9 the
+# Central publish queue outlasted the plugin's poll window, the job "failed", and
+# the release and docker steps were skipped while Central went on to publish anyway.
+# So they still do not depend on each other -- but every one of them now depends on
+# `test`, because until it did, `native` and `central` had no `needs:` at all and
+# both build with -DskipTests. A tagged commit with failing tests published native
+# distributions and a Maven Central artifact; only `docker` was gated, and only
+# incidentally, by depending on `build`.
+#
+# `test` runs `verify` rather than `test`, so the shaded-jar smoke test and JaCoCo
+# run here too -- a release is the one place where the packaged artifact being
+# runnable has to be checked before anything is uploaded.
+#
 # Workflow permissions are least-privilege by default (see the maven-publish
-# hardening); only the job that creates the GitHub release gets write access.
+# hardening); only the jobs that create the GitHub release get write access.
 permissions:
   contents: read
 
 jobs:
+  # The gate. Nothing is published unless this passes.
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: 'maven'
+
+    # No versions:set: the tests do not depend on the version, and the smoke test
+    # resolves the jar through ${project.build.finalName} rather than globbing.
+    # -Dgpg.skip: signing belongs to the `central` job, which has the key. maven-gpg-plugin
+    # binds to verify, so without this the gate fails on a missing key rather than on a test.
+    - name: Verify
+      run: mvn -B verify -Dgpg.skip=true
+
   build:
     runs-on: ubuntu-latest
+    needs: test
     permissions:
       contents: write   # creates the release and uploads the jar asset
 
@@ -69,6 +104,7 @@ jobs:
   # matrix. Each build is verified before upload, because a missing module fails at
   # runtime rather than at build time.
   native:
+    needs: test
     permissions:
       contents: write
     strategy:
@@ -79,7 +115,10 @@ jobs:
             asset: testingbot-tunnel-linux-x64
           - os: ubuntu-24.04-arm
             asset: testingbot-tunnel-linux-arm64
-          - os: macos-13
+          # macos-13 was retired by GitHub on 2025-12-04; macos-15-intel is the
+          # Intel runner that replaced it. jlink emits a runtime for the machine it
+          # runs on, so this entry is what makes the x64 macOS build x64.
+          - os: macos-15-intel
             asset: testingbot-tunnel-macos-x64
           - os: macos-latest
             asset: testingbot-tunnel-macos-arm64
@@ -190,6 +229,7 @@ jobs:
 
   central:
     runs-on: ubuntu-latest
+    needs: test
 
     steps:
     - name: Checkout code
@@ -212,7 +252,7 @@ jobs:
         TAG_VERSION=${GITHUB_REF#refs/tags/v}
         mvn versions:set -DnewVersion=${TAG_VERSION} -DgenerateBackupPoms=false
 
-    # Tests run in the build job; this job only deploys.
+    # Tests run in the `test` job this depends on; this job only deploys.
     - name: Deploy to Maven Central
       run: mvn -B clean deploy -DskipTests -Dgpg.passphrase=${{ secrets.GPG_PASSPHRASE }}
       env:
@@ -222,7 +262,10 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
-    needs: build
+    # `test`, not `build`: the point was never to wait for the release to be created,
+    # only not to publish an image from a failing build. Naming the gate directly says
+    # that, and lets the image build alongside the release rather than after it.
+    needs: test
 
     steps:
     - name: Checkout code

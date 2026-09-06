@@ -339,20 +339,50 @@ public class SSHTunnel implements ReconnectableTunnel {
     /**
      * Is the local forward for {@code sshPort} still in JSch's list?
      *
-     * <p>Extracted so it can be tested: the entries are free-form strings like
-     * {@code "4446:hub.testingbot.com:80"}, and a substring match on the port is looser than it
-     * looks -- 445 matches 4456 -- so the exact behaviour is worth pinning rather than assuming.
+     * <p>The entries look like {@code "4446:hub.testingbot.com:80"}, or with a bind address
+     * {@code "127.0.0.1:4446:hub.testingbot.com:80"}. The local port is what identifies the
+     * forward, so that is what is compared.
+     *
+     * <p>This was {@code contains(String.valueOf(sshPort))} on the whole entry, and a previous
+     * test documented the false positive it produces -- 445 matching 4456 -- as harmless. It is
+     * not: this answers "is my forward still there", and the monitor repairs it when the answer
+     * is no. A match against some other forward's port, or against a digit sequence in the
+     * destination host or the remote port, reports a forward that is gone as present, so the
+     * repair never runs and every request through the tunnel keeps failing.
      */
     static boolean localForwardingActive(String[] forwardedPorts, int sshPort) {
         if (forwardedPorts == null) {
             return false;
         }
-        for (String port : forwardedPorts) {
-            if (port != null && port.contains(String.valueOf(sshPort))) {
+        for (String entry : forwardedPorts) {
+            if (entry != null && localPortOf(entry) == sshPort) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     * The local port from a JSch forwarding entry, or -1 when it cannot be read.
+     *
+     * <p>The port is the field before the destination host: first for {@code lport:host:rport},
+     * second when a bind address is present. Distinguished by which one parses as a number --
+     * a bind address never does, and a port always does.
+     */
+    private static int localPortOf(String entry) {
+        String[] fields = entry.split(":");
+        if (fields.length < 3) {
+            return -1;
+        }
+        // fields[0] is either the local port or a bind address.
+        for (int i = 0; i < 2 && i < fields.length; i++) {
+            try {
+                return Integer.parseInt(fields[i].trim());
+            } catch (NumberFormatException notAPort) {
+                // a bind address; try the next field
+            }
+        }
+        return -1;
     }
 
     /**
