@@ -896,7 +896,8 @@ public class App {
             ConsoleHandler handler = new ConsoleHandler();
             // Read from the command line rather than the App, which does not exist yet: the
             // console handler is installed before anything is parsed into an App.
-            handler.setFormatter(logFormatterFor(requestedLogFormat(commandLine)));
+            activeLogFormat = requestedLogFormat(commandLine);
+            handler.setFormatter(logFormatterFor(activeLogFormat));
             logger.addHandler(handler);
             if ("json".equalsIgnoreCase(requestedLogFormat(commandLine))) {
                 // Sibling JUL loggers (HttpProxy, Doctor, SSHTunnel, the handlers) publish
@@ -907,6 +908,14 @@ public class App {
                         : Logger.getLogger("").getHandlers()) {
                     rootHandler.setFormatter(new JsonLogFormatter());
                 }
+                // And the other logging stack. This process logs through both: JUL for its own
+                // classes and SLF4J/logback for Jetty, Apache HC and the proxy handlers, and
+                // logback.xml pins its console appender to a text pattern. So --log-format json
+                // produced a stream that was JSON for some records and text for others -- which
+                // is not a format at all, and worse than plain text for the collector this
+                // option exists to serve. The file appender below already did this; the console
+                // is where almost every record actually goes.
+                jsonifyLogbackConsole((LoggerContext) LoggerFactory.getILoggerFactory());
             }
 
             App app = new App();
@@ -994,10 +1003,18 @@ public class App {
                 return;
             }
 
-            System.out.println("----------------------------------------------------------------");
-            System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
-            System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
-            System.out.println("----------------------------------------------------------------");
+            // Suppressed under --log-format json: four lines of ASCII art on stdout is four
+            // parse failures for a collector reading one object per line, and it is the very
+            // first thing it would meet.
+            if (!"json".equalsIgnoreCase(requestedLogFormat(commandLine))) {
+                System.out.println("----------------------------------------------------------------");
+                System.out.println("  TestingBot Tunnel v" + App.VERSION + "                        ");
+                System.out.println("  Questions or suggestions, please visit https://testingbot.com ");
+                System.out.println("----------------------------------------------------------------");
+            } else {
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "TestingBot Tunnel {0}", App.VERSION);
+            }
 
             applyCredentials(app, commandLine);
 
@@ -1028,7 +1045,15 @@ public class App {
             System.err.println(parseException.getMessage());
             System.exit(2);
         } catch (TunnelFailedException tunnelFailedException) {
-            System.err.println(tunnelFailedException.getMessage());
+            // Under json this goes through the logger instead: JUL's console handler writes to
+            // stderr, so printing here would put a bare multi-line message in the middle of the
+            // JSON stream -- and this is a multi-line message, so it is several parse failures.
+            if ("json".equalsIgnoreCase(activeLogFormat)) {
+                Logger.getLogger(App.class.getName()).log(Level.SEVERE,
+                        tunnelFailedException.getMessage());
+            } else {
+                System.err.println(tunnelFailedException.getMessage());
+            }
             System.exit(tunnelFailedException.getExitCode());
         }
     }
@@ -1038,6 +1063,14 @@ public class App {
      * command line client exits with a status a supervisor can act on.
      */
     private volatile boolean commandLineClient;
+    /**
+     * The format the console log stream is using, for code outside the parse block.
+     *
+     * <p>Static because the fatal-error path in main() runs from a catch that encloses argument
+     * parsing, so the CommandLine may not exist by then -- but the formatter has already been
+     * installed and the stream already has a shape that must be respected.
+     */
+    private static volatile String activeLogFormat = "text";
     private PidPoller pidPoller;
     private TunnelPoller poller;
     private HttpForwarder httpForwarder;
@@ -1079,7 +1112,8 @@ public class App {
                 }
                 TunnelMetrics.setTunnelUp(false);
                 try {
-                    System.out.println("Shutting down your personal Tunnel Server.");
+                    Logger.getLogger(App.class.getName()).log(Level.INFO,
+                            "Shutting down your personal Tunnel Server.");
                     api.destroyTunnel();
                 } catch (Exception ex) {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
@@ -1187,7 +1221,11 @@ public class App {
         // so being explicit here keeps the reason for the gauge attached to this path.
         TunnelMetrics.setTunnelUp(false);
         if (commandLineClient) {
-            System.err.println(reason);
+            // Already logged above; printing it again would duplicate it under text and break
+            // the stream under json.
+            if (!"json".equalsIgnoreCase(activeLogFormat)) {
+                System.err.println(reason);
+            }
             System.exit(exitCode);
         }
     }
@@ -1251,7 +1289,8 @@ public class App {
         // normal path for an embedder cleaning up in a finally block.
         if (api != null) {
             try {
-                System.out.println("Shutting down your personal Tunnel Server.");
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "Shutting down your personal Tunnel Server.");
                 api.destroyTunnel();
             } catch (Exception ex) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
@@ -1751,6 +1790,33 @@ public class App {
 
     public void setLogFormat(String logFormat) {
         this.logFormat = logFormat == null ? "text" : logFormat;
+    }
+
+    /**
+     * Replaces the encoder on logback's console appender with the JSON one.
+     *
+     * <p>Reaches into the configured appenders rather than adding another: logback.xml's STDOUT
+     * appender is what Jetty, Apache HC and the SLF4J-using proxy handlers write through, and
+     * adding a second would duplicate every record rather than reformat it.
+     */
+    static void jsonifyLogbackConsole(LoggerContext loggerContext) {
+        ch.qos.logback.classic.Logger root =
+                loggerContext.getLogger(ch.qos.logback.classic.Logger.ROOT_LOGGER_NAME);
+        for (java.util.Iterator<ch.qos.logback.core.Appender<ch.qos.logback.classic.spi.ILoggingEvent>>
+                     it = root.iteratorForAppenders(); it.hasNext(); ) {
+            ch.qos.logback.core.Appender<ch.qos.logback.classic.spi.ILoggingEvent> appender = it.next();
+            if (appender instanceof ch.qos.logback.core.ConsoleAppender<?> console) {
+                JsonLogbackEncoder json = new JsonLogbackEncoder();
+                json.setContext(loggerContext);
+                json.start();
+                @SuppressWarnings("unchecked")
+                ch.qos.logback.core.ConsoleAppender<ch.qos.logback.classic.spi.ILoggingEvent> typed =
+                        (ch.qos.logback.core.ConsoleAppender<ch.qos.logback.classic.spi.ILoggingEvent>) console;
+                typed.stop();
+                typed.setEncoder(json);
+                typed.start();
+            }
+        }
     }
 
     /** The formatter for {@code --log-format}, shared by the console and the log file. */
