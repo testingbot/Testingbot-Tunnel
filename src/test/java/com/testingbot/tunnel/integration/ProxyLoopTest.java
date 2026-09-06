@@ -87,6 +87,10 @@ class ProxyLoopTest {
 
         assertThat(statusOf(response)).contains("508");
         assertThat(response).contains("loop-detected");
+        // A deliberate wait, not a guess at readiness. This asserts the request did *not*
+        // re-enter the handler, so there is no condition that becomes true and nothing to poll
+        // for -- looking too early would pass whether the loop guard works or not. Too short
+        // weakens the test rather than flaking it, which is why it stays generous.
         Thread.sleep(300);
         assertThat(Statistics.getNumberOfRequests())
                 .as("the request must not re-enter the handler")

@@ -41,7 +41,7 @@ class HealthEndpointsTest {
         app.setClientSecret("test_secret");
         app.setMetricsPort(metricsPort);
         insightServer = new InsightServer(app);
-        waitForPort(metricsPort);
+        Await.serverOn(metricsPort);
     }
 
     @AfterEach
@@ -56,16 +56,6 @@ class HealthEndpointsTest {
         }
     }
 
-    private static void waitForPort(int port) throws Exception {
-        for (int i = 0; i < 100; i++) {
-            try (java.net.Socket s = new java.net.Socket("127.0.0.1", port)) {
-                return;
-            } catch (IOException retry) {
-                Thread.sleep(50);
-            }
-        }
-        throw new IllegalStateException("Insight server did not start on port " + port);
-    }
 
     private static int status(int port, String path) throws Exception {
         try (CloseableHttpClient client = HttpClients.createDefault()) {
@@ -124,14 +114,20 @@ class HealthEndpointsTest {
         app.setClientSecret("test_secret");
         app.setMetricsPort(port);
         app.setMetricsAuth("user:password");
-        new InsightServer(app);
-        waitForPort(port);
+        // A second server, so it needs stopping too: tearDown only knows about the one from
+        // setUp. Left running, it held this port for the rest of the JVM.
+        InsightServer authed = new InsightServer(app);
+        try {
+            Await.serverOn(port);
 
-        // Probes cannot easily carry credentials, so these must not be behind auth...
-        assertThat(status(port, "/healthz")).isEqualTo(200);
-        assertThat(status(port, "/readyz")).isEqualTo(503);
-        // ...but /metrics still is.
-        assertThat(status(port, "/metrics")).isEqualTo(401);
+            // Probes cannot easily carry credentials, so these must not be behind auth...
+            assertThat(status(port, "/healthz")).isEqualTo(200);
+            assertThat(status(port, "/readyz")).isEqualTo(503);
+            // ...but /metrics still is.
+            assertThat(status(port, "/metrics")).isEqualTo(401);
+        } finally {
+            authed.stop();
+        }
     }
 
     @Test

@@ -141,7 +141,10 @@ class ForwarderLoggingTest {
         } catch (IOException expected) {
             // only the logging matters here
         }
-        Thread.sleep(300);
+        // Shared by the tests that expect a line and the ones that expect none, so it cannot
+        // simply poll: it returns as soon as something is logged, and otherwise waits the full
+        // window before reporting nothing, which is what the absence assertions need.
+        com.testingbot.tunnel.Await.atMost(300, () -> !captured.messages().isEmpty());
         return captured.messages();
     }
 

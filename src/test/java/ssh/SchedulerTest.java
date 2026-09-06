@@ -57,6 +57,8 @@ class SchedulerTest {
         scheduler.cancel();
         int afterCancel = runs.get();
         assertThat(afterCancel).isPositive();
+        // Absence again: a cancelled scheduler must run nothing more, and "nothing more"
+        // only becomes observable by giving it time to misbehave.
         Thread.sleep(100);
 
         assertThat(runs.get()).isEqualTo(afterCancel);
@@ -130,6 +132,7 @@ class SchedulerTest {
             int afterReplace = first.get();
             assertThat(afterReplace).isPositive();
             assertThat(second.await(5, TimeUnit.SECONDS)).isTrue();
+            // As above: the replaced task must not fire again, which cannot be polled for.
             Thread.sleep(50);
 
             assertThat(first.get()).isEqualTo(afterReplace);

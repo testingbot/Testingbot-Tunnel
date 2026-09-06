@@ -44,6 +44,19 @@ class HttpLoggingTest {
     private CapturingHandler captured;
     private Logger logHandlerLogger;
 
+    /**
+     * The captured log, once there is one.
+     *
+     * <p>The record is written by the handler on another thread, so the helpers used to sleep
+     * 200ms and hope. Too long when the record is already there -- which is almost always --
+     * and too short on a loaded runner, where it failed as an assertion about logging that said
+     * nothing about timing.
+     */
+    private String awaitLogged() {
+        return com.testingbot.tunnel.Await.value("a log record from HttpLogHandler",
+                captured::all);
+    }
+
     /** Collects what HttpLogHandler emits. */
     private static final class CapturingHandler extends Handler {
         private final List<String> messages = new ArrayList<>();
@@ -186,7 +199,6 @@ class HttpLoggingTest {
             while ((line = reader.readLine()) != null) {
                 all.append(line).append('\n');
             }
-            Thread.sleep(200);
             return all.toString();
         }
     }
@@ -206,7 +218,6 @@ class HttpLoggingTest {
                 // drain so the exchange completes before we look at the log
             }
         }
-        Thread.sleep(200);
     }
 
     @Test
@@ -216,6 +227,9 @@ class HttpLoggingTest {
 
         proxyGet("");
 
+        // A deliberate wait, not a guess at readiness: this asserts a record never appears,
+        // so there is nothing to poll for and the only way to be wrong is to look too early.
+        Thread.sleep(200);
         assertThat(captured.count()).isZero();
     }
 
@@ -226,7 +240,7 @@ class HttpLoggingTest {
 
         proxyGet("X-Custom: visible\r\n");
 
-        String logged = captured.all();
+        String logged = awaitLogged();
         assertThat(logged).contains("GET");
         assertThat(logged).contains("/page");
         assertThat(logged).contains("200");
@@ -240,7 +254,7 @@ class HttpLoggingTest {
 
         proxyGet("X-Custom: visible\r\n");
 
-        assertThat(captured.all()).contains("X-Custom: visible");
+        assertThat(awaitLogged()).contains("X-Custom: visible");
     }
 
     @Test
@@ -251,7 +265,7 @@ class HttpLoggingTest {
 
         proxyGet("Authorization: Bearer super-secret-token\r\n");
 
-        String logged = captured.all();
+        String logged = awaitLogged();
         assertThat(logged).contains("Authorization");
         assertThat(logged).doesNotContain("super-secret-token");
     }
@@ -263,6 +277,9 @@ class HttpLoggingTest {
 
         proxyGet("");
 
+        // A deliberate wait, not a guess at readiness: this asserts a record never appears,
+        // so there is nothing to poll for and the only way to be wrong is to look too early.
+        Thread.sleep(200);
         assertThat(captured.count()).isZero();
     }
 
@@ -273,7 +290,7 @@ class HttpLoggingTest {
 
         proxyGet("X-Custom: visible\r\n");
 
-        String logged = captured.all();
+        String logged = awaitLogged();
         assertThat(logged).contains("500");
         assertThat(logged).contains("X-Custom: visible");
     }
@@ -286,7 +303,7 @@ class HttpLoggingTest {
 
         proxyGet("X-Request-Id: caller-supplied-id\r\n");
 
-        assertThat(captured.all()).contains("[caller-supplied-id]");
+        assertThat(awaitLogged()).contains("[caller-supplied-id]");
     }
 
     @Test
@@ -296,7 +313,7 @@ class HttpLoggingTest {
 
         proxyGet("");
 
-        assertThat(captured.all()).matches("(?s).*\\[[0-9a-f]+\\].*");
+        assertThat(awaitLogged()).matches("(?s).*\\[[0-9a-f]+\\].*");
     }
 
     @Test
@@ -308,7 +325,7 @@ class HttpLoggingTest {
         String seenByOrigin = proxyGetEchoing("X-Request-Id: caller-supplied-id\r\n");
 
         assertThat(seenByOrigin).contains("caller-supplied-id");
-        assertThat(captured.all()).contains("[caller-supplied-id]");
+        assertThat(awaitLogged()).contains("[caller-supplied-id]");
     }
 
     @Test
@@ -329,6 +346,6 @@ class HttpLoggingTest {
 
         proxyGet("X-Trace: my-trace-id\r\n");
 
-        assertThat(captured.all()).contains("[my-trace-id]");
+        assertThat(awaitLogged()).contains("[my-trace-id]");
     }
 }

@@ -50,12 +50,19 @@ class InsightServerTest {
     @AfterEach
     void tearDown() throws Exception {
         resetStatistics();
+        // Every test here leaked a Jetty server and a bound port. That leak is why the tests
+        // below each needed a *different* hardcoded port: the previous one was still held.
+        if (insightServer != null) {
+            insightServer.stop();
+            insightServer = null;
+        }
     }
 
     @Test
     void constructor_shouldStartServer() throws Exception {
         // Given: App with metrics port configured
-        app.setMetricsPort(8999);
+        int port = freePort();
+        app.setMetricsPort(port);
 
         // When: Creating InsightServer
         insightServer = new InsightServer(app);
@@ -64,19 +71,20 @@ class InsightServerTest {
         assertThat(insightServer).isNotNull();
 
         // Give server time to start
-        Thread.sleep(500);
+        Await.serverOn(port);
     }
 
     @Test
     void metricsEndpoint_shouldReturnJson() throws Exception {
         // Given: Running InsightServer
-        app.setMetricsPort(8998);
+        int port = freePort();
+        app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500); // Wait for server to start
+        Await.serverOn(port);
 
         // When: Making request to metrics endpoint
         try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet request = new HttpGet("http://localhost:8998/");
+            HttpGet request = new HttpGet("http://localhost:" + port + "/");
             client.execute(request, response -> {
                 // Then: Should return 200 OK
                 assertThat(response.getCode()).isEqualTo(200);
@@ -101,13 +109,14 @@ class InsightServerTest {
     @Test
     void metricsEndpoint_shouldReturnCorrectVersion() throws Exception {
         // Given: Running InsightServer
-        app.setMetricsPort(8997);
+        int port = freePort();
+        app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet request = new HttpGet("http://localhost:8997/");
+            HttpGet request = new HttpGet("http://localhost:" + port + "/");
             client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
@@ -125,13 +134,14 @@ class InsightServerTest {
         long startTime = System.currentTimeMillis() - 5000; // 5 seconds ago
         Statistics.setStartTime(startTime);
 
-        app.setMetricsPort(8996);
+        int port = freePort();
+        app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet request = new HttpGet("http://localhost:8996/");
+            HttpGet request = new HttpGet("http://localhost:" + port + "/");
             client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
@@ -152,13 +162,14 @@ class InsightServerTest {
         Statistics.addRequest();
         Statistics.addRequest();
 
-        app.setMetricsPort(8995);
+        int port = freePort();
+        app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet request = new HttpGet("http://localhost:8995/");
+            HttpGet request = new HttpGet("http://localhost:" + port + "/");
             client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
@@ -176,13 +187,14 @@ class InsightServerTest {
         resetStatistics();
         Statistics.addBytesTransferred(2048);
 
-        app.setMetricsPort(8994);
+        int port = freePort();
+        app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         // When: Getting metrics
         try (CloseableHttpClient client = HttpClients.createDefault()) {
-            HttpGet request = new HttpGet("http://localhost:8994/");
+            HttpGet request = new HttpGet("http://localhost:" + port + "/");
             client.execute(request, response -> {
                 String body = EntityUtils.toString(response.getEntity());
                 JsonNode json = objectMapper.readTree(body);
@@ -197,14 +209,15 @@ class InsightServerTest {
     @Test
     void metricsEndpoint_shouldHandleMultipleRequests() throws Exception {
         // Given: Running InsightServer
-        app.setMetricsPort(8993);
+        int port = freePort();
+        app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         // When: Making multiple requests
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             for (int i = 0; i < 5; i++) {
-                HttpGet request = new HttpGet("http://localhost:8993/");
+                HttpGet request = new HttpGet("http://localhost:" + port + "/");
                 client.execute(request, response -> {
                     // Then: Each request should succeed
                     assertThat(response.getCode()).isEqualTo(200);
@@ -230,7 +243,7 @@ class InsightServerTest {
         int port = freePort();
         app.setMetricsPort(port);
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:" + port + "/metrics");
@@ -254,7 +267,7 @@ class InsightServerTest {
         app.setMetricsPort(port);
         app.setMetricsAuth("user:secret");
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:" + port + "/metrics");
@@ -273,7 +286,7 @@ class InsightServerTest {
         app.setMetricsPort(port);
         app.setMetricsAuth("user:secret");
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         String credentials = java.util.Base64.getEncoder()
             .encodeToString("user:secret".getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -296,7 +309,7 @@ class InsightServerTest {
         app.setMetricsPort(port);
         app.setMetricsAuth("user:secret");
         insightServer = new InsightServer(app);
-        Thread.sleep(500);
+        Await.serverOn(port);
 
         try (CloseableHttpClient client = HttpClients.createDefault()) {
             HttpGet request = new HttpGet("http://localhost:" + port + "/");

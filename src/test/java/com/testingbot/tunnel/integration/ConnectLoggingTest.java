@@ -135,6 +135,8 @@ class ConnectLoggingTest {
         } catch (IOException expected) {
             // the tunnel cannot be established; only the logging matters here
         }
+        // A deliberate wait, not a guess at readiness: this asserts a line never appears, so
+        // there is nothing to poll for and the only way to be wrong is to look too early.
         Thread.sleep(300);
 
         assertThat(captured.messages())
@@ -176,7 +178,8 @@ class ConnectLoggingTest {
             } catch (IOException expected) {
                 // the dial cannot succeed; the line is written on the way in regardless
             }
-            Thread.sleep(300);
+            com.testingbot.tunnel.Await.until("a CONNECT line from the proxy logger",
+                    () -> urlCaptured.messages().stream().anyMatch(m -> m.contains("CONNECT")));
 
             assertThat(urlCaptured.messages())
                     .as("--log-http url must log the CONNECT")
@@ -221,7 +224,8 @@ class ConnectLoggingTest {
         } catch (IOException expected) {
             // the destination does not resolve; only the logging matters here
         }
-        Thread.sleep(300);
+        com.testingbot.tunnel.Await.until("the CONNECT headers to be logged",
+                () -> debugCaptured.messages().stream().anyMatch(m -> m.contains("X-Marker")));
 
         String log = String.join("\n", debugCaptured.messages());
         assertThat(log).contains("X-Marker: seen");

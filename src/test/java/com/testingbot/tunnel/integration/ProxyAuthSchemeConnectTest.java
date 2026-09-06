@@ -121,7 +121,10 @@ class ProxyAuthSchemeConnectTest {
             BufferedReader reader = new BufferedReader(
                     new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
             String status = reader.readLine();
-            Thread.sleep(200);
+            // The upstream records the CONNECT headers on its own thread, and every caller
+            // asserts on them, so wait for them rather than guessing how long that takes.
+            com.testingbot.tunnel.Await.until("the upstream to record the CONNECT headers",
+                    () -> !connectHeaders.isEmpty());
             return status == null ? "" : status;
         }
     }
