@@ -69,8 +69,11 @@ public class CustomConnectionMonitor {
     }
 
     private void scheduleRetry() {
-        scheduler.scheduleOnce("Reconnect-" + tunnel.getConnectionId(), this::attemptReconnect,
-                retryDelayMs);
+        scheduleRetry(this::attemptReconnect);
+    }
+
+    private void scheduleRetry(Runnable task) {
+        scheduler.scheduleOnce("Reconnect-" + tunnel.getConnectionId(), task, retryDelayMs);
     }
 
     /** One reconnect attempt. Package-private so a test can drive it without the scheduler. */
@@ -121,11 +124,26 @@ public class CustomConnectionMonitor {
             LOG.log(Level.SEVERE, String.format(
                     "[%s] SSH reconnected, but the local proxy could not be restarted: %s",
                     tunnel.getConnectionId(), proxyFailed.getMessage()), proxyFailed);
-            // The SSH session stays up; retry just the proxy rather than re-dialling it.
-            scheduleRetry();
+            // Retry just the proxy. This used to call scheduleRetry(), whose task is
+            // attemptReconnect() -- which begins tunnel.stop(); tunnel.connect(). So the branch
+            // that exists to avoid re-dialling a healthy SSH session scheduled exactly that,
+            // every five seconds, for as long as the port stayed bound.
+            if (retryAttempts >= MAX_RETRIES) {
+                // Checked here too. Returning from attemptReconnect() through onReconnected()
+                // skips its own limit check, so a port that never frees up retried forever
+                // rather than falling through to the rebuild that would have released it.
+                giveUpAndRebuild();
+                return;
+            }
+            scheduleRetry(this::retryLocalProxy);
             return;
         }
 
+        finishReconnect();
+    }
+
+    /** The part common to a clean reconnect and one that needed the proxy retried. */
+    private void finishReconnect() {
         retrying.set(false);
         scheduler.cancel();
 
@@ -136,6 +154,32 @@ public class CustomConnectionMonitor {
                 "[%s] Successfully re-established SSH Connection after %d attempts",
                 tunnel.getConnectionId(), retryAttempts));
         retryAttempts = 0;
+    }
+
+    /**
+     * Restarts the local proxy without touching the SSH session.
+     *
+     * <p>Reached when SSH is up and authenticated but the proxy could not bind -- typically its
+     * port has not been released yet. Everything else about the tunnel is healthy, so the
+     * expensive part is not repeated; only when the port never frees up does this fall through
+     * to the rebuild, which stops the whole App and so releases it.
+     */
+    private void retryLocalProxy() {
+        retryAttempts += 1;
+        try {
+            host.startLocalProxy();
+        } catch (RuntimeException proxyFailed) {
+            LOG.log(Level.WARNING, String.format(
+                    "[%s] Local proxy restart attempt %d failed: %s",
+                    tunnel.getConnectionId(), retryAttempts, proxyFailed.getMessage()));
+            if (retryAttempts >= MAX_RETRIES) {
+                giveUpAndRebuild();
+            } else {
+                scheduleRetry(this::retryLocalProxy);
+            }
+            return;
+        }
+        finishReconnect();
     }
 
     private void giveUpAndRebuild() {

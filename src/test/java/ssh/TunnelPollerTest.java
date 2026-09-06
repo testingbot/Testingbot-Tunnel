@@ -107,17 +107,62 @@ class TunnelPollerTest {
     }
 
     @Test
-    void aFailureWhilePollingStopsTheSchedule() throws Exception {
-        when(api.pollTunnel(anyString())).thenThrow(new RuntimeException("boom"));
+    void oneFailedPollIsRetriedRatherThanEndingTheTunnel() throws Exception {
+        when(api.pollTunnel(anyString()))
+                .thenThrow(new RuntimeException("boom"))
+                .thenReturn(state("READY"));
         poller();
 
         scheduler.poll();
 
-        // The cancel is the point: without it the poller keeps throwing every five seconds for
-        // the life of the process. The old test asserted only that tunnelReady was not called.
-        verify(api, times(1)).pollTunnel("tunnel123");
-        verify(app, never()).tunnelReady(any());
+        // The previous behaviour, and what the previous test asserted: a single exception
+        // cancelled the schedule for good. Nothing then terminated or reported, so the process
+        // stayed alive and permanently unready on one transient API error.
+        assertThat(scheduler.wasCancelled())
+                .as("a single failed poll must not stop the schedule")
+                .isFalse();
+        verify(app, never()).setupFailed(anyString(), org.mockito.ArgumentMatchers.anyInt());
+
+        scheduler.poll();
+
+        verify(app).tunnelReady(any());
+    }
+
+    @Test
+    void aSustainedRunOfFailuresGivesUpAndReportsIt() throws Exception {
+        when(api.pollTunnel(anyString())).thenThrow(new RuntimeException("boom"));
+        poller();
+
+        for (int i = 0; i < TunnelPoller.MAX_CONSECUTIVE_ERRORS; i++) {
+            scheduler.poll();
+        }
+
+        // Retrying forever would be the opposite mistake. The schedule stops, and -- the part
+        // that was missing -- the app is told, so it stops reporting ready and the command line
+        // client exits instead of lingering.
         assertThat(scheduler.wasCancelled()).isTrue();
+        verify(api, times(TunnelPoller.MAX_CONSECUTIVE_ERRORS)).pollTunnel("tunnel123");
+        verify(app).setupFailed(anyString(), org.mockito.ArgumentMatchers.anyInt());
+    }
+
+    @Test
+    void aSuccessfulPollResetsTheFailureCount() throws Exception {
+        when(api.pollTunnel(anyString()))
+                .thenThrow(new RuntimeException("boom"))
+                .thenThrow(new RuntimeException("boom"))
+                .thenReturn(state("BOOTING"))
+                .thenThrow(new RuntimeException("boom"))
+                .thenThrow(new RuntimeException("boom"));
+        poller();
+
+        for (int i = 0; i < 5; i++) {
+            scheduler.poll();
+        }
+
+        // Four failures in total but never MAX_CONSECUTIVE_ERRORS in a row, which is the
+        // distinction the counter exists to make: an unreliable network is not a dead tunnel.
+        assertThat(scheduler.wasCancelled()).isFalse();
+        verify(app, never()).setupFailed(anyString(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test
@@ -130,8 +175,10 @@ class TunnelPollerTest {
         scheduler.poll();
 
         // Runs on a timer thread with nobody to propagate to, so it must stop itself rather
-        // than retry a setup that already failed.
+        // than retry a setup that already failed -- and say so, rather than leaving a live
+        // process that will never be ready.
         assertThat(scheduler.wasCancelled()).isTrue();
+        verify(app).setupFailed(anyString(), org.mockito.ArgumentMatchers.anyInt());
     }
 
     @Test

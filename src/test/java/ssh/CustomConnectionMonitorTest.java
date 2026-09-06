@@ -250,6 +250,47 @@ class CustomConnectionMonitorTest {
     }
 
     @Test
+    void aRepeatedProxyFailureStillNeverRedialsTheSshSession() {
+        // The gap the previous test left: it fired once and stopped. The retry it scheduled ran
+        // attemptReconnect(), whose first act is stop() then connect() -- so the branch written
+        // to avoid re-dialling a healthy session did exactly that on every subsequent tick.
+        tunnel.authenticated = true;
+        host.startFailure = new IllegalStateException("Address already in use");
+        monitor.connectionLost(new RuntimeException("drop"));
+
+        for (int i = 0; i < 5; i++) {
+            scheduler.fire();
+        }
+
+        assertThat(tunnel.calls)
+                .as("one dial for the reconnect, and none for the proxy retries")
+                .containsExactly("stop", "connect");
+        assertThat(host.calls)
+                .filteredOn("startLocalProxy"::equals)
+                .as("only the proxy is retried")
+                .hasSize(5);
+    }
+
+    @Test
+    void aProxyThatNeverBindsFallsThroughToARebuild() {
+        // Reaching onReconnected() returned before attemptReconnect()'s limit check, so this
+        // path had no bound at all: a port that never frees up retried every five seconds
+        // forever, and the rebuild that would have released it was never reached.
+        tunnel.authenticated = true;
+        host.startFailure = new IllegalStateException("Address already in use");
+        monitor.connectionLost(new RuntimeException("drop"));
+
+        for (int i = 0; i < CustomConnectionMonitor.MAX_RETRIES + 1; i++) {
+            if (!scheduler.hasPending()) {
+                break;
+            }
+            scheduler.fire();
+        }
+
+        assertThat(host.calls).as("the retry is bounded").contains("rebuildTunnel");
+    }
+
+    @Test
     void aProxyRestartThatRecoversCompletesTheReconnect() {
         tunnel.authenticated = true;
         host.startFailure = new IllegalStateException("Address already in use");

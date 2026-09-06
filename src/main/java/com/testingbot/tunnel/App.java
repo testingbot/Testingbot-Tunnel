@@ -992,6 +992,7 @@ public class App {
             }
 
             app.init();
+            app.commandLineClient = true;
             app.boot();
             // The pid file lets an external supervisor stop this process; it is
             // only meaningful when running as a command line client.
@@ -1015,6 +1016,12 @@ public class App {
             System.exit(tunnelFailedException.getExitCode());
         }
     }
+    /**
+     * True only for the {@code main()} client. An embedder's JVM is not ours to exit, so a
+     * terminal setup failure stops the tunnel and reports itself for them to observe, while the
+     * command line client exits with a status a supervisor can act on.
+     */
+    private volatile boolean commandLineClient;
     private PidPoller pidPoller;
     private TunnelPoller poller;
     private HttpForwarder httpForwarder;
@@ -1137,6 +1144,34 @@ public class App {
         pidPoller = new PidPoller(this);
     }
 
+    /**
+     * Gives up on a tunnel that cannot be set up, from a thread with nobody to throw to.
+     *
+     * <p>The poller and {@link #tunnelReady} both run on timer threads, so a failure there used
+     * to be logged and dropped: the scheduler stopped, but the metrics server kept answering and
+     * the process stayed alive forever, never ready and no longer trying. Neither a supervisor
+     * nor a container could tell that from a tunnel still coming up.
+     *
+     * <p>Everything is released either way. The command line client then exits with a status;
+     * an embedder is left a stopped App whose {@code /readyz} says what happened.
+     */
+    public void setupFailed(String reason, int exitCode) {
+        Logger.getLogger(App.class.getName()).log(Level.SEVERE, reason);
+        try {
+            stop();
+        } catch (Exception cleanupFailed) {
+            Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                    "Cleanup after a failed setup did not complete", cleanupFailed);
+        }
+        // After stop(), which sets it false itself -- but stop() is also the ordinary teardown,
+        // so being explicit here keeps the reason for the gauge attached to this path.
+        TunnelMetrics.setTunnelUp(false);
+        if (commandLineClient) {
+            System.err.println(reason);
+            System.exit(exitCode);
+        }
+    }
+
     public void stop() {
         TunnelMetrics.setTunnelUp(false);
 
@@ -1206,11 +1241,19 @@ public class App {
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
                 boolean healthy = this.startProxies();
-                TunnelMetrics.setTunnelUp(true);
+                // Gated on the self-test, not merely on having got this far. /readyz means "the
+                // tunnel is forwarding", and every check startProxies() runs is a check that
+                // traffic will actually arrive -- the Selenium relay reaching the hub, the
+                // reverse forward reaching the local proxy, the proxy reaching the internet. A
+                // tunnel that failed one of those carries nothing, so reporting it ready told
+                // container probes and --readyfile integrations to send work to something that
+                // could not do any. It stays not-ready until a reconnect succeeds.
+                TunnelMetrics.setTunnelUp(healthy);
                 if (healthy) {
+                    writeReadyFile();
                     Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 } else {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "The Tunnel is up (ip: {0}) but its self-test failed; tests may not work until this is resolved.", _serverIP);
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "The Tunnel is up (ip: {0}) but its self-test failed, so it is not reporting ready; tests will not work until this is resolved.", _serverIP);
                 }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
             }
@@ -1219,12 +1262,15 @@ public class App {
             // client can exit and an embedder can handle it
             throw tunnelFailedException;
         } catch (Exception ex) {
-            Logger.getLogger(App.class.getName()).log(Level.INFO, "Something went wrong while setting up the Tunnel.");
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, null, ex);
+            // Not merely logged: this runs on a timer thread when it is reached from the poller,
+            // so returning here left a process that was alive, unready and no longer trying.
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Something went wrong while setting up the Tunnel.", ex);
+            setupFailed("Could not set up the tunnel: " + ex.getMessage(), 1);
         }
     }
 
-    private boolean startProxies() {
+    /** Package-private so ReadinessGatingTest can drive a failing startup. */
+    boolean startProxies() {
         boolean healthy = true;
         httpForwarder = new HttpForwarder(this);
 
@@ -1249,21 +1295,41 @@ public class App {
             }
         }
 
-        if (this.readyFile != null) {
-            File f = new File(this.readyFile);
-            if (f.exists()) {
-                f.setLastModified(System.currentTimeMillis());
-            } else {
-                try (FileWriter fw = new FileWriter(f.getAbsoluteFile());
-                     BufferedWriter bw = new BufferedWriter(fw)) {
-                    bw.write("TestingBot Tunnel Ready");
-                } catch (IOException ex) {
-                    Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the directory exists and we have permission write to this directory." , ex);
-                }
-            }
-        }
-
         return healthy;
+    }
+
+    /**
+     * Touches {@code --readyfile}.
+     *
+     * <p>Only from the healthy path. It used to be written at the end of startProxies()
+     * regardless of what those checks found, so a tunnel whose forwarding test had just failed
+     * still announced itself ready to whatever was waiting on the file.
+     */
+    /** Package-private, for the readiness tests; the CLI assigns the field directly. */
+    void setNoProxy(boolean noProxy) {
+        this.noProxy = noProxy;
+    }
+
+    /** Package-private, for the readiness tests; the CLI assigns the field directly. */
+    void setReadyFile(String readyFile) {
+        this.readyFile = readyFile;
+    }
+
+    void writeReadyFile() {
+        if (this.readyFile == null) {
+            return;
+        }
+        File f = new File(this.readyFile);
+        if (f.exists()) {
+            f.setLastModified(System.currentTimeMillis());
+            return;
+        }
+        try (FileWriter fw = new FileWriter(f.getAbsoluteFile());
+             BufferedWriter bw = new BufferedWriter(fw)) {
+            bw.write("TestingBot Tunnel Ready");
+        } catch (IOException ex) {
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "Could not create readyfile. Please make sure the directory exists and we have permission write to this directory." , ex);
+        }
     }
 
     /**
