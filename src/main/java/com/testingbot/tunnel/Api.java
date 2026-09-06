@@ -393,9 +393,23 @@ public class Api {
                 postRequest.setHeader("Authorization", "Basic " + encoding);
                 postRequest.setEntity(new UrlEncodedFormEntity(postData));
 
-                responseBody = httpClient.execute(postRequest, response ->
-                    EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8)
-                );
+                responseBody = httpClient.execute(postRequest, response -> {
+                    // The status, not just the body. Without this a 500 carrying
+                    // {"message":"failure"} parsed cleanly and was handed back as tunnel data,
+                    // so an API outage read as a malformed response -- or worse, as a tunnel
+                    // whose fields happened to be absent. _get has always checked; this is the
+                    // path that creates the tunnel.
+                    //
+                    // The body is read either way and included: the API says why it refused,
+                    // and the reason is the whole value of the message to the user.
+                    String body = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+                    if (response.getCode() < 200 || response.getCode() >= 300) {
+                        throw new RuntimeException("Failed : HTTP error code : "
+                                + response.getCode()
+                                + (body == null || body.isBlank() ? "" : " - " + body));
+                    }
+                    return body;
+                });
             }
 
             try {

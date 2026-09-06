@@ -29,9 +29,9 @@ class TunnelInfoMetricTest {
 
     @Test
     void rebuildingReplacesTheSeriesRatherThanAddingOne() {
-        TunnelMetrics.setTunnelInfo(5.0f, 1001, "ci-run");
-        TunnelMetrics.setTunnelInfo(5.0f, 1002, "ci-run");
-        TunnelMetrics.setTunnelInfo(5.0f, 1003, "ci-run");
+        TunnelMetrics.setTunnelInfo("5.0", 1001, "ci-run");
+        TunnelMetrics.setTunnelInfo("5.0", 1002, "ci-run");
+        TunnelMetrics.setTunnelInfo("5.0", 1003, "ci-run");
 
         assertThat(samples())
                 .as("one active tunnel means one series")
@@ -41,8 +41,8 @@ class TunnelInfoMetricTest {
 
     @Test
     void theSurvivingSeriesCarriesTheCurrentIdentity() {
-        TunnelMetrics.setTunnelInfo(5.0f, 2001, "first");
-        TunnelMetrics.setTunnelInfo(5.0f, 2002, "second");
+        TunnelMetrics.setTunnelInfo("5.0", 2001, "first");
+        TunnelMetrics.setTunnelInfo("5.0", 2002, "second");
 
         Collector.MetricFamilySamples.Sample sample = samples().get(0);
         assertThat(sample.labelValues).containsExactly("5.0", "2002", "second");
@@ -52,7 +52,7 @@ class TunnelInfoMetricTest {
     @Test
     void aMissingIdentifierIsRecordedAsEmptyRatherThanNull() {
         // Prometheus label values cannot be null; an unnamed tunnel is the common case.
-        TunnelMetrics.setTunnelInfo(5.0f, 3001, null);
+        TunnelMetrics.setTunnelInfo("5.0", 3001, null);
 
         assertThat(samples()).hasSize(1);
         assertThat(samples().get(0).labelValues).containsExactly("5.0", "3001", "");

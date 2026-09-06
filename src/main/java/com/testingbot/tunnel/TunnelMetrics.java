@@ -226,11 +226,11 @@ public final class TunnelMetrics {
      * forever. A long session then reported several tunnels as simultaneously active, and the
      * label set grew without bound.
      */
-    public static void setTunnelInfo(float version, int tunnelId, String identifier) {
+    public static void setTunnelInfo(String version, int tunnelId, String identifier) {
         // Only ever one active tunnel per process.
         TUNNEL_INFO.clear();
         TUNNEL_INFO.labels(
-                Float.toString(version),
+                version == null ? "unknown" : version,
                 Integer.toString(tunnelId),
                 identifier == null ? "" : identifier
         ).set(1.0);

@@ -29,7 +29,18 @@ import ssh.SSHTunnel;
 import ssh.TunnelPoller;
 
 public class App {
-    public static final Float VERSION = getVersionFromProperties();
+    /**
+     * The release version as written, e.g. {@code 5.0} or {@code 5.10.2}.
+     *
+     * <p>Was a {@code Float}, which could not represent this project's own version scheme:
+     * {@code 5.10} became {@code 5.1f} and sorted below {@code 5.9}, and {@code 5.0.1} did not
+     * parse at all and silently became {@code 0.0}. Every use of it here is display, so a
+     * string is what was wanted throughout; {@link #RELEASE} does the comparing.
+     */
+    public static final String VERSION = getVersionFromProperties();
+
+    /** {@link #VERSION} parsed for comparison, or null when the properties could not be read. */
+    static final Version RELEASE = Version.parse(VERSION);
     private Api api;
     private String clientKey;
     private String clientSecret;
@@ -120,22 +131,27 @@ public class App {
     private int sshPort = 0;
     private boolean shared = false;
 
-    private static Float getVersionFromProperties() {
+    private static String getVersionFromProperties() {
         try (InputStream input = App.class.getClassLoader().getResourceAsStream("version.properties")) {
             if (input == null) {
-                return 0.0f;
+                return "unknown";
             }
             Properties prop = new Properties();
             prop.load(input);
             String version = prop.getProperty("version");
-            if (version != null) {
-                String numericVersion = version.replaceAll("-SNAPSHOT", "").replaceAll("[^0-9.]", "");
-                return Float.parseFloat(numericVersion);
+            if (version != null && !version.isBlank()) {
+                // Returned as written. The stripping that used to happen here -- removing
+                // -SNAPSHOT and then every non-digit -- existed only to make Float.parseFloat
+                // accept the result, and it is what turned 5.0.1 into an unparseable "5.0.1"
+                // and then, via the catch below, into 0.0.
+                return version.trim();
             }
-        } catch (IOException | NumberFormatException ex) {
+        } catch (IOException ex) {
             Logger.getLogger(App.class.getName()).log(Level.WARNING, "Could not read version from properties, using fallback", ex);
         }
-        return 0.0f;
+        // Not "0.0": that is not "unknown", it is "older than every release", which is what made
+        // the upgrade notice fire on every startup once the version stopped parsing.
+        return "unknown";
     }
 
     /** Matches maven.compiler.release; the jar's class files cannot load below this. */
@@ -1113,8 +1129,12 @@ public class App {
 
         TunnelMetrics.setTunnelInfo(App.VERSION, this.tunnelID, this.tunnelIdentifier);
 
-        if (Float.parseFloat(tunnelData.get("version").asText()) > App.VERSION) {
-            System.err.println("A new version (" + tunnelData.get("version").asText() + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
+        // Both sides have to parse before anyone is told to upgrade. An unreadable local
+        // version used to compare as 0.0 and so nagged on every single startup, and an
+        // unexpected value from the API would have thrown out of boot() entirely.
+        Version latest = Version.parse(tunnelData.path("version").asText(null));
+        if (latest != null && RELEASE != null && RELEASE.isOlderThan(latest)) {
+            System.err.println("A new version (" + latest + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
         }
 
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
