@@ -14,8 +14,27 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || dirname "$(dirname "$(readlink -f "$(command -v java)")")")}"
 
-JAR="$(ls "$ROOT"/target/TestingBotTunnel-*-shaded.jar 2>/dev/null | head -1)"
-[ -z "$JAR" ] && { echo "No shaded jar. Run: mvn package"; exit 1; }
+# The newest shaded jar, and only when it is unambiguous. `ls | head -1` took the
+# alphabetically first, so after a version bump without `mvn clean` it silently picked
+# the *older* artifact -- 5.10 sorts before 5.9, and the run then verified the previous
+# release while reporting the new one.
+select_shaded_jar() {
+  local root="$1"
+  local jars=()
+  while IFS= read -r line; do jars+=("$line"); done < <(
+    ls -t "$root"/target/TestingBotTunnel-*-shaded.jar 2>/dev/null
+  )
+  if [ "${#jars[@]}" -eq 0 ]; then
+    return 1
+  fi
+  if [ "${#jars[@]}" -gt 1 ]; then
+    echo "Warning: several shaded jars in target/; using the newest ($(basename "${jars[0]}"))." >&2
+    echo "         Run 'mvn clean package' if that is not what you meant." >&2
+  fi
+  printf '%s\n' "${jars[0]}"
+}
+
+JAR="$(select_shaded_jar "$ROOT")" || { echo "No shaded jar. Run: mvn package"; exit 1; }
 
 case "$(uname -s)" in
   Darwin) OS=macos;;

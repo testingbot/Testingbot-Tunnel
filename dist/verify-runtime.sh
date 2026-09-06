@@ -13,7 +13,8 @@ set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DIST="${1:-}"
 if [ -z "$DIST" ]; then
-  DIST="$(ls -d "$HERE"/testingbot-tunnel-*-*/ 2>/dev/null | head -1)"
+  # -t: newest first. Alphabetical order picked an older build when several are present.
+  DIST="$(ls -dt "$HERE"/testingbot-tunnel-*-*/ 2>/dev/null | head -1)"
 fi
 [ -z "$DIST" ] && { echo "usage: verify-runtime.sh <dist-dir>"; exit 1; }
 # build-runtime.sh emits a .cmd launcher on Windows and a shell script everywhere

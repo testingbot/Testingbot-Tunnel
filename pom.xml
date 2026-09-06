@@ -348,6 +348,41 @@
               <goal>report</goal>
             </goals>
           </execution>
+          <!-- A floor, not a target. Set a couple of points under what the suite currently
+               achieves, so ordinary movement does not fail a build but a change that drops
+               real coverage does. Without it the report was produced and nothing read it,
+               so coverage could fall to nothing without the build noticing. -->
+          <execution>
+            <id>coverage-floor</id>
+            <phase>verify</phase>
+            <goals>
+              <goal>check</goal>
+            </goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>INSTRUCTION</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.82</minimum>
+                    </limit>
+                    <limit>
+                      <counter>BRANCH</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.73</minimum>
+                    </limit>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.81</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+            </configuration>
+          </execution>
         </executions>
       </plugin>
       <plugin>
@@ -500,6 +535,38 @@
       <groupId>org.apache.httpcomponents.client5</groupId>
       <artifactId>httpclient5</artifactId>
       <version>5.6.4</version>
+    </dependency>
+    <!-- Declared because this code imports them directly, not because they were missing from
+         the classpath: they arrive transitively today. The published primary artifact is the
+         thin jar, so a consumer's classpath is built from these declarations, and a transitive
+         provider that dropped or renamed one of these would break that consumer with a
+         NoClassDefFoundError naming nothing in this pom. Versions come from the same places the
+         direct dependencies do, so nothing about the resolved build changes. -->
+    <dependency>
+      <groupId>org.apache.httpcomponents.core5</groupId>
+      <artifactId>httpcore5</artifactId>
+      <version>5.4.3</version>
+    </dependency>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-core</artifactId>
+      <version>2.22.2</version>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-client</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-http</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-io</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-util</artifactId>
     </dependency>
     <!-- Resolves hostnames against a caller-specified DNS server for the "dns" option.
          The JDK has no supported resolver SPI before Java 18 (JEP 418); our baseline is 17. -->
