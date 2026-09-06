@@ -350,11 +350,14 @@ public class WebsocketHandler extends ConnectHandler {
             // newConnectAddress() applies --dns and --connect-to. Dialling an InetSocketAddress
             // directly here is what once made the custom resolver dead code on this path.
             //
-            // With an upstream proxy the socket goes to the proxy; the target's name travels in
-            // the request line, which is why --connect-to and --dns are not applied to it here.
+            // With an upstream proxy the socket goes to the proxy and the target's name travels
+            // in the request line, so --connect-to is not applied: it says where a named
+            // *destination* lives, and applying it to the proxy moved this connection instead
+            // while leaving the destination alone. --dns still resolves the proxy's own name.
+            // --localhost-policy is skipped for the same reason: a proxy on loopback is ordinary.
             channel.connect(upstream == null
                     ? newConnectAddress(host, port)
-                    : resolveAddress(connectTo.remap(upstream.getHost(), upstream.getPort())));
+                    : resolveAddress(new ConnectToMap.Target(upstream.getHost(), upstream.getPort())));
             promise.succeeded(channel);
         } catch (Throwable x) {
             close(channel);

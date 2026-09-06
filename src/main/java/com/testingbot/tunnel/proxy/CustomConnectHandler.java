@@ -380,8 +380,11 @@ public class CustomConnectHandler extends ConnectHandler {
             channel.socket().setTcpNoDelay(true);
             channel.configureBlocking(false);
             // resolveAddress, not newConnectAddress: this socket goes to the proxy, and the
-            // loopback policy is about destinations.
-            channel.connect(resolveAddress(connectTo.remap(upstream.getHost(), upstream.getPort())));
+            // loopback policy is about destinations. --connect-to is left out for the same
+            // reason -- it says where a named *destination* lives, so applying it here moved the
+            // proxy connection instead and left the destination alone; a wildcard rule pointed
+            // every request at one address while appearing to do nothing.
+            channel.connect(resolveAddress(new ConnectToMap.Target(upstream.getHost(), upstream.getPort())));
             promise.succeeded(channel);
         } catch (Throwable x) {
             closeQuietly(channel);
