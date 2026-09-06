@@ -37,12 +37,44 @@ class PortForwardingMonitorTest {
     }
 
     @Test
-    void theMatchIsASubstringSoADigitPrefixAlsoMatches() {
-        // Documenting the real behaviour rather than an assumed one: "445" is a substring of
-        // "4456", so a port that merely shares a prefix reads as active. Harmless in practice --
-        // the alternative is a false "forwarding lost" and a needless restart -- but it is not
-        // what the code appears to say at a glance.
-        assertThat(SSHTunnel.localForwardingActive(new String[]{"4456:h:80"}, 445)).isTrue();
+    void aPortThatMerelySharesAPrefixIsNotAMatch() {
+        // Was documented as harmless: "445" is a substring of "4456", so the old contains()
+        // check reported a forward that does not exist. It is not harmless -- this answers "is
+        // my forward still there", and the monitor repairs it when the answer is no. A false
+        // positive means the repair never runs and every request through the tunnel keeps
+        // failing, with the log insisting forwarding is fine.
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"4456:h:80"}, 445)).isFalse();
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"4456:h:80"}, 4456)).isTrue();
+    }
+
+    @Test
+    void onlyTheLocalPortIsCompared() {
+        // The digits also appear in the destination host and the remote port, and neither
+        // identifies this forward.
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"9999:host80.example:80"}, 80))
+                .as("the remote port is not the local port")
+                .isFalse();
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"9999:h4446.example:80"}, 4446))
+                .as("digits in the destination host are not a port")
+                .isFalse();
+    }
+
+    @Test
+    void aBindAddressBeforeThePortIsUnderstood() {
+        // JSch renders a bound forward as "127.0.0.1:4446:host:80".
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"127.0.0.1:4446:h:80"}, 4446))
+                .isTrue();
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"127.0.0.1:4446:h:80"}, 127))
+                .as("the bind address is not the port")
+                .isFalse();
+    }
+
+    @Test
+    void malformedEntriesDoNotMatch() {
+        assertThat(SSHTunnel.localForwardingActive(new String[]{"nonsense"}, 4446)).isFalse();
+        assertThat(SSHTunnel.localForwardingActive(new String[]{""}, 4446)).isFalse();
+        assertThat(SSHTunnel.localForwardingActive(new String[]{null}, 4446)).isFalse();
+        assertThat(SSHTunnel.localForwardingActive(null, 4446)).isFalse();
     }
 
     @Test

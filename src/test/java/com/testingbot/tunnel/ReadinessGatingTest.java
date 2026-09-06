@@ -121,6 +121,29 @@ class ReadinessGatingTest {
     }
 
     @Test
+    void stoppingRemovesTheReadyFile() throws Exception {
+        // The file means "this tunnel is forwarding", so it must not outlive the tunnel. The
+        // shutdown hook covered JVM exit; an explicit stop() -- an embedder between jobs, or the
+        // reconnect monitor's stop()/boot() rebuild -- left it behind claiming a tunnel that no
+        // longer existed was ready.
+        Path readyFile = tempDir.resolve("tunnel.ready");
+        App app = new App();
+        app.setReadyFile(readyFile.toString());
+        app.writeReadyFile();
+        assertThat(Files.exists(readyFile)).isTrue();
+
+        app.stop();
+
+        assertThat(Files.exists(readyFile)).isFalse();
+    }
+
+    @Test
+    void stoppingWithNoReadyFileConfiguredIsHarmless() {
+        App app = new App();
+        app.stop();
+    }
+
+    @Test
     void writingTheReadyFileTwiceTouchesRatherThanFails() throws Exception {
         Path readyFile = tempDir.resolve("tunnel.ready");
         App app = new App();

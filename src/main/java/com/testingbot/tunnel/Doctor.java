@@ -201,28 +201,13 @@ public final class Doctor {
             .setResponseTimeout(Timeout.of(3, TimeUnit.SECONDS))
             .build();
 
-        org.apache.hc.client5.http.impl.classic.HttpClientBuilder builder = HttpClients.custom();
-        com.testingbot.tunnel.proxy.ProxySpec spec =
-                com.testingbot.tunnel.proxy.ProxySpec.parse(app.getControlProxy());
-        if (spec != null && !spec.isSocks5()) {
-            builder.setProxy(new org.apache.hc.core5.http.HttpHost(
-                    "http", spec.getHost(), spec.getPort()));
-        }
-        if (app.getCaCertificates() != null) {
-            try {
-                builder.setConnectionManager(
-                        org.apache.hc.client5.http.impl.io
-                                .PoolingHttpClientConnectionManagerBuilder.create()
-                                .setTlsSocketStrategy(
-                                        new org.apache.hc.client5.http.ssl.DefaultClientTlsStrategy(
-                                                app.getCaCertificates().sslContext()))
-                                .build());
-            } catch (java.security.GeneralSecurityException unusable) {
-                Logger.getLogger(Doctor.class.getName()).log(Level.WARNING,
-                        "Could not apply --cacert-file to the connectivity check: {0}",
-                        unusable.getMessage());
-            }
-        }
+        // The same builder Api uses, rather than a second one that has to be kept in step. This
+        // was a local reimplementation that had drifted: it skipped SOCKS5 entirely and never
+        // supplied credentials for an authenticated proxy, so on those networks --doctor tested
+        // a route the tunnel does not take -- reporting a failure the tunnel would not hit, or a
+        // success by a path it would not use.
+        org.apache.hc.client5.http.impl.classic.HttpClientBuilder builder =
+                Api.controlPlaneBuilder(app);
 
         try (CloseableHttpClient client = builder
             .setDefaultRequestConfig(cfg).build()) {

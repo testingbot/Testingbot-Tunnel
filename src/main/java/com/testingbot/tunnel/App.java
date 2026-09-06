@@ -1223,6 +1223,19 @@ public class App {
             pidPoller = null;
         }
 
+        // The ready file says "this tunnel is forwarding", so it must not outlive the tunnel.
+        // The shutdown hook below removes it when the JVM exits, which covers the command line
+        // client but not an explicit stop(): an embedder running a tunnel per job left a stale
+        // file claiming the previous job's tunnel was ready, and the reconnect monitor's
+        // stop()/boot() rebuild left one across the window where nothing was forwarding.
+        if (readyFile != null) {
+            File f = new File(readyFile);
+            if (f.exists() && !f.delete()) {
+                Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                        "Could not delete ready file: {0}", readyFile);
+            }
+        }
+
         // Without this, an embedder that starts a tunnel per job leaks one
         // shutdown hook per App instance for the lifetime of the JVM.
         if (cleanupThread != null) {
@@ -1493,15 +1506,14 @@ public class App {
     }
 
     static int readinessPort(CommandLine commandLine) throws ParseException {
-        String value = commandLine.getOptionValue("metrics-port");
-        if (value == null) {
+        if (commandLine.getOptionValue("metrics-port") == null) {
             return DEFAULT_METRICS_PORT;
         }
-        try {
-            return Integer.parseInt(value.trim());
-        } catch (NumberFormatException notANumber) {
-            throw new ParseException("Invalid --metrics-port value: " + value);
-        }
+        // port(), like every other port option. This checked the syntax but not the range, so
+        // --ready --metrics-port 99999 got past it and died in ReadinessProbe with an uncaught
+        // IllegalArgumentException and a stack trace -- from the one command whose entire
+        // contract is to exit 0 or 1 for a container probe to read.
+        return port(commandLine, "metrics-port");
     }
 
     public void doctor() {

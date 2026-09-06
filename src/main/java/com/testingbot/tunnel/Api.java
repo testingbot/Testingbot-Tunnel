@@ -112,6 +112,19 @@ public class Api {
      * could start -- so a SOCKS5 upstream proxy never worked at all. {@code http://host:port}
      * was broken the same way.
      */
+    /**
+     * The control-plane client builder, for callers outside a live Api.
+     *
+     * <p>{@code --doctor} runs before an Api exists but has to reach TestingBot the same way one
+     * would, or it reports a route nobody uses. It built its own client and got it partly wrong:
+     * no SOCKS5 support, and no credentials for an authenticated proxy -- so on those networks it
+     * said "can not be reached" and exited 1 while the tunnel started perfectly, or reached the
+     * API by a path the tunnel would not have taken.
+     */
+    static HttpClientBuilder controlPlaneBuilder(App app) {
+        return new Api(app).newBuilderWithProxy();
+    }
+
     private HttpClientBuilder newBuilderWithProxy() {
         HttpClientBuilder builder = httpClientBuilderSupplier.get();
         builder.setDefaultRequestConfig(defaultRequestConfig());
