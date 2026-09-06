@@ -16,8 +16,24 @@ if [ -z "$DIST" ]; then
   DIST="$(ls -d "$HERE"/testingbot-tunnel-*-*/ 2>/dev/null | head -1)"
 fi
 [ -z "$DIST" ] && { echo "usage: verify-runtime.sh <dist-dir>"; exit 1; }
-LAUNCHER="$DIST/bin/testingbot-tunnel"
-[ -x "$LAUNCHER" ] || { echo "launcher not found: $LAUNCHER"; exit 1; }
+# build-runtime.sh emits a .cmd launcher on Windows and a shell script everywhere
+# else. This looked only for the shell script and required it to be executable, so
+# the Windows leg of the release matrix could never pass -- it failed at this line,
+# before verifying anything, on every tagged build.
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;;
+  *)                    IS_WINDOWS=0 ;;
+esac
+
+if [ "$IS_WINDOWS" = "1" ]; then
+  LAUNCHER="$DIST/bin/testingbot-tunnel.cmd"
+  # Not -x: a .cmd carries no Unix executable bit, and whether the MSYS layer
+  # synthesises one is not something to depend on.
+  [ -f "$LAUNCHER" ] || { echo "launcher not found: $LAUNCHER"; exit 1; }
+else
+  LAUNCHER="$DIST/bin/testingbot-tunnel"
+  [ -x "$LAUNCHER" ] || { echo "launcher not found: $LAUNCHER"; exit 1; }
+fi
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/tb-runtime.XXXXXX")"
 PID=""
@@ -41,7 +57,31 @@ ok()  { PASS=$((PASS+1)); printf '  \033[32m✓\033[0m %s\n' "$1"; }
 bad() { FAIL=$((FAIL+1)); printf '  \033[31m✗\033[0m %s — %s\n' "$1" "$2"; }
 
 # Deliberately strip the environment so a system JDK cannot rescue a missing module.
-run_isolated() { env -i HOME="$HOME" PATH=/usr/bin:/bin "$@"; }
+#
+# Kept as an array rather than only a function: the live-tunnel launch below has to
+# invoke it directly, because backgrounding a shell function makes $! the wrapping
+# subshell and killing that orphans the JVM underneath it, which then holds a slot
+# against the account's concurrent-tunnel limit.
+#
+# TESTINGBOT_KEY and TESTINGBOT_SECRET are carried through when set. They were not,
+# which made the credentialed section below unreachable by the means it tests for:
+# the guard admitted a run because the variables were set, and then launched the
+# tunnel with an environment that no longer contained them. Only a ~/.testingbot
+# file ever actually exercised the live checks.
+if [ "$IS_WINDOWS" = "1" ]; then
+  # env -i is not usable here: the launcher is a .cmd and needs the Windows command
+  # processor, which is located through the very environment that would be cleared.
+  # Strip what could actually rescue a missing module instead -- a system JDK on
+  # PATH or at JAVA_HOME -- which is what the isolation is for.
+  ISOLATED=(env "JAVA_HOME=" \
+      "PATH=$(printf '%s' "$PATH" | tr ':' '\n' | grep -viE 'jdk|jre|/java' | paste -sd: -)")
+else
+  ISOLATED=(env -i "HOME=$HOME" PATH=/usr/bin:/bin)
+fi
+[ -n "${TESTINGBOT_KEY:-}" ] && ISOLATED+=("TESTINGBOT_KEY=$TESTINGBOT_KEY")
+[ -n "${TESTINGBOT_SECRET:-}" ] && ISOLATED+=("TESTINGBOT_SECRET=$TESTINGBOT_SECRET")
+
+run_isolated() { "${ISOLATED[@]}" "$@"; }
 
 echo "Verifying $(basename "$DIST")"
 
@@ -59,11 +99,11 @@ if [ -z "${TESTINGBOT_KEY:-}" ] && [ ! -f "$HOME/.testingbot" ]; then
   echo "  - live tunnel checks skipped (no credentials)"
 else
   MPORT="$(python3 -c 'import socket;s=socket.socket();s.bind(("127.0.0.1",0));print(s.getsockname()[1]);s.close()')"
-  # Launch directly rather than through run_isolated: backgrounding a shell function
-  # makes $! the wrapping subshell, and killing that orphans the JVM underneath it --
-  # which then keeps holding a tunnel slot on the account.
-  env -i HOME="$HOME" PATH=/usr/bin:/bin \
-      "$LAUNCHER" --readyfile "$WORK/ready" --metrics-port "$MPORT" > "$WORK/tunnel.log" 2>&1 &
+  # The array directly, not run_isolated: backgrounding a shell function makes $! the
+  # wrapping subshell, and killing that orphans the JVM underneath it -- which then
+  # keeps holding a tunnel slot on the account.
+  "${ISOLATED[@]}" "$LAUNCHER" --readyfile "$WORK/ready" --metrics-port "$MPORT" \
+      > "$WORK/tunnel.log" 2>&1 &
   PID=$!
   for _ in $(seq 1 120); do [ -f "$WORK/ready" ] && break; kill -0 $PID 2>/dev/null || break; sleep 1; done
 

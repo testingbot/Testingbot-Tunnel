@@ -74,8 +74,12 @@ jobs:
         key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
         restore-keys: ${{ runner.os }}-m2
         
+    # verify, not package: it adds the shaded-jar smoke test and the JaCoCo report,
+    # which is what the release gate runs. Building with `package` here meant the
+    # first time a release ever checked the packaged jar was actually runnable was
+    # after the tag had been pushed.
     - name: Build project
-      run: mvn clean package
+      run: mvn clean verify
       
     - name: Upload build artifacts
       uses: actions/upload-artifact@v7
