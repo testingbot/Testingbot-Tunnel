@@ -1637,9 +1637,44 @@ public class App {
     /** Loaded once and shared; null when --pac-local was not given. */
     public synchronized com.testingbot.tunnel.pac.PacPolicy getPacPolicy() {
         if (pacPolicy == null && pacLocal != null) {
-            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(pacLocal, pacLocalSha256);
+            pacPolicy = com.testingbot.tunnel.pac.PacPolicy.load(
+                    pacLocal, pacLocalSha256, pacFetchOptions());
         }
         return pacPolicy;
+    }
+
+    /**
+     * How to reach a remote {@code --pac-local} document.
+     *
+     * <p>The fetch used to ignore both {@code --proxy} and {@code --cacert-file}, so on a
+     * proxy-only network the URL was unreachable and on a TLS-intercepting network the
+     * handshake failed against a CA the JVM has never seen -- the exact network
+     * {@code --cacert-file} exists for. Either way the tunnel refused to start over a document
+     * it had been told how to reach.
+     */
+    com.testingbot.tunnel.pac.PacPolicy.FetchOptions pacFetchOptions() {
+        java.net.Proxy proxy = null;
+        com.testingbot.tunnel.proxy.ProxySpec spec =
+                com.testingbot.tunnel.proxy.ProxySpec.parse(getProxy());
+        if (spec != null) {
+            proxy = new java.net.Proxy(
+                    spec.isSocks5() ? java.net.Proxy.Type.SOCKS : java.net.Proxy.Type.HTTP,
+                    new java.net.InetSocketAddress(spec.getHost(), spec.getPort()));
+        }
+        javax.net.ssl.SSLSocketFactory sslSocketFactory = null;
+        if (caCertificates != null) {
+            try {
+                sslSocketFactory = caCertificates.sslContext().getSocketFactory();
+            } catch (java.security.GeneralSecurityException ex) {
+                // Not fatal here: the fetch still runs against the platform trust store, and if
+                // that is not enough it fails with a certificate error naming the real problem.
+                Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                        "Could not apply --cacert-file to the PAC fetch", ex);
+            }
+        }
+        return proxy == null && sslSocketFactory == null
+                ? null
+                : new com.testingbot.tunnel.pac.PacPolicy.FetchOptions(proxy, sslSocketFactory);
     }
 
     public String getProxyAuthScheme() {

@@ -201,7 +201,12 @@ public class CustomConnectHandler extends ConnectHandler {
             return proxySpec;
         }
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolve("https://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull("https://" + host + ":" + port + "/", host);
+        if (result == null) {
+            // The file could not be evaluated. Falling through to --proxy rather than going
+            // direct: on a proxy-only network, direct is not a safe default, it is a bypass.
+            return proxySpec;
+        }
         if (result.first().isDirect()) {
             return null;
         }

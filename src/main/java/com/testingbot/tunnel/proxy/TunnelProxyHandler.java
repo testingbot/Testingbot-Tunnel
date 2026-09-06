@@ -79,6 +79,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     private String proxyAuthHeaderValue;
     /** Host of the upstream HTTP proxy, or null when there is not one. */
     private String upstreamHttpProxyHost;
+    /** The same proxy in full, so a chosen upstream can be compared against it. */
+    private ProxySpec upstreamHttpProxySpec;
     private String upstreamProxy;
     private String upstreamProxyAuth;
     private String[] basicAuth;
@@ -130,6 +132,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         ProxySpec spec = ProxySpec.parse(hostPort);
         boolean httpProxy = spec != null && !spec.isSocks5();
         this.upstreamHttpProxyHost = httpProxy ? spec.getHost() : null;
+        this.upstreamHttpProxySpec = httpProxy ? spec : null;
         if (httpProxy && userPassword != null && !userPassword.isEmpty()) {
             this.proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(userPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -149,16 +152,16 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
      * never fire and every request through a Negotiate proxy failed. The CONNECT and SSH paths
      * were already pre-emptive; this makes the plain-HTTP path agree with them.
      */
-    private String upstreamAuthorization() {
+    private String upstreamAuthorization(org.eclipse.jetty.client.Request proxyToServerRequest) {
         if (upstreamHttpProxyHost == null) {
             return null;
         }
-        if (pacPolicy != null) {
-            // --proxy is not used when a PAC file is loaded, so its credential has no recipient
-            // here. Stamping it anyway would put the customer's proxy password on requests that
-            // now go to a PAC-chosen proxy -- or, for a DIRECT answer, straight to the origin
-            // and into an arbitrary internet host's access log. registerPacProxy warns once
-            // that the credential is being withheld and why.
+        if (pacPolicy != null && !goesToTheConfiguredProxy(proxyToServerRequest)) {
+            // The credential names one specific proxy. Under a PAC file this request may be
+            // going to a different one, or -- for a DIRECT answer -- straight to the origin,
+            // where the customer's proxy password would land in an arbitrary internet host's
+            // access log. Withheld unless --proxy is genuinely the chosen upstream, which it
+            // still is when the file routes there and when a failed evaluation falls back to it.
             return null;
         }
         if (proxyAuthenticator.isNegotiate()) {
@@ -180,6 +183,23 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                         proxyToServerRequest.getURI() == null
                                 ? proxyToServerRequest.getScheme()
                                 : proxyToServerRequest.getURI().getScheme());
+    }
+
+    /** True when the upstream chosen for this request is the proxy {@code --proxy} names. */
+    private boolean goesToTheConfiguredProxy(org.eclipse.jetty.client.Request proxyToServerRequest) {
+        if (upstreamHttpProxySpec == null) {
+            return false;
+        }
+        String host = proxyToServerRequest.getHost();
+        int port = proxyToServerRequest.getPort();
+        if (port <= 0) {
+            port = HttpScheme.HTTPS.is(proxyToServerRequest.getScheme()) ? 443 : 80;
+        }
+        ProxySpec chosen = upstreamFor(host, port, proxyToServerRequest.getScheme());
+        return chosen != null
+                && !chosen.isSocks5()
+                && chosen.getPort() == upstreamHttpProxySpec.getPort()
+                && chosen.getHost().equalsIgnoreCase(upstreamHttpProxySpec.getHost());
     }
 
     /** Splits "user:password"; the password may itself contain colons. */
@@ -272,7 +292,12 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             return null;
         }
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolve(scheme + "://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull(scheme + "://" + host + ":" + port + "/", host);
+        if (result == null) {
+            // Could not evaluate: fall through to --proxy rather than direct, so a broken file
+            // does not silently bypass the network's only sanctioned egress.
+            return ProxySpec.parse(upstreamProxy);
+        }
         if (result.first().isDirect()) {
             return null;
         }
@@ -897,7 +922,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             // and also with no attacker at all where a bumping upstream Squid re-issues requests
             // in that shape. Mirrors jetty-client's own HttpProxy.requiresTunnel test.
             if (!isTunnelledToOrigin(proxyToServerRequest)) {
-                String upstreamAuthorization = upstreamAuthorization();
+                String upstreamAuthorization = upstreamAuthorization(proxyToServerRequest);
                 if (upstreamAuthorization != null) {
                     fields.put(HttpHeader.PROXY_AUTHORIZATION, upstreamAuthorization);
                 }

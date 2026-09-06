@@ -120,7 +120,12 @@ public class WebsocketHandler extends ConnectHandler {
         }
         // ws:// is carried over HTTP, so that is the scheme a PAC file is asked about.
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolve("http://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull("http://" + host + ":" + port + "/", host);
+        if (result == null) {
+            // Could not evaluate: fall through to --proxy rather than direct, so a broken file
+            // does not silently bypass the network's only sanctioned egress.
+            return proxySpec;
+        }
         if (result.first().isDirect()) {
             return null;
         }

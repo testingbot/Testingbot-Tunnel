@@ -142,6 +142,69 @@ class PacHttpRoutingTest {
     }
 
     @Test
+    void aPacFileThatThrowsFallsBackToTheStaticProxyRatherThanGoingDirect() throws Exception {
+        // The fail-open case. A broken PAC file used to resolve to DIRECT, which on a
+        // proxy-only network is not a fallback but a bypass: traffic the operator deliberately
+        // routed through --proxy went straight out instead, and the log said "going direct".
+        proxiedOrigin.stubFor(get(urlPathEqualTo("/thing"))
+                .willReturn(aResponse().withStatus(200).withBody("origin")));
+        viaProxy.stubFor(any(urlMatching(".*"))
+                .willReturn(aResponse().proxiedFrom("http://127.0.0.1:" + proxiedOrigin.port())));
+
+        // Parses, but throws on every evaluation.
+        startLocalProxy("function FindProxyForURL(url, host) { return noSuchFunction(host); }",
+                "127.0.0.1:" + viaProxy.port());
+
+        assertThat(getThrough("http://127.0.0.1:" + proxiedOrigin.port() + "/thing")).isEqualTo(200);
+
+        viaProxy.verify(getRequestedFor(urlPathEqualTo("/thing")));
+    }
+
+    @Test
+    void aBrokenPacWithNoProxyConfiguredStillGoesDirect() throws Exception {
+        // With nothing else configured there is genuinely nowhere else to send it, so the
+        // fallback must not turn a working direct setup into a failure.
+        directOrigin.stubFor(get(urlPathEqualTo("/thing"))
+                .willReturn(aResponse().withStatus(200)));
+
+        startLocalProxy("function FindProxyForURL(url, host) { return noSuchFunction(host); }",
+                null);
+
+        assertThat(getThrough("http://127.0.0.1:" + directOrigin.port() + "/thing")).isEqualTo(200);
+        directOrigin.verify(getRequestedFor(urlPathEqualTo("/thing")));
+    }
+
+    @Test
+    void theCredentialIsSentWhenPacRoutesToTheConfiguredProxy() throws Exception {
+        // The other side of the withholding rule. --proxy-userpwd names a specific proxy, and
+        // when the PAC file routes there -- or when a failed evaluation falls back to it -- that
+        // proxy is the rightful recipient and must still get its credential.
+        proxiedOrigin.stubFor(get(urlPathEqualTo("/thing"))
+                .willReturn(aResponse().withStatus(200)));
+        String expected = "Basic " + java.util.Base64.getEncoder()
+                .encodeToString("user:sesame".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        viaProxy.stubFor(any(urlMatching(".*"))
+                .withHeader("Proxy-Authorization", equalTo(expected))
+                .willReturn(aResponse().proxiedFrom("http://127.0.0.1:" + proxiedOrigin.port())));
+        viaProxy.stubFor(any(urlMatching(".*"))
+                .withHeader("Proxy-Authorization", absent())
+                .willReturn(aResponse().withStatus(407)));
+
+        TunnelProxyHandler handler = new TunnelProxyHandler();
+        handler.setUpstreamProxy("127.0.0.1:" + viaProxy.port(), "user:sesame");
+        handler.setPacPolicy(PacPolicy.of("function FindProxyForURL(url, host) {"
+                + " return \"PROXY 127.0.0.1:" + viaProxy.port() + "\"; }", "test.pac"));
+        localProxyServer = new Server(0);
+        localProxyServer.setHandler(handler);
+        localProxyServer.start();
+        localProxyPort = ((ServerConnector) localProxyServer.getConnectors()[0]).getLocalPort();
+
+        assertThat(getThrough("http://127.0.0.1:" + proxiedOrigin.port() + "/thing"))
+                .as("the proxy --proxy-userpwd names must still receive its credential")
+                .isEqualTo(200);
+    }
+
+    @Test
     void theStaticProxyCredentialIsNotSentToAPacChosenDestination() throws Exception {
         // --proxy-userpwd names one specific proxy. Once a PAC file decides routing, --proxy is
         // no longer the recipient, so its password must not be stamped on requests -- which for
