@@ -56,9 +56,9 @@ class PacAbsoluteFormTest {
                 try {
                     Socket accepted = peer.accept();
                     pool.submit(() -> {
-                        try (Socket socket = accepted) {
-                            BufferedReader in = new BufferedReader(new InputStreamReader(
-                                    socket.getInputStream(), StandardCharsets.UTF_8));
+                        try (Socket socket = accepted;
+                             BufferedReader in = new BufferedReader(new InputStreamReader(
+                                     socket.getInputStream(), StandardCharsets.UTF_8))) {
                             String requestLine = in.readLine();
                             String line;
                             while ((line = in.readLine()) != null && !line.isEmpty()) {
@@ -130,14 +130,14 @@ class PacAbsoluteFormTest {
     }
 
     private String proxyGet(String host, String pathQuery) throws Exception {
-        try (Socket socket = new Socket("127.0.0.1", proxyPort)) {
+        try (Socket socket = new Socket("127.0.0.1", proxyPort);
+             BufferedReader reader = new BufferedReader(new InputStreamReader(
+                     socket.getInputStream(), StandardCharsets.UTF_8))) {
             socket.setSoTimeout(10_000);
             String request = "GET http://" + host + pathQuery + " HTTP/1.1\r\n"
                     + "Host: " + host + "\r\nConnection: close\r\n\r\n";
             socket.getOutputStream().write(request.getBytes(StandardCharsets.UTF_8));
             socket.getOutputStream().flush();
-            BufferedReader reader = new BufferedReader(new InputStreamReader(
-                    socket.getInputStream(), StandardCharsets.UTF_8));
             StringBuilder all = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {

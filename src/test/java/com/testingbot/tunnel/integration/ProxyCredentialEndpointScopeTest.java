@@ -65,9 +65,9 @@ class ProxyCredentialEndpointScopeTest {
         ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
         Thread acceptor = new Thread(() -> {
             while (!server.isClosed()) {
-                try (Socket socket = server.accept()) {
-                    BufferedReader in = new BufferedReader(new InputStreamReader(
-                            socket.getInputStream(), StandardCharsets.UTF_8));
+                try (Socket socket = server.accept();
+                     BufferedReader in = new BufferedReader(new InputStreamReader(
+                             socket.getInputStream(), StandardCharsets.UTF_8))) {
                     List<String> head = new ArrayList<>();
                     String line;
                     while ((line = in.readLine()) != null && !line.isEmpty()) {
@@ -124,12 +124,13 @@ class ProxyCredentialEndpointScopeTest {
     }
 
     private void send(String requestHead, List<String> expectRecordedIn) throws Exception {
-        try (Socket socket = new Socket("127.0.0.1", tunnelPort)) {
+        try (Socket socket = new Socket("127.0.0.1", tunnelPort);
+             BufferedReader in = new BufferedReader(new InputStreamReader(
+                     socket.getInputStream(), StandardCharsets.UTF_8))) {
             socket.setSoTimeout(10_000);
             socket.getOutputStream().write(requestHead.getBytes(StandardCharsets.UTF_8));
             socket.getOutputStream().flush();
-            new BufferedReader(new InputStreamReader(
-                    socket.getInputStream(), StandardCharsets.UTF_8)).readLine();
+            in.readLine();
             Await.until("the upstream to record the request head",
                     () -> !expectRecordedIn.isEmpty());
         }

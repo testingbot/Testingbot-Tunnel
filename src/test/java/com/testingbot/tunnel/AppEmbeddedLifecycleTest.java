@@ -73,9 +73,9 @@ class AppEmbeddedLifecycleTest {
         hub = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
         pool.submit(() -> {
             while (!hub.isClosed()) {
-                try (Socket socket = hub.accept()) {
-                    BufferedReader in = new BufferedReader(new InputStreamReader(
-                            socket.getInputStream(), StandardCharsets.UTF_8));
+                try (Socket socket = hub.accept();
+                     BufferedReader in = new BufferedReader(new InputStreamReader(
+                             socket.getInputStream(), StandardCharsets.UTF_8))) {
                     String line = in.readLine();
                     while (line != null && !line.isEmpty()) {
                         line = in.readLine();
@@ -129,10 +129,10 @@ class AppEmbeddedLifecycleTest {
      */
     private void serveApi() {
         while (!api.isClosed()) {
-            try (Socket socket = api.accept()) {
+            try (Socket socket = api.accept();
+                 BufferedReader in = new BufferedReader(new InputStreamReader(
+                         socket.getInputStream(), StandardCharsets.UTF_8))) {
                 socket.setSoTimeout(10_000);
-                BufferedReader in = new BufferedReader(new InputStreamReader(
-                        socket.getInputStream(), StandardCharsets.UTF_8));
                 String requestLine = in.readLine();
                 if (requestLine == null) {
                     continue;
@@ -258,13 +258,13 @@ class AppEmbeddedLifecycleTest {
 
     /** GETs a path on an App's metrics port and returns the status code. */
     private static int probe(App app, String path) throws Exception {
-        try (Socket socket = new Socket("127.0.0.1", app.getMetricsPort())) {
+        try (Socket socket = new Socket("127.0.0.1", app.getMetricsPort());
+             BufferedReader in = new BufferedReader(new InputStreamReader(
+                     socket.getInputStream(), StandardCharsets.UTF_8))) {
             socket.setSoTimeout(10_000);
             socket.getOutputStream().write(("GET " + path + " HTTP/1.1\r\nHost: localhost\r\n"
                     + "Connection: close\r\n\r\n").getBytes(StandardCharsets.UTF_8));
             socket.getOutputStream().flush();
-            BufferedReader in = new BufferedReader(new InputStreamReader(
-                    socket.getInputStream(), StandardCharsets.UTF_8));
             String status = in.readLine();
             return status == null ? -1 : Integer.parseInt(status.split(" ")[1]);
         }
