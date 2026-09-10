@@ -23,4 +23,9 @@ public interface ReconnectableTunnel {
     boolean isAuthenticated();
 
     void createPortForwarding();
+
+    /** True only after both forwarding directions were established. */
+    default boolean isForwardingEstablished() {
+        return false;
+    }
 }

@@ -61,7 +61,9 @@ class CustomConnectionMonitorTest {
         private final List<String> calls = new ArrayList<>();
         private boolean shuttingDown;
         private boolean authenticated;
+        private boolean forwardingEstablished = true;
         private RuntimeException connectFailure;
+        private Runnable duringConnect = () -> {};
 
         @Override
         public String getConnectionId() {
@@ -81,6 +83,7 @@ class CustomConnectionMonitorTest {
         @Override
         public void connect() {
             calls.add("connect");
+            duringConnect.run();
             if (connectFailure != null) {
                 throw connectFailure;
             }
@@ -89,6 +92,11 @@ class CustomConnectionMonitorTest {
         @Override
         public boolean isAuthenticated() {
             return authenticated;
+        }
+
+        @Override
+        public boolean isForwardingEstablished() {
+            return forwardingEstablished;
         }
 
         @Override
@@ -131,10 +139,89 @@ class CustomConnectionMonitorTest {
 
     @BeforeEach
     void setUp() {
+        com.testingbot.tunnel.TunnelMetrics.setTunnelUp(false);
         tunnel = new FakeTunnel();
         host = new FakeHost();
         scheduler = new ManualScheduler();
         monitor = new CustomConnectionMonitor(tunnel, host, scheduler, 5000);
+    }
+
+    @Test
+    void anAlreadyQueuedRetryDoesNothingAfterShutdown() {
+        monitor.connectionLost(new RuntimeException("drop"));
+        tunnel.shuttingDown = true;
+        scheduler.fire();
+        assertThat(tunnel.calls).isEmpty();
+        assertThat(host.calls).containsExactly("stopLocalProxy");
+        assertThat(scheduler.hasPending()).isFalse();
+        assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isFalse();
+    }
+
+    @Test
+    void cancellationAlsoStopsACallbackAlreadyDequeuedByTheTimer() {
+        monitor.connectionLost(new RuntimeException("drop"));
+        Runnable dequeued = scheduler.pending;
+        monitor.cancel();
+        dequeued.run();
+        monitor.connectionLost(new RuntimeException("late drop"));
+        assertThat(tunnel.calls).isEmpty();
+        assertThat(host.calls).containsExactly("stopLocalProxy");
+        assertThat(scheduler.hasPending()).isFalse();
+        assertThat(monitor.isRetrying()).isFalse();
+    }
+
+    @Test
+    void cancellationDuringConnectClosesTheSessionWithoutStartingTheProxy() {
+        tunnel.authenticated = true;
+        tunnel.duringConnect = monitor::cancel;
+        monitor.connectionLost(new RuntimeException("drop"));
+        scheduler.fire();
+        assertThat(tunnel.calls).containsExactly("stop", "connect", "stop");
+        assertThat(host.calls).containsExactly("stopLocalProxy");
+        assertThat(scheduler.hasPending()).isFalse();
+        assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isFalse();
+    }
+
+    @Test
+    void cancellationStopsAQueuedLocalProxyRetry() {
+        tunnel.authenticated = true;
+        host.startFailure = new IllegalStateException("port occupied");
+        monitor.connectionLost(new RuntimeException("drop"));
+        scheduler.fire();
+        Runnable dequeued = scheduler.pending;
+        monitor.cancel();
+        host.calls.clear();
+        dequeued.run();
+        assertThat(host.calls).isEmpty();
+        assertThat(scheduler.hasPending()).isFalse();
+    }
+
+    @Test
+    void refusedForwardingStaysUnreadyAndRetriesUntilItSucceeds() {
+        tunnel.authenticated = true;
+        tunnel.forwardingEstablished = false;
+        monitor.connectionLost(new RuntimeException("drop"));
+        scheduler.fire();
+        assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isFalse();
+        assertThat(monitor.isRetrying()).isTrue();
+        assertThat(scheduler.hasPending()).isTrue();
+        tunnel.forwardingEstablished = true;
+        scheduler.fire();
+        assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isTrue();
+        assertThat(scheduler.hasPending()).isFalse();
+    }
+
+    @Test
+    void permanentlyRefusedForwardingEventuallyRebuilds() {
+        tunnel.authenticated = true;
+        tunnel.forwardingEstablished = false;
+        monitor.connectionLost(new RuntimeException("drop"));
+        for (int i = 0; i < CustomConnectionMonitor.MAX_RETRIES; i++) {
+            scheduler.fire();
+        }
+        assertThat(host.calls).contains("rebuildTunnel");
+        assertThat(scheduler.hasPending()).isFalse();
+        assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isFalse();
     }
 
     @Test

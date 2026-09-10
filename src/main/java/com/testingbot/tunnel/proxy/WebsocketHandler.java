@@ -104,8 +104,7 @@ public class WebsocketHandler extends ConnectHandler {
 
     /** True when {@code upstream} is the proxy {@code --proxy} named; see CustomConnectHandler. */
     private boolean isConfiguredProxy(ProxySpec upstream) {
-        return proxySpec != null && upstream != null
-                && proxySpec.getHost().equalsIgnoreCase(upstream.getHost());
+        return proxySpec != null && proxySpec.sameEndpoint(upstream);
     }
 
     /**
@@ -115,12 +114,16 @@ public class WebsocketHandler extends ConnectHandler {
      * without a PAC file this is just the static {@code --proxy}.
      */
     ProxySpec upstreamFor(String host, int port) {
+        return upstreamFor(TunnelProxyHandler.absoluteForm("http", host, port, "/"), host);
+    }
+
+    private ProxySpec upstreamFor(String url, String host) {
         if (pacPolicy == null) {
             return proxySpec;
         }
         // ws:// is carried over HTTP, so that is the scheme a PAC file is asked about.
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolveOrNull("http://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull(url, host);
         if (result == null) {
             // Could not evaluate: fall through to --proxy rather than direct, so a broken file
             // does not silently bypass the network's only sanctioned egress.
@@ -340,7 +343,7 @@ public class WebsocketHandler extends ConnectHandler {
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         request.setAttribute(WS_TARGET_ATTRIBUTE, Boolean.TRUE);
-        ProxySpec upstream = upstreamFor(host, port);
+        ProxySpec upstream = upstreamFor(request.getHttpURI().asString(), host);
         if (upstream != null) {
             request.setAttribute(WS_PROXY_TARGET_ATTRIBUTE, new ProxyTarget(upstream, host, port));
         }
@@ -505,8 +508,8 @@ public class WebsocketHandler extends ConnectHandler {
                     .append(proxyTarget.port()).append(" HTTP/1.1\r\n");
             connect.append("Host: ").append(proxyTarget.host()).append(':')
                     .append(proxyTarget.port()).append("\r\n");
-            String authorization =
-                    proxyAuthenticator.authorizationValue(proxyTarget.upstream().getHost());
+            String authorization = isConfiguredProxy(proxyTarget.upstream())
+                    ? proxyAuthenticator.authorizationValue(proxyTarget.upstream().getHost()) : null;
             if (authorization != null) {
                 connect.append("Proxy-Authorization: ").append(authorization).append("\r\n");
             }
@@ -523,7 +526,7 @@ public class WebsocketHandler extends ConnectHandler {
             // peer. After a CONNECT or a SOCKS handshake the peer is the target itself.
             boolean throughHttpProxy = proxyTarget != null
                     && !proxyTarget.upstream().isSocks5() && !upgradeViaConnect;
-            String authorization = throughHttpProxy
+            String authorization = throughHttpProxy && isConfiguredProxy(proxyTarget.upstream())
                     ? proxyAuthenticator.authorizationValue(proxyTarget.upstream().getHost())
                     : null;
             ByteBuffer request = ByteBuffer.wrap(

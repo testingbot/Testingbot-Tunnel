@@ -24,7 +24,11 @@ Egress and upstream proxies
 * `--ws-proxy-mode`: how a ws:// upgrade traverses --proxy, `connect` (default, per RFC 6455) or `get`
 * `--connect-to`: dial one host:port for requests naming another, leaving the URL, Host header and TLS SNI untouched
 * `--dns-timeout`, `--dns-round-robin`: per-server timeout and round-robin across the --dns list
-* `--http-dial-timeout`, `--http-idle-timeout`
+* `--http-dial-timeout`, `--http-idle-timeout`. The dial timeout also bounds the SSH control connection, which previously had none: a peer that accepted the socket and sent no banner blocked startup and every reconnect
+* Upstream proxy credentials are scoped to the whole configured endpoint -- protocol, host and port. CONNECT and WebSocket upgrades compared only the hostname, so a PAC file naming 127.0.0.1 on any other port was sent --proxy-userpwd or the SOCKS5 credentials
+* A PAC file is evaluated with the URL the request actually uses, so a rule written on a path is followed by traffic and not only by --pac-test. CONNECT still uses a synthetic https://host:port/, since it carries no path
+* A proxy named only by a PAC file receives absolute-form request targets, and a PAC DIRECT answer sends origin-form even when --proxy is configured
+* The API client authenticates to the upstream proxy with Negotiate when --proxy-auth-scheme negotiate is set. It only ever sent username and password, so on a proxy requiring Kerberos the tunnel could not register at all
 
 Observability
 * `--log-http`: per-request logging at `none`, `url`, `headers` or `errors`, settable per module (`proxy:`, `forwarder:`). `forwarder:body` logs the Selenium relay's request body with credentials redacted by key
@@ -33,11 +37,23 @@ Observability
 * `/healthz` and `/readyz` on the metrics port, and `--ready` to query a running tunnel and exit 0 or 1
 * `--doctor` diagnoses the configuration it was actually given, including the whole Kerberos chain and any --cacert-file subjects
 
+Embedding the tunnel in another application
+* `App.awaitReady(Duration)` and `App.getSetupFailure()`: boot() returns once the tunnel is created, which is not the same as it being able to carry traffic, and a caller had nothing to wait on but its own polling loop
+* Readiness is per tunnel: two tunnels in one JVM each answer for themselves on their own metrics port, where /readyz previously answered from a process-wide gauge for whichever wrote last -- and stopping one reported the other as down
+* stop() restores the JVM's default Authenticator and forgets the SOCKS credentials it registered, so a stopped tunnel's proxy password is no longer offered for the rest of the process's life, and a tunnel per job no longer stacks one authenticator per job
+* The startup self-test asks the API it was configured with rather than naming api.testingbot.com literally, so an embedder pointing at another endpoint is not failed by its own diagnostic
+* The new-version notice is logged rather than written to the host application's stderr
+
 Other
 * `--config`: read options from a file. Every long option also has a TESTINGBOT_* environment alias derived from its name; precedence is command line, then config file, then environment
 * `--header` and `--response-header`: add, replace or remove headers on plain HTTP
 * `--nobump-domains`: disable SSL bumping for named hosts only
-* The tunnel server's SSH host key is verified when the API supplies its fingerprint. Without one the connection is unverified, as before, but says so on every connect and in --doctor
+* `--ssh-host-key`: pin the SHA-256 fingerprint the tunnel server's SSH host key must have. The API's fingerprint is used when it supplies one, and a pin given here outranks it. Without either the connection is unverified, as before, but says so on every connect and in --doctor; `--ssh-host-key-policy require` refuses to connect instead. A fingerprint the API sends that cannot be parsed is now fatal rather than ignored
+* A boolean set to false in a --config file is no longer overridden by the environment. `shared=false` with TESTINGBOT_SHARED=true produced a shared tunnel
+* A failed startup self-test is retried while SSH stays connected, so a check that failed for a transient reason no longer leaves a healthy tunnel reporting 503 forever. The external loopback callback test is skipped, rather than failed, when --localhost-policy deny, --allow-hosts, --fast-fail-regexps, --connect-to or --pac-local would legitimately refuse it, and it now honours --proxy-testingbot and --cacert-file
+* A reconnect reports ready only once both forwarding directions are established; a server that authenticated and then refused the reverse forward used to advertise a tunnel that could carry nothing
+* A queued reconnect no longer fires after shutdown: stop() cancels the reconnect monitor, and every step of a retry checks it
+* Request URLs are redacted in logs -- userinfo and credential-shaped query values -- and TB-Credentials is treated as a sensitive header
 * Example Prometheus + Grafana stack publishes on loopback and requires an admin password to be supplied
 
 4.8

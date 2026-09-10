@@ -47,9 +47,8 @@ public final class ProxyAuthenticator {
      * whoever was being connected to -- and with {@code --pac-local} the PAC file chooses that
      * host per destination.
      *
-     * <p>Matched on host, not host:port, because that is all the dial sites know at the point
-     * they ask. A different port on the same proxy host is the same proxy in every deployment
-     * this has, and narrowing further would refuse credentials to a proxy that should have them.
+     * <p>The routing handlers also require {@link ProxySpec#sameEndpoint} before requesting a
+     * token, so a PAC result on a different port or protocol cannot receive these credentials.
      */
     private final String authorizedHost;
 

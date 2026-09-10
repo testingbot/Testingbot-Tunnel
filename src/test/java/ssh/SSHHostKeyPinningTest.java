@@ -113,4 +113,24 @@ class SSHHostKeyPinningTest {
         assertThatCode(() -> tunnel = tunnelFor(app)).doesNotThrowAnyException();
     }
 
+    @Test
+    void refusesToConnectUnverified_whenThePolicyRequiresAPin() throws Exception {
+        // The opt-in for networks where an intermediary could answer for the tunnel server:
+        // nothing to verify against means the secret is not sent at all.
+        App app = app();
+        app.setSshHostKeyPolicy("require");
+
+        assertThatThrownBy(() -> tunnelFor(app))
+            .hasMessageContaining("ssh-host-key-policy");
+    }
+
+    @Test
+    void requiringAPinStillConnects_whenOneIsConfigured() throws Exception {
+        App app = app();
+        app.setSshHostKeyPolicy("require");
+        app.setSshHostKeyPins(HostKeyPins.parse(serverFingerprint()));
+
+        assertThatCode(() -> tunnel = tunnelFor(app)).doesNotThrowAnyException();
+    }
+
 }

@@ -34,6 +34,8 @@ public class CustomConnectionMonitor {
 
     private final AtomicBoolean retrying = new AtomicBoolean(false);
     private int retryAttempts = 0;
+    private final Object lifecycleLock = new Object();
+    private volatile boolean cancelled;
 
     public CustomConnectionMonitor(SSHTunnel tunnel, App app) {
         this(tunnel, ReconnectHost.of(app), Scheduler.timerBased(), CURRENT_RETRY_DELAY);
@@ -48,23 +50,25 @@ public class CustomConnectionMonitor {
     }
 
     public void connectionLost(Throwable reason) {
-        if (tunnel.isShuttingDown()) {
-            // A drop during a deliberate shutdown is expected, not something to recover from.
-            return;
-        }
+        synchronized (lifecycleLock) {
+            if (isStopped()) {
+                // A drop during a deliberate shutdown is expected, not something to recover from.
+                return;
+            }
 
-        TunnelMetrics.setTunnelUp(false);
-        TunnelMetrics.ERRORS_TOTAL.labels("ssh_connection_lost").inc();
+            host.setReady(false);
+            TunnelMetrics.ERRORS_TOTAL.labels("ssh_connection_lost").inc();
 
-        host.stopLocalProxy();
+            host.stopLocalProxy();
 
-        LOG.log(Level.SEVERE, String.format("[%s] SSH Connection lost! %s",
-                tunnel.getConnectionId(), reason == null ? "" : reason.getMessage()));
+            LOG.log(Level.SEVERE, String.format("[%s] SSH Connection lost! %s",
+                    tunnel.getConnectionId(), reason == null ? "" : reason.getMessage()));
 
-        // Only the first loss starts a retry cycle; further reports while one is already in
-        // flight would otherwise stack up timers all racing to reconnect the same tunnel.
-        if (retrying.compareAndSet(false, true)) {
-            scheduleRetry();
+            // Only the first loss starts a retry cycle; further reports while one is already in
+            // flight would otherwise stack up timers all racing to reconnect the same tunnel.
+            if (retrying.compareAndSet(false, true)) {
+                scheduleRetry();
+            }
         }
     }
 
@@ -73,11 +77,18 @@ public class CustomConnectionMonitor {
     }
 
     private void scheduleRetry(Runnable task) {
-        scheduler.scheduleOnce("Reconnect-" + tunnel.getConnectionId(), task, retryDelayMs);
+        synchronized (lifecycleLock) {
+            if (!isStopped()) {
+                scheduler.scheduleOnce("Reconnect-" + tunnel.getConnectionId(), task, retryDelayMs);
+            }
+        }
     }
 
     /** One reconnect attempt. Package-private so a test can drive it without the scheduler. */
     void attemptReconnect() {
+        if (isStopped()) {
+            return;
+        }
         try {
             retryAttempts += 1;
             TunnelMetrics.TUNNEL_RECONNECTS_TOTAL.inc();
@@ -87,7 +98,14 @@ public class CustomConnectionMonitor {
                     tunnel.getConnectionId(), retryAttempts, retryDelayMs));
 
             tunnel.stop();
+            if (isStopped()) {
+                return;
+            }
             tunnel.connect();
+            if (isStopped()) {
+                tunnel.stop();
+                return;
+            }
 
             if (tunnel.isAuthenticated()) {
                 onReconnected();
@@ -119,7 +137,12 @@ public class CustomConnectionMonitor {
         // thirty pointless reconnects and a full tunnel rebuild, with nothing in the log naming
         // the port.
         try {
-            host.startLocalProxy();
+            synchronized (lifecycleLock) {
+                if (isStopped()) {
+                    return;
+                }
+                host.startLocalProxy();
+            }
         } catch (RuntimeException proxyFailed) {
             LOG.log(Level.SEVERE, String.format(
                     "[%s] SSH reconnected, but the local proxy could not be restarted: %s",
@@ -144,16 +167,33 @@ public class CustomConnectionMonitor {
 
     /** The part common to a clean reconnect and one that needed the proxy retried. */
     private void finishReconnect() {
-        retrying.set(false);
-        scheduler.cancel();
-
+        if (isStopped()) {
+            return;
+        }
         tunnel.createPortForwarding();
-        TunnelMetrics.setTunnelUp(true);
-
-        LOG.log(Level.INFO, String.format(
-                "[%s] Successfully re-established SSH Connection after %d attempts",
-                tunnel.getConnectionId(), retryAttempts));
-        retryAttempts = 0;
+        synchronized (lifecycleLock) {
+            if (isStopped()) {
+                tunnel.stop();
+                return;
+            }
+            if (!tunnel.isAuthenticated() || !tunnel.isForwardingEstablished()) {
+                host.setReady(false);
+                LOG.log(Level.WARNING, "SSH reconnected but port forwarding failed; retrying setup");
+                if (retryAttempts >= MAX_RETRIES) {
+                    giveUpAndRebuild();
+                } else {
+                    scheduleRetry();
+                }
+                return;
+            }
+            retrying.set(false);
+            scheduler.cancel();
+            host.setReady(true);
+            LOG.log(Level.INFO, String.format(
+                    "[%s] Successfully re-established SSH Connection after %d attempts",
+                    tunnel.getConnectionId(), retryAttempts));
+            retryAttempts = 0;
+        }
     }
 
     /**
@@ -165,9 +205,17 @@ public class CustomConnectionMonitor {
      * to the rebuild, which stops the whole App and so releases it.
      */
     private void retryLocalProxy() {
+        if (isStopped()) {
+            return;
+        }
         retryAttempts += 1;
         try {
-            host.startLocalProxy();
+            synchronized (lifecycleLock) {
+                if (isStopped()) {
+                    return;
+                }
+                host.startLocalProxy();
+            }
         } catch (RuntimeException proxyFailed) {
             LOG.log(Level.WARNING, String.format(
                     "[%s] Local proxy restart attempt %d failed: %s",
@@ -183,6 +231,9 @@ public class CustomConnectionMonitor {
     }
 
     private void giveUpAndRebuild() {
+        if (isStopped()) {
+            return;
+        }
         LOG.log(Level.WARNING, String.format(
                 "[%s] Giving up retrying after %d attempts. Creating a new Tunnel Connection.",
                 tunnel.getConnectionId(), retryAttempts));
@@ -197,6 +248,20 @@ public class CustomConnectionMonitor {
             LOG.log(Level.SEVERE, String.format("[%s] Failed to create new tunnel: %s",
                     tunnel.getConnectionId(), ex.getMessage()), ex);
         }
+    }
+
+    /** Stops the retry scheduler, including callbacks racing its cancellation. */
+    public void cancel() {
+        synchronized (lifecycleLock) {
+            cancelled = true;
+            scheduler.cancel();
+            retrying.set(false);
+            host.setReady(false);
+        }
+    }
+
+    private boolean isStopped() {
+        return cancelled || tunnel.isShuttingDown();
     }
 
     /** Attempts made in the current retry cycle; for tests and diagnostics. */

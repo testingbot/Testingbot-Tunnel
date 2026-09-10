@@ -51,14 +51,23 @@ public final class ConfigFile {
      * @throws ParseException if the file is missing, unreadable, or contains unknown keys
      */
     public static String[] expand(String[] args, Options options) throws ParseException {
+        return expandWithSources(args, options).arguments();
+    }
+
+    /** Keeps explicit false values present when the environment is merged afterwards. */
+    public record Expansion(String[] arguments, java.util.Set<String> configuredOptions) {
+    }
+
+    public static Expansion expandWithSources(String[] args, Options options) throws ParseException {
         String path = findValue(args, "config");
         if (path == null) {
-            return args;
+            return new Expansion(args, java.util.Set.of());
         }
 
         Properties properties = read(Path.of(path));
         List<String> merged = new ArrayList<>(List.of(args));
         List<String> trailing = new ArrayList<>();
+        java.util.Set<String> configured = new java.util.HashSet<>();
 
         for (Map.Entry<String, String> entry : ordered(properties).entrySet()) {
             String key = entry.getKey();
@@ -73,6 +82,9 @@ public final class ConfigFile {
             Option option = options.getOption(key);
             if (option == null) {
                 throw new ParseException("Unknown setting '" + key + "' in config file " + path);
+            }
+            if (option.getLongOpt() != null) {
+                configured.add(option.getLongOpt());
             }
             if (isPresent(args, key, options)) {
                 // An explicit command-line flag beats the file.
@@ -100,7 +112,7 @@ public final class ConfigFile {
         }
         out.addAll(List.of(args));
         out.addAll(merged.subList(args.length, merged.size()));
-        return out.toArray(new String[0]);
+        return new Expansion(out.toArray(new String[0]), java.util.Set.copyOf(configured));
     }
 
     /**

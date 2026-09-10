@@ -16,6 +16,8 @@ import java.net.ServerSocket;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
+import java.util.Timer;
+import java.util.TimerTask;
 import java.util.logging.ConsoleHandler;
 import java.util.logging.FileHandler;
 import java.util.logging.Level;
@@ -128,6 +130,16 @@ public class App {
      * be replaced by a later API-supplied one, while a pin a caller set is never overwritten.
      */
     private boolean sshHostKeyPinsFromApi;
+    /**
+     * What to do when nothing can verify the tunnel server: "warn" (default) or "require".
+     *
+     * <p>Not "require" by default because the service does not publish fingerprints for every
+     * tunnel server yet, and defaulting to it would refuse connections that work today. It is
+     * the setting to use on a network where an intermediary could answer for the tunnel server.
+     */
+    private String sshHostKeyPolicy = HOST_KEY_POLICY_WARN;
+    static final String HOST_KEY_POLICY_WARN = "warn";
+    static final String HOST_KEY_POLICY_REQUIRE = "require";
     private int sshPort = 0;
     private boolean shared = false;
 
@@ -438,6 +450,23 @@ public class App {
         // customer's API key back at them -- the line that gets pasted into a support
         // ticket. Repeating the option already yields every occurrence.
         options.addOption(caCert);
+
+        Option sshHostKey = new Option(null, "ssh-host-key", true,
+            "SHA-256 fingerprint the tunnel server's SSH host key must have, as printed by "
+            + "ssh-keygen -lf <key> -E sha256. Repeatable, and a single value may list several "
+            + "separated by commas. The account secret is the SSH password, so without a "
+            + "fingerprint -- from here or from the API -- whatever answers on the tunnel port "
+            + "receives it. A pin given here outranks the one the API supplies.");
+        sshHostKey.setArgName("SHA256:...");
+        options.addOption(sshHostKey);
+
+        Option sshHostKeyPolicy = new Option(null, "ssh-host-key-policy", true,
+            "What to do when no host key fingerprint is available: warn (default) connects "
+            + "anyway and says so, require refuses to connect. Requiring one is the safe "
+            + "setting and will become the default once the service publishes fingerprints for "
+            + "every tunnel server; until then it is opt-in so existing tunnels keep working.");
+        sshHostKeyPolicy.setArgName("warn|require");
+        options.addOption(sshHostKeyPolicy);
 
         Option controlProxy = new Option(null, "proxy-testingbot", true,
             "Upstream proxy for reaching TestingBot itself -- the API and the SSH control "
@@ -864,7 +893,7 @@ public class App {
             // Config entries first, then the environment for anything still unset, so the
             // parser below sees all three sources as if they had been typed on the command line.
             commandLine = cmdLinePosixParser.parse(options,
-                    EnvOptions.expand(ConfigFile.expand(args, options), options));
+                    EnvOptions.expand(ConfigFile.expandWithSources(args, options), options));
             if (commandLine.hasOption("help")) {
                 HelpFormatter help = new HelpFormatter();
                 help.setWidth(180);
@@ -1076,6 +1105,24 @@ public class App {
     private static volatile String activeLogFormat = "text";
     /** The --web directory server, or null when --web was not given. */
     private LocalWebServer localWebServer;
+    /**
+     * Whether *this* tunnel is forwarding.
+     *
+     * <p>Per App, not static. `/readyz` used to answer from the process-wide gauge, so a host
+     * application running two tunnels -- or one per job, overlapping -- had both endpoints
+     * answering for whichever App wrote last, and stopping one reported the other as not ready.
+     * The gauge is still kept in step for the single-tunnel case, which is every command line
+     * run; it is process-wide by nature, since the Prometheus registry is.
+     */
+    private volatile boolean ready;
+
+    /** Why a tunnel that will not come up gave up, or null while it may still succeed. */
+    private volatile String setupFailure;
+
+    /** Our JVM-wide proxy authenticator and what it replaced, so {@link #stop} can undo it. */
+    private Authenticator installedProxyAuthenticator;
+    private Authenticator previousDefaultAuthenticator;
+
     private PidPoller pidPoller;
     private TunnelPoller poller;
     private HttpForwarder httpForwarder;
@@ -1115,7 +1162,7 @@ public class App {
                 if (tunnel != null) {
                     tunnel.stop();
                 }
-                TunnelMetrics.setTunnelUp(false);
+                setReady(false);
                 try {
                     Logger.getLogger(App.class.getName()).log(Level.INFO,
                             "Shutting down your personal Tunnel Server.");
@@ -1133,6 +1180,15 @@ public class App {
         return new Api(this);
     }
 
+    /**
+     * Package-private for the same reason as {@link #createApi}: the tunnel server's port and the
+     * hub host are fixed in production, so without a seam nothing that boots a whole App can run
+     * anywhere but against the live service.
+     */
+    ssh.SSHTunnel createTunnel(String serverIp) throws Exception {
+        return new ssh.SSHTunnel(this, serverIp);
+    }
+
     public void boot() throws Exception {
         // Set here, not only in main(): an embedder constructs App directly, leaving startTime at
         // zero, so uptime was reported as seconds since the epoch -- a number that keeps climbing
@@ -1141,6 +1197,7 @@ public class App {
             Statistics.setStartTime(System.currentTimeMillis());
         }
 
+        setupFailure = null;
         api = createApi();
         JsonNode tunnelData = null;
 
@@ -1173,7 +1230,12 @@ public class App {
         // unexpected value from the API would have thrown out of boot() entirely.
         Version latest = Version.parse(tunnelData.path("version").asText(null));
         if (latest != null && RELEASE != null && RELEASE.isOlderThan(latest)) {
-            System.err.println("A new version (" + latest + ") is available for download at https://testingbot.com\nYou have version " + App.VERSION);
+            // Logged, not printed: boot() runs inside whatever process embeds this, and a
+            // library writing to the host application's stderr is noise it cannot switch off.
+            // The command line client's console handler puts it on the terminal as before.
+            Logger.getLogger(App.class.getName()).log(Level.INFO,
+                    "A new version ({0}) is available for download at https://testingbot.com. "
+                            + "You have version {1}.", new Object[]{latest, App.VERSION});
         }
 
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
@@ -1216,6 +1278,7 @@ public class App {
      */
     public void setupFailed(String reason, int exitCode) {
         Logger.getLogger(App.class.getName()).log(Level.SEVERE, reason);
+        this.setupFailure = reason;
         try {
             stop();
         } catch (Exception cleanupFailed) {
@@ -1224,7 +1287,7 @@ public class App {
         }
         // After stop(), which sets it false itself -- but stop() is also the ordinary teardown,
         // so being explicit here keeps the reason for the gauge attached to this path.
-        TunnelMetrics.setTunnelUp(false);
+        setReady(false);
         if (commandLineClient) {
             // Already logged above; printing it again would duplicate it under text and break
             // the stream under json.
@@ -1236,7 +1299,8 @@ public class App {
     }
 
     public void stop() {
-        TunnelMetrics.setTunnelUp(false);
+        setReady(false);
+        cancelSelfTestRetry();
 
         if (tunnel != null) {
             tunnel.stop(true);
@@ -1284,6 +1348,10 @@ public class App {
             }
         }
 
+        restoreDefaultAuthenticator();
+        Api.forgetSocksCredentials(
+                com.testingbot.tunnel.proxy.ProxySpec.parse(getControlProxy()));
+
         // Without this, an embedder that starts a tunnel per job leaks one
         // shutdown hook per App instance for the lifetime of the JVM.
         if (cleanupThread != null) {
@@ -1317,12 +1385,12 @@ public class App {
             // describes the server about to be dialled. Adopting only in boot() left every
             // polled tunnel unverified.
             adoptApiHostKeyFingerprint(apiResponse);
-            tunnel = new SSHTunnel(this, _serverIP);
+            tunnel = createTunnel(_serverIP);
             if (tunnel.isAuthenticated()) {
                 this.serverIP = _serverIP;
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "Successfully authenticated, setting up forwarding.");
                 tunnel.createPortForwarding();
-                boolean healthy = this.startProxies();
+                boolean healthy = this.startProxies() && tunnel.isForwardingEstablished();
                 // Gated on the self-test, not merely on having got this far. /readyz means "the
                 // tunnel is forwarding", and every check startProxies() runs is a check that
                 // traffic will actually arrive -- the Selenium relay reaching the hub, the
@@ -1330,12 +1398,13 @@ public class App {
                 // tunnel that failed one of those carries nothing, so reporting it ready told
                 // container probes and --readyfile integrations to send work to something that
                 // could not do any. It stays not-ready until a reconnect succeeds.
-                TunnelMetrics.setTunnelUp(healthy);
+                setReady(healthy);
                 if (healthy) {
                     writeReadyFile();
                     Logger.getLogger(App.class.getName()).log(Level.INFO, "The Tunnel is ready, ip: {0}\nYou may start your tests.", _serverIP);
                 } else {
                     Logger.getLogger(App.class.getName()).log(Level.SEVERE, "The Tunnel is up (ip: {0}) but its self-test failed, so it is not reporting ready; tests will not work until this is resolved.", _serverIP);
+                    scheduleSelfTestRetry();
                 }
                 Logger.getLogger(App.class.getName()).log(Level.INFO, "To stop the tunnel, press CTRL+C");
             }
@@ -1351,15 +1420,92 @@ public class App {
         }
     }
 
+    /**
+     * Puts back whatever {@code Authenticator.getDefault()} was before {@code --proxy-userpwd}.
+     *
+     * <p>{@code Authenticator.setDefault} is JVM-wide and there is no other hook for the JDK's
+     * proxy authentication, so a tunnel embedded in a host application installs something that
+     * outlives it. Left in place, a stopped tunnel's credentials went on being offered for the
+     * proxy it named, and a host starting a tunnel per job stacked one delegating authenticator
+     * per job for the life of the process.
+     *
+     * <p>Only when ours is still the default: if something else installed one afterwards, it has
+     * ours in its chain and removing it here would break that instead.
+     */
+    private void restoreDefaultAuthenticator() {
+        if (installedProxyAuthenticator == null) {
+            return;
+        }
+        if (Authenticator.getDefault() == installedProxyAuthenticator) {
+            Authenticator.setDefault(previousDefaultAuthenticator);
+        }
+        installedProxyAuthenticator = null;
+        previousDefaultAuthenticator = null;
+    }
+
+    /**
+     * Blocks until this tunnel is forwarding, it gives up, or the timeout expires.
+     *
+     * <p>For embedders. {@code boot()} returns as soon as the tunnel has been *created*, and when
+     * the server was not yet READY the rest happens on the poller's timer thread -- so a caller
+     * that started running tests when {@code boot()} returned was racing the tunnel it had just
+     * asked for. Polling is enough here: readiness changes once, and a caller that wants to know
+     * the instant it does can read {@link #isReady()} itself.
+     *
+     * @param timeout how long to wait
+     * @return true if the tunnel became ready, false on a timeout or a failed setup
+     * @throws InterruptedException if the calling thread is interrupted while waiting
+     */
+    public boolean awaitReady(java.time.Duration timeout) throws InterruptedException {
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (true) {
+            if (ready) {
+                return true;
+            }
+            if (setupFailure != null) {
+                // Terminal: nothing is still trying, so waiting out the clock would only delay
+                // the caller's own error handling.
+                return false;
+            }
+            if (System.nanoTime() >= deadline) {
+                return false;
+            }
+            Thread.sleep(50);
+        }
+    }
+
+    /**
+     * @return why the tunnel gave up, or null if it has not -- for an embedder that wants the
+     *         reason rather than the log line {@link #setupFailed} writes
+     */
+    public String getSetupFailure() {
+        return setupFailure;
+    }
+
+    /**
+     * @return true when this tunnel is forwarding, which is what {@code /readyz} answers
+     */
+    public boolean isReady() {
+        return ready;
+    }
+
+    /**
+     * Records readiness for this App and mirrors it to the process-wide gauge.
+     *
+     * <p>Public because the reconnect monitor lives in another package and reports through
+     * {@link ssh.ReconnectHost}; it is not part of what an embedder is expected to call. The
+     * gauge stays in step because a single-tunnel process -- every command line run -- is what
+     * {@code tunnel_up} describes. With two tunnels in one JVM the gauge is whichever wrote
+     * last, while {@code /readyz} on each metrics port answers for its own App.
+     */
+    public void setReady(boolean ready) {
+        this.ready = ready;
+        TunnelMetrics.setTunnelUp(ready);
+    }
+
     /** Package-private so ReadinessGatingTest can drive a failing startup. */
     boolean startProxies() {
-        boolean healthy = true;
         httpForwarder = new HttpForwarder(this);
-
-        if (!httpForwarder.testForwarding()) {
-            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", Integer.toString(getSeleniumPort()));
-            healthy = false;
-        }
 
         if (!this.noProxy) {
             try {
@@ -1367,17 +1513,124 @@ public class App {
             } catch (HttpProxy.HttpProxyStartException ex) {
                 throw new TunnelFailedException(ex.getMessage(), 1, ex);
             }
+        }
+
+        return selfTest();
+    }
+
+    /**
+     * The startup self-test, separated from building the listeners so it can be repeated.
+     *
+     * <p>Each check is a check that traffic will actually arrive. They can fail for reasons that
+     * pass a moment later -- the hub refusing a connection while the tunnel server finishes
+     * booting, say -- and a single such failure used to leave a connected tunnel reporting 503 for
+     * as long as SSH stayed up, with nothing retrying it. {@link #scheduleSelfTestRetry} is what
+     * resolves that; this method is the part worth repeating.
+     */
+    boolean selfTest() {
+        boolean healthy = true;
+
+        if (!httpForwarder.testForwarding()) {
+            Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Forwarder testing failed, localhost port {0} does not seem to be able to reach our hub (hub.testingbot.com)", Integer.toString(getSeleniumPort()));
+            healthy = false;
+        }
+
+        if (!this.noProxy && this.httpProxy != null) {
             if (tunnel != null && !tunnel.verifyReverseForwardDelivery()) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Reverse port forwarding cannot reach the local proxy on port {0}, traffic through the tunnel will fail", Integer.toString(getJettyPort()));
                 healthy = false;
             }
-            if (this.getProxy() == null && !this.httpProxy.testProxy()) {
+            if (!shouldRunProxyCallbackTest()) {
+                Logger.getLogger(App.class.getName()).log(Level.INFO,
+                        "Skipping external loopback callback test because destination policy or routing is configured; local forwarding checks still apply.");
+            } else if (!this.httpProxy.testProxy()) {
                 Logger.getLogger(App.class.getName()).log(Level.SEVERE, "! Tunnel might not work properly, test failed");
                 healthy = false;
             }
         }
 
         return healthy;
+    }
+
+    /** How long between self-test retries, and how many are attempted before giving up. */
+    static final long SELF_TEST_RETRY_INTERVAL_MS = 30_000L;
+    static final int SELF_TEST_RETRY_ATTEMPTS = 10;
+
+    private Timer selfTestRetryTimer;
+    /** Package-private so a test does not have to wait the production interval. */
+    long selfTestRetryIntervalMs = SELF_TEST_RETRY_INTERVAL_MS;
+
+    /** Package-private so a test can drive the retry without a live SSH session. */
+    boolean tunnelIsForwarding() {
+        return tunnel != null && tunnel.isForwardingEstablished();
+    }
+
+    /**
+     * Re-runs {@link #selfTest} while SSH stays connected, until it passes or the attempts run
+     * out.
+     *
+     * <p>Readiness is gated on the self-test, so a transient failure at startup -- the hub not
+     * yet accepting connections on a tunnel server that has only just booted -- otherwise
+     * pinned this process at 503 forever, with a working SSH session and nothing that would
+     * ever look again. Reconnects already re-run the whole sequence; this covers the case where
+     * the connection never drops.
+     */
+    synchronized void scheduleSelfTestRetry() {
+        if (selfTestRetryTimer != null) {
+            return;
+        }
+        Timer timer = new Timer("SelfTestRetry-" + getJettyPort(), true);
+        selfTestRetryTimer = timer;
+        timer.schedule(new TimerTask() {
+            private int attempts;
+
+            @Override
+            public void run() {
+                attempts += 1;
+                if (!tunnelIsForwarding()) {
+                    // Not our failure to retry: the reconnect monitor owns a dropped session and
+                    // re-runs startProxies() itself when it comes back.
+                    return;
+                }
+                boolean healthy;
+                try {
+                    healthy = selfTest();
+                } catch (RuntimeException ex) {
+                    Logger.getLogger(App.class.getName()).log(Level.WARNING,
+                            "Self-test retry failed", ex);
+                    healthy = false;
+                }
+                if (healthy) {
+                    setReady(true);
+                    writeReadyFile();
+                    Logger.getLogger(App.class.getName()).log(Level.INFO,
+                            "The Tunnel self-test passed on retry {0}; the tunnel is ready.",
+                            attempts);
+                    cancelSelfTestRetry();
+                } else if (attempts >= SELF_TEST_RETRY_ATTEMPTS) {
+                    Logger.getLogger(App.class.getName()).log(Level.SEVERE,
+                            "The Tunnel self-test still fails after {0} retries; giving up. "
+                                    + "The tunnel stays not ready.", attempts);
+                    cancelSelfTestRetry();
+                }
+            }
+        }, selfTestRetryIntervalMs, selfTestRetryIntervalMs);
+    }
+
+    synchronized void cancelSelfTestRetry() {
+        if (selfTestRetryTimer != null) {
+            selfTestRetryTimer.cancel();
+            selfTestRetryTimer = null;
+        }
+    }
+
+    /** The external callback targets a temporary loopback server, outside user test targets. */
+    boolean shouldRunProxyCallbackTest() {
+        return getProxy() == null && getPacLocal() == null
+                && !"deny".equalsIgnoreCase(getLocalhostPolicy())
+                && getAllowedHosts().isUnrestricted()
+                && (getFastFail() == null || getFastFail().length == 0)
+                && (getConnectTo() == null || getConnectTo().length == 0);
     }
 
     /**
@@ -1475,6 +1728,24 @@ public class App {
                             "No --krb5-keytab given, so the ambient ticket cache will be used.");
                 }
             }
+        }
+
+        if (commandLine.hasOption("ssh-host-key")) {
+            try {
+                app.setSshHostKeyPins(ssh.HostKeyPins.parse(
+                        String.join(",", commandLine.getOptionValues("ssh-host-key"))));
+            } catch (IllegalArgumentException invalid) {
+                throw new ParseException("Invalid --ssh-host-key value: " + invalid.getMessage());
+            }
+        }
+
+        if (commandLine.hasOption("ssh-host-key-policy")) {
+            String value = commandLine.getOptionValue("ssh-host-key-policy").trim();
+            if (!value.equalsIgnoreCase("warn") && !value.equalsIgnoreCase("require")) {
+                throw new ParseException("Invalid --ssh-host-key-policy value: " + value
+                        + ". Expected warn or require.");
+            }
+            app.setSshHostKeyPolicy(value.toLowerCase(java.util.Locale.ROOT));
         }
 
         if (commandLine.hasOption("cacert-file")) {
@@ -1983,11 +2254,17 @@ public class App {
             // every request in the JVM with these credentials, whoever was asking.
             com.testingbot.tunnel.proxy.ProxySpec spec =
                     com.testingbot.tunnel.proxy.ProxySpec.parse(this.proxy);
+            // Setting it twice on one App -- reconfiguring before boot, or an embedder reusing
+            // the object -- would otherwise wrap our own authenticator in another of ours.
+            restoreDefaultAuthenticator();
             Authenticator previousDefault = Authenticator.getDefault();
-            Authenticator.setDefault(spec == null
+            Authenticator installed = spec == null
                     ? new ProxyAuth(splitted[0], splitted[1], null, -1, previousDefault)
                     : new ProxyAuth(splitted[0], splitted[1], spec.getHost(), spec.getPort(),
-                                    previousDefault));
+                                    previousDefault);
+            this.previousDefaultAuthenticator = previousDefault;
+            this.installedProxyAuthenticator = installed;
+            Authenticator.setDefault(installed);
         } else {
             this.proxyAuth = proxyAuth;
         }
@@ -2250,12 +2527,14 @@ public class App {
                         + "supplied by the API: {0}", pins.displayValues());
                 return;
             } catch (IllegalArgumentException ex) {
-                // Logged, not fatal: an unusable value from the service should not stop a tunnel
-                // that would otherwise start, and the connect path warns that it is unverified.
-                Logger.getLogger(App.class.getName()).log(Level.WARNING,
-                    "Ignoring unusable host key fingerprint from the API ({0}): {1}",
-                    new Object[]{field, ex.getMessage()});
-                return;
+                // Fatal, not warned past. The service sending this field at all means it meant
+                // this connection to be verified, so a value that cannot be parsed is either a
+                // bug or something on the path having rewritten it -- and continuing would hand
+                // the account secret to an unverified server on exactly the occasion where
+                // somebody tried to stop that being checked.
+                throw new TunnelFailedException("The API supplied a host key fingerprint ("
+                    + field + ") that cannot be used: " + ex.getMessage()
+                    + ". Refusing to connect unverified.", 1, ex);
             }
         }
     }
@@ -2273,6 +2552,26 @@ public class App {
     public void setSshHostKeyPins(ssh.HostKeyPins pins) {
         this.sshHostKeyPins = pins == null ? ssh.HostKeyPins.none() : pins;
         this.sshHostKeyPinsFromApi = false;
+    }
+
+    /**
+     * @return "warn" or "require", never null
+     */
+    public String getSshHostKeyPolicy() {
+        return sshHostKeyPolicy;
+    }
+
+    /**
+     * @param policy "warn" or "require"; blank restores the default
+     */
+    public void setSshHostKeyPolicy(String policy) {
+        this.sshHostKeyPolicy = policy == null || policy.trim().isEmpty()
+                ? HOST_KEY_POLICY_WARN : policy.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    /** True when the connection must not be made without a fingerprint to verify against. */
+    public boolean requiresVerifiedSshHostKey() {
+        return HOST_KEY_POLICY_REQUIRE.equals(sshHostKeyPolicy);
     }
 
     /**

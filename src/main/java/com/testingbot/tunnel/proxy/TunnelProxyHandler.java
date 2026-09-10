@@ -133,6 +133,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         boolean httpProxy = spec != null && !spec.isSocks5();
         this.upstreamHttpProxyHost = httpProxy ? spec.getHost() : null;
         this.upstreamHttpProxySpec = httpProxy ? spec : null;
+        this.proxyAuthHeaderValue = null;
         if (httpProxy && userPassword != null && !userPassword.isEmpty()) {
             this.proxyAuthHeaderValue = "Basic " + java.util.Base64.getEncoder()
                     .encodeToString(userPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8));
@@ -178,28 +179,25 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
      * the origin. With no upstream proxy there is no tunnel and nothing to withhold.
      */
     boolean isTunnelledToOrigin(org.eclipse.jetty.client.Request proxyToServerRequest) {
-        return upstreamHttpProxyHost != null
+        ProxySpec chosen = selectedProxy(proxyToServerRequest);
+        return chosen != null && !chosen.isSocks5()
                 && org.eclipse.jetty.http.HttpScheme.HTTPS.is(
                         proxyToServerRequest.getURI() == null
                                 ? proxyToServerRequest.getScheme()
                                 : proxyToServerRequest.getURI().getScheme());
     }
 
-    /** True when the upstream chosen for this request is the proxy {@code --proxy} names. */
-    private boolean goesToTheConfiguredProxy(org.eclipse.jetty.client.Request proxyToServerRequest) {
-        if (upstreamHttpProxySpec == null) {
-            return false;
+    /** Uses the route already chosen for this exchange; PAC must not be re-evaluated here. */
+    private boolean goesToTheConfiguredProxy(org.eclipse.jetty.client.Request request) {
+        ProxySpec chosen = selectedProxy(request);
+        return upstreamHttpProxySpec != null && upstreamHttpProxySpec.sameEndpoint(chosen);
+    }
+
+    private ProxySpec selectedProxy(org.eclipse.jetty.client.Request request) {
+        if (pacPolicy == null) {
+            return ProxySpec.parse(upstreamProxy);
         }
-        String host = proxyToServerRequest.getHost();
-        int port = proxyToServerRequest.getPort();
-        if (port <= 0) {
-            port = HttpScheme.HTTPS.is(proxyToServerRequest.getScheme()) ? 443 : 80;
-        }
-        ProxySpec chosen = upstreamFor(host, port, proxyToServerRequest.getScheme());
-        return chosen != null
-                && !chosen.isSocks5()
-                && chosen.getPort() == upstreamHttpProxySpec.getPort()
-                && chosen.getHost().equalsIgnoreCase(upstreamHttpProxySpec.getHost());
+        return request.getTag() instanceof String key ? ProxySpec.parse(key) : null;
     }
 
     /** Splits "user:password"; the password may itself contain colons. */
@@ -285,6 +283,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
      * retry loop around jetty-client's exchange.
      */
     ProxySpec upstreamFor(String host, int port, String scheme) {
+        return upstreamFor(absoluteForm(scheme, host, port, "/"), host);
+    }
+
+    private ProxySpec upstreamFor(String url, String host) {
         if (pacPolicy == null) {
             return ProxySpec.parse(upstreamProxy);
         }
@@ -292,7 +294,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
             return null;
         }
         com.testingbot.tunnel.pac.PacResult result =
-                pacPolicy.resolveOrNull(scheme + "://" + host + ":" + port + "/", host);
+                pacPolicy.resolveOrNull(url, host);
         if (result == null) {
             // Could not evaluate: fall through to --proxy rather than direct, so a broken file
             // does not silently bypass the network's only sanctioned egress.
@@ -335,25 +337,14 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     }
 
     /**
-     * Makes sure jetty-client knows about the proxy PAC chose for this destination.
-     *
-     * <p>jetty-client picks an upstream by walking {@link ProxyConfiguration}'s list and taking
-     * the first {@code Proxy} whose {@code matches(Origin)} answers true -- a fixed address per
-     * entry, which a PAC file is not. So each distinct proxy the file has named gets one entry
-     * whose {@code matches} re-asks the PAC and claims only the origins routed to itself; a host
-     * the file sends DIRECT is claimed by none of them and dialled directly.
-     *
-     * <p>Registration happens here, on the request thread before the exchange is created, rather
-     * than from inside {@code matches()}: {@code match()} iterates the list, and growing it
-     * during that walk is how this would become an intermittent failure under load.
-     *
-     * @return the proxy key for this destination, used as the request tag
+     * Registers the chosen proxy before creating the exchange. The request tag carries this
+     * route into Origin selection, so paths on one host can use different connection pools
+     * without re-evaluating a time-dependent PAC decision during authentication or dialing.
      */
-    private String registerPacProxy(String host, int port, String scheme) {
+    private String registerPacProxy(ProxySpec chosen) {
         if (pacPolicy == null) {
             return null;
         }
-        ProxySpec chosen = upstreamFor(host, port, scheme);
         String key = proxyKey(chosen);
         if (key == null) {
             return null;
@@ -389,8 +380,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
         @Override
         public boolean matches(Origin origin) {
-            return key.equals(proxyKey(upstreamFor(origin.getAddress().getHost(),
-                    origin.getAddress().getPort(), origin.getScheme())));
+            return key.equals(origin.getTag());
         }
     }
 
@@ -405,8 +395,7 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
 
         @Override
         public boolean matches(Origin origin) {
-            return key.equals(proxyKey(upstreamFor(origin.getAddress().getHost(),
-                    origin.getAddress().getPort(), origin.getScheme())));
+            return key.equals(origin.getTag());
         }
     }
 
@@ -829,7 +818,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         }
         // Before the request is created, so the proxy PAC chose is already in the client's
         // configuration when jetty-client resolves the destination and asks which one matches.
-        String pacTag = registerPacProxy(newHttpURI.getHost(), port, newHttpURI.getScheme());
+        ProxySpec chosen = upstreamFor(newHttpURI.asString(), newHttpURI.getHost());
+        String pacTag = registerPacProxy(chosen);
 
         org.eclipse.jetty.client.Request proxyRequest =
                 getHttpClient().newRequest(newHttpURI.getHost(), port)
@@ -857,7 +847,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         // to pass through ("?a={json}", "?next=a|b", "?tpl={{name}}"), because java.net.URI
         // rejects them. Those requests would reach the upstream proxy in origin-form, which
         // Squid answers with 400. Absolutize them here, the same way jetty-client would.
-        if (usesHttpUpstreamProxy() && proxyRequest.getURI() == null) {
+        if (chosen != null && !chosen.isSocks5()
+                && !HttpScheme.HTTPS.is(newHttpURI.getScheme()) && proxyRequest.getURI() == null) {
             proxyRequest.path(absoluteForm(newHttpURI.getScheme(), newHttpURI.getHost(), port, pathQuery));
         }
         return proxyRequest;
@@ -886,12 +877,6 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         }
         // Same port as ours: only a loop if it also names this machine.
         return LocalhostPolicy.DENY.blocks(targetHost);
-    }
-
-    /** True when traffic leaves through an HTTP forward proxy. SOCKS5 is transparent at TCP level. */
-    private boolean usesHttpUpstreamProxy() {
-        ProxySpec spec = ProxySpec.parse(upstreamProxy);
-        return spec != null && !spec.isSocks5();
     }
 
     static String absoluteForm(String scheme, String host, int port, String pathQuery) {

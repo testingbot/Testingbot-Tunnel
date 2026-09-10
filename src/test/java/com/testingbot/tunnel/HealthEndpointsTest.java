@@ -31,12 +31,14 @@ class HealthEndpointsTest {
     }
 
     private InsightServer insightServer;
+    /** The App the endpoints answer for: readiness is per tunnel, not per process. */
+    private App app;
 
     @BeforeEach
     void setUp() throws Exception {
         TunnelMetrics.setTunnelUp(false);
         metricsPort = findFreePort();
-        App app = new App();
+        app = new App();
         app.setClientKey("test_key");
         app.setClientSecret("test_secret");
         app.setMetricsPort(metricsPort);
@@ -88,18 +90,20 @@ class HealthEndpointsTest {
 
     @Test
     void readyz_is200OnceTheTunnelIsUp() throws Exception {
-        TunnelMetrics.setTunnelUp(true);
+        // Through the App, which is what the tunnel itself does. The gauge is mirrored from
+        // here, not read by the endpoint: two tunnels in one process each answer for their own.
+        app.setReady(true);
 
         assertThat(get("/readyz")).isEqualTo("200|{\"status\":\"ready\"}");
     }
 
     @Test
     void readyz_dropsBackTo503WhenTheConnectionIsLost() throws Exception {
-        TunnelMetrics.setTunnelUp(true);
+        app.setReady(true);
         assertThat(get("/readyz")).startsWith("200");
 
-        // What CustomConnectionMonitor.connectionLost() does.
-        TunnelMetrics.setTunnelUp(false);
+        // What CustomConnectionMonitor.connectionLost() does, via ReconnectHost.
+        app.setReady(false);
 
         assertThat(get("/readyz")).isEqualTo("503|{\"status\":\"not_ready\"}");
         // ...while liveness stays up, so the process is not killed mid-recovery.
@@ -132,10 +136,10 @@ class HealthEndpointsTest {
 
     @Test
     void readinessProbe_exitCodeFollowsTheEndpoint() {
-        TunnelMetrics.setTunnelUp(true);
+        app.setReady(true);
         assertThat(ReadinessProbe.probe("127.0.0.1", metricsPort, 2_000)).isZero();
 
-        TunnelMetrics.setTunnelUp(false);
+        app.setReady(false);
         assertThat(ReadinessProbe.probe("127.0.0.1", metricsPort, 2_000)).isEqualTo(1);
     }
 

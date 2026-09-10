@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 import ssh.HostKeyPins;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /**
  * Adoption of the tunnel server's host key fingerprint from the API response.
@@ -69,11 +70,16 @@ class ApiHostKeyFingerprintTest {
     }
 
     @Test
-    void unusableValueLeavesTheTunnelUnverifiedRatherThanFailing() {
+    void unusableValueIsFatalRatherThanConnectingUnverified() {
         App app = app();
 
-        app.adoptApiHostKeyFingerprint(node("ssh_fingerprint", "not-a-fingerprint"));
-
+        // The field being present at all means the service meant this connection to be verified,
+        // so a value that cannot be parsed is a bug or a rewrite on the path. Connecting anyway
+        // would hand over the account secret on exactly the occasion somebody interfered.
+        assertThatThrownBy(() -> app.adoptApiHostKeyFingerprint(
+                node("ssh_fingerprint", "not-a-fingerprint")))
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("Refusing to connect unverified");
         assertThat(app.getSshHostKeyPins().isEmpty()).isTrue();
     }
 
@@ -81,9 +87,10 @@ class ApiHostKeyFingerprintTest {
     void md5FromTheApiIsRefused() {
         App app = app();
 
-        app.adoptApiHostKeyFingerprint(
-            node("ssh_fingerprint", "MD5:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff"));
-
+        assertThatThrownBy(() -> app.adoptApiHostKeyFingerprint(
+                node("ssh_fingerprint", "MD5:00:11:22:33:44:55:66:77:88:99:aa:bb:cc:dd:ee:ff")))
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("MD5");
         assertThat(app.getSshHostKeyPins().isEmpty()).isTrue();
     }
 

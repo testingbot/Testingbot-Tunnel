@@ -10,8 +10,8 @@ traffic to TestingBot and routes the browser's web requests back through your ne
 > **Running tunnel 4.x or older?** This page documents **5.0**, which needs Java 17 and changes
 > a few defaults. The 4.x source and its documentation stay on the
 > [`v4.x` branch](https://github.com/testingbot/Testingbot-Tunnel/tree/v4.x). If you are upgrading, read
-> [Upgrading from 4.x](#upgrading-from-4x) first — it is short, and two of the changes are
-> ones you will notice immediately.
+> [Upgrading from 4.x](docs/upgrading-from-4x.md) first — it is short, and existing command lines
+> keep working, but the listeners now bind loopback and successful requests no longer log.
 
 ## Requirements
 
@@ -20,39 +20,6 @@ traffic to TestingBot and routes the browser's web requests back through your ne
 | **5.0** and later | **17** | Built on Jetty 12. Tested on 17, 21 and 25. |
 | 4.x | 11 | Jetty 11, which is end-of-life and no longer receives security fixes. |
 | 3.x and earlier | 8 | Unsupported. |
-
-## Upgrading from 4.x
-
-5.0 adds 28 options and removes none, so existing command lines keep working. Six things do
-change, and the first three are the ones people notice:
-
-| | 4.x | 5.0 | To keep the 4.x behaviour |
-|---|---|---|---|
-| **Java** | 11 | **17** | — (hard requirement) |
-| **What the listeners bind** | every interface | `127.0.0.1` | `--bind-address 0.0.0.0` |
-| **Per-request logging** | one `INFO` line per request | only failures and 5xx | `--log-http url` |
-| **Selenium relay logging** | always logged | honours `--log-http` | `--log-http forwarder:url` |
-| **Docker image** | — | sets `TESTINGBOT_BIND_ADDRESS=0.0.0.0` | — (published ports keep working) |
-| **Embedding the jar** | Jetty 11 + Servlet API | Jetty 12 core handlers | — (source change) |
-
-**Java 17.** The jar's classes cannot be loaded by an older JVM. The tunnel checks the version
-itself and says so plainly, rather than failing as `A JNI error has occurred`.
-
-**Listeners bind loopback.** In 4.x the Selenium relay (`4445`), the local proxy (`8087`), the
-insight endpoints (`8003`) and `--web` (`8080`) accepted connections from any machine that could
-route to yours. None of them authenticates: the relay attaches your TestingBot key and secret to
-everything it forwards, and the proxy will connect anywhere your machine can, including its own
-loopback. They now bind `127.0.0.1`.
-
-If your tests run on the same machine as the tunnel — the normal case — nothing changes. If they
-run elsewhere, add `--bind-address 0.0.0.0` and restrict the port with a firewall. The Docker
-image sets that for you, because a loopback bind inside a container makes published ports
-unreachable; narrow it there on the host side of the publish instead
-(`-p 127.0.0.1:4445:4445`).
-
-**Quieter logs.** 4.x logged a line for every proxied request. 5.0 logs failures and 5xx only.
-`--log-http url` restores a line per request, and `--log-http` takes a level per module —
-`--log-http proxy:url,forwarder:none`.
 
 ## Getting started
 
@@ -100,9 +67,8 @@ TESTINGBOT_SE_PORT=4446 java -jar testingbot-tunnel.jar
 
 ### Keeping credentials out of the process list
 
-Anything on the command line is visible to other users of the machine in `ps`. Every long option
-has a `TESTINGBOT_*` alias derived from its name, so the ones carrying a secret can be set in the
-environment instead:
+Anything on the command line is visible to other users of the machine in `ps`, so the options
+carrying a secret are worth setting in the environment instead:
 
 | Option | Environment variable | Format |
 |---|---|---|
@@ -111,12 +77,9 @@ environment instead:
 | `--proxy-testingbot-userpwd` | `TESTINGBOT_PROXY_TESTINGBOT_USERPWD` | `user:password` |
 | `--metrics-auth` | `TESTINGBOT_METRICS_AUTH` | `user:password` |
 
-The API key and secret can come from `TESTINGBOT_KEY` / `TESTINGBOT_SECRET` or from
-`~/.testingbot` instead of being passed as arguments. The flag always wins over the variable.
-
-> The positional `API_KEY API_SECRET` form shown above is still supported, but it does put the
-> secret in `ps` for as long as the tunnel runs. On a shared machine, prefer the environment
-> variables or `~/.testingbot`.
+> The positional `API_KEY API_SECRET` form is still supported, but it puts the secret in `ps` for
+> as long as the tunnel runs. On a shared machine, prefer `TESTINGBOT_KEY` / `TESTINGBOT_SECRET`
+> or `~/.testingbot`. A flag always wins over the matching variable.
 
 `--help` lists everything. The options people reach for most:
 
@@ -130,6 +93,23 @@ The API key and secret can come from `TESTINGBOT_KEY` / `TESTINGBOT_SECRET` or f
 | `--bind-address` | Which interface the local listeners use: `127.0.0.1` (default) or `0.0.0.0` |
 | `--proxy` | Upstream proxy for egress — browser traffic and, unless `--proxy-testingbot` is set, the tunnel's own connection |
 | `--doctor` | Run diagnostics and exit |
+
+### Verifying the tunnel server
+
+The tunnel's control connection is SSH and your account secret is its password, so whatever
+answers on the tunnel port receives it. `--ssh-host-key` pins the fingerprint the server must
+present, and `--ssh-host-key-policy require` refuses to connect without one:
+
+```bash
+java -jar testingbot-tunnel.jar --ssh-host-key SHA256:xxxx... --ssh-host-key-policy require
+```
+
+Only SHA-256 is accepted (`ssh-keygen -lf <key> -E sha256`); MD5 is collidable, so it is refused
+rather than quietly trusted. Repeat the option, or comma-separate several, where the server may
+present more than one key. The API supplies a fingerprint over its authenticated HTTPS connection
+where it has one, and a pin given here outranks it. Without either the tunnel connects anyway and
+logs a warning, which is what every existing tunnel does. `--doctor` reports which case applies
+before anything connects.
 
 ### Restricting what the tunnel can reach
 
@@ -217,13 +197,13 @@ Use `https://` or a local file where you can. Redirects are refused rather than 
 what is fetched is what you named.
 
 The file is evaluated by a restricted interpreter built for this purpose — **no JavaScript
-engine is embedded**. That keeps the dependency surface small for a process that already sits in
-the network path, at the cost of supporting only the subset PAC files actually use: functions,
-variables, conditionals, loops, the usual operators, and the standard helpers (`isPlainHostName`,
-`dnsDomainIs`, `shExpMatch`, `isInNet`, `dnsResolve`, `myIpAddress`, `weekdayRange`, `dateRange`,
-`timeRange` and friends). Anything outside it — object literals, regular expressions, `new` — is
-**reported with its line number rather than guessed at**, because a misread PAC file silently
-sends traffic to the wrong place.
+engine is embedded**. That keeps the dependency surface small for a process already sitting in
+the network path, at the cost of supporting only the subset PAC files use: functions, variables,
+conditionals, loops, the usual operators, and the standard helpers (`isPlainHostName`,
+`dnsDomainIs`, `shExpMatch`, `isInNet`, `dnsResolve`, `myIpAddress` and the date/time
+predicates). Anything outside it — object literals, regular expressions, `new` — is **reported
+with its line number rather than guessed at**, because a misread PAC file silently sends traffic
+to the wrong place.
 
 Check a file before relying on it:
 
@@ -293,6 +273,15 @@ has to stream and cannot be buffered for logging.
 
 `--log-format json` writes one JSON object per record, so a collector need not guess where a
 multi-line message or a stack trace ends.
+
+## Embedding it in another application
+
+The tunnel runs as a library as well as a process: configure an `App`, `boot()` it, wait on
+`awaitReady(Duration)`, and `stop()` it when the work is done. Nothing calls `System.exit`,
+`stop()` gives every port, thread and hook back, and two tunnels in one JVM report their
+readiness separately.
+
+See [docs/embedding.md](docs/embedding.md) for the worked example and what is guaranteed.
 
 ## Building
 

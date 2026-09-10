@@ -22,7 +22,6 @@ import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.entity.UrlEncodedFormEntity;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.NameValuePair;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.message.BasicNameValuePair;
@@ -358,11 +357,11 @@ public final class HttpProxy {
                 .setRedirectsEnabled(false)
                 .build();
 
-            try (CloseableHttpClient http = HttpClients.custom()
+            try (CloseableHttpClient http = Api.controlPlaneBuilder(app)
                 .setDefaultRequestConfig(cfg)
                 .build()) {
 
-                HttpPost post = new HttpPost("https://api.testingbot.com/v1/tunnel/test");
+                HttpPost post = new HttpPost(testUrl());
                 List<NameValuePair> form = Arrays.asList(
                     new BasicNameValuePair("client_key",    app.getClientKey()),
                     new BasicNameValuePair("client_secret", app.getClientSecret()),
@@ -389,6 +388,12 @@ public final class HttpProxy {
                 server.destroy();
             }
         }
+    }
+
+    /** Where the callback test is requested, following whatever API this App is configured for. */
+    private String testUrl() {
+        Api api = app.getApi();
+        return api == null ? new Api(app).url("/v1/tunnel/test") : api.url("/v1/tunnel/test");
     }
 
     /**

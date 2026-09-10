@@ -1,6 +1,7 @@
 package ssh;
 
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.TunnelMetrics;
 
 /**
  * The part of {@link App} that {@link CustomConnectionMonitor} needs: the local proxy has to be
@@ -17,6 +18,17 @@ public interface ReconnectHost {
 
     /** Tears the tunnel down and builds a new one, typically against a different server. */
     void rebuildTunnel() throws Exception;
+
+    /**
+     * Records whether the tunnel is forwarding.
+     *
+     * <p>Through the host rather than straight to {@code TunnelMetrics}, because readiness
+     * belongs to one App: a host application running two tunnels had a reconnect on either of
+     * them answering {@code /readyz} for both.
+     */
+    default void setReady(boolean ready) {
+        TunnelMetrics.setTunnelUp(ready);
+    }
 
     /** The production adapter. */
     static ReconnectHost of(App app) {
@@ -39,6 +51,11 @@ public interface ReconnectHost {
             public void rebuildTunnel() throws Exception {
                 app.stop();
                 app.boot();
+            }
+
+            @Override
+            public void setReady(boolean ready) {
+                app.setReady(ready);
             }
         };
     }

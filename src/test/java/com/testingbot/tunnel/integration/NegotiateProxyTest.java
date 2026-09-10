@@ -427,4 +427,35 @@ class NegotiateProxyTest {
                 .as("a ticket for another service must not verify")
                 .isEmpty();
     }
+
+    @Test
+    void theApiClientIsAcceptedByTheProxy() throws Exception {
+        // The path that runs before any of the others: creating the tunnel, polling it and
+        // tearing it down. It installed username/password credentials and nothing else, so on a
+        // proxy demanding Negotiate it returned 407 and the tunnel never started -- while SSH
+        // and browser traffic, which have their own Negotiate support, would have been fine.
+        startUpstream();
+
+        App app = new App();
+        app.setClientKey("test_key");
+        app.setClientSecret("test_secret");
+        app.setProxy(PROXY_HOST + ":" + upstream.getLocalPort());
+        app.setProxyAuthScheme("negotiate");
+        app.setKrb5KeyTab(clientKeyTab.toAbsolutePath().toString());
+        app.setKrb5Principal(CLIENT_PRINCIPAL + "@" + REALM);
+
+        try (org.apache.hc.client5.http.impl.classic.CloseableHttpClient client =
+                     com.testingbot.tunnel.ControlPlaneClients.forApp(app).build()) {
+            String body = client.execute(
+                    new org.apache.hc.client5.http.classic.methods.HttpGet("http://example.com/"),
+                    response -> org.apache.hc.core5.http.io.entity.EntityUtils.toString(
+                            response.getEntity()));
+
+            assertThat(body)
+                    .as("the proxy answers 200 only for a token it could verify")
+                    .contains("negotiated-ok");
+        }
+
+        assertThat(verifiedClients).contains(CLIENT_PRINCIPAL + "@" + REALM);
+    }
 }

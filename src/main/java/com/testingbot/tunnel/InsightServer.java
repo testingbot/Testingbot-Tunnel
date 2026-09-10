@@ -59,7 +59,7 @@ public class InsightServer {
         routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/healthz"),
                 new LivenessHandler());
         routes.addMapping(org.eclipse.jetty.http.pathmap.PathSpec.from("/readyz"),
-                new ReadinessHandler());
+                new ReadinessHandler(app));
         server.setHandler(routes);
 
         try {
@@ -124,9 +124,17 @@ public class InsightServer {
      * rotation without killing it.
      */
     static class ReadinessHandler extends Handler.Abstract {
+        private final App app;
+
+        ReadinessHandler(App app) {
+            this.app = app;
+        }
+
         @Override
         public boolean handle(Request request, Response response, Callback callback) {
-            boolean ready = TunnelMetrics.isTunnelUp();
+            // This App's state, not the process gauge: a host application running two tunnels
+            // had each metrics port answering for whichever one wrote last.
+            boolean ready = app.isReady();
             response.setStatus(ready ? HttpStatus.OK_200 : HttpStatus.SERVICE_UNAVAILABLE_503);
             response.getHeaders().put(HttpHeader.CONTENT_TYPE, "application/json");
             Content.Sink.write(response, true,

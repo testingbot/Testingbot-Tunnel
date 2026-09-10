@@ -155,7 +155,7 @@ public class HttpLogHandler extends Handler.Wrapper {
         if (request.getHttpURI().getPath() == null && authority != null) {
             return authority;
         }
-        return request.getHttpURI().toString();
+        return SensitiveHeaders.redactUrl(request.getHttpURI().toString());
     }
 
     private static String newRequestId() {

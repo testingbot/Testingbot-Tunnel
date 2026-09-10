@@ -24,7 +24,8 @@ import java.util.logging.Logger;
 public class SSHTunnel implements ReconnectableTunnel {
     private final App app;
     private final JSch jsch;
-    private Session session;
+    private volatile Session session;
+    private final Object lifecycleLock = new Object();
     private final String server;
     private final String connectionId;
     private Timer keepAliveTimer;
@@ -32,7 +33,10 @@ public class SSHTunnel implements ReconnectableTunnel {
     private Timer portForwardingMonitorTimer;
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final CustomConnectionMonitor connectionMonitor;
-    private boolean portForwardingEstablished = false;
+    private volatile boolean portForwardingEstablished = false;
+
+    /** Long enough for a slow network and a proxy hop, short enough to fail rather than hang. */
+    static final int DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
     /** TestingBot's tunnel servers listen for SSH on 443, so egress firewalls let it out. */
     static final int DEFAULT_SSH_PORT = 443;
@@ -40,27 +44,40 @@ public class SSHTunnel implements ReconnectableTunnel {
     /** Where the Selenium forward is delivered, resolved by the tunnel server, not by us. */
     static final String DEFAULT_HUB_HOST = "hub.testingbot.com";
 
+    /** The port the tunnel server accepts browser traffic on and forwards back to us. */
+    static final int DEFAULT_REMOTE_PROXY_PORT = 2010;
+
     private final int sshPort;
     private final String hubHost;
+    private final int remoteProxyPort;
 
     public SSHTunnel(App app, String server) throws Exception {
-        this(app, server, DEFAULT_SSH_PORT, DEFAULT_HUB_HOST);
+        this(app, server, DEFAULT_SSH_PORT, DEFAULT_HUB_HOST, DEFAULT_REMOTE_PROXY_PORT);
+    }
+
+    SSHTunnel(App app, String server, int sshPort, String hubHost) throws Exception {
+        this(app, server, sshPort, hubHost, DEFAULT_REMOTE_PROXY_PORT);
     }
 
     /**
-     * @param sshPort the tunnel server's SSH port
-     * @param hubHost where the local forward is delivered
+     * @param sshPort         the tunnel server's SSH port
+     * @param hubHost         where the local forward is delivered
+     * @param remoteProxyPort the port the tunnel server listens on for browser traffic
      *
-     * <p>Both are fixed in production. They are parameters so the session handling can be tested
-     * against an in-process SSH server on an ephemeral port, forwarding to a local stand-in for
-     * the hub -- otherwise none of this code is reachable without the live service.
+     * <p>All three are fixed in production. They are parameters so the session handling can be
+     * tested against an in-process SSH server on an ephemeral port, forwarding to a local stand-in
+     * for the hub -- otherwise none of this code is reachable without the live service. The
+     * reverse forward's port is one of them because two tunnel servers are two machines there,
+     * while in one JVM they are two listeners that cannot both bind 2010.
      */
-    SSHTunnel(App app, String server, int sshPort, String hubHost) throws Exception {
+    SSHTunnel(App app, String server, int sshPort, String hubHost, int remoteProxyPort)
+            throws Exception {
         /* Create a connection instance */
         this.app = app;
         this.server = server;
         this.sshPort = sshPort;
         this.hubHost = hubHost;
+        this.remoteProxyPort = remoteProxyPort;
         this.connectionId = UUID.randomUUID().toString().substring(0, 8);
 
         this.jsch = new JSch();
@@ -119,14 +136,23 @@ public class SSHTunnel implements ReconnectableTunnel {
      * on this session is the customer's account secret, and an unverified server is one that
      * could be anybody.
      */
-    private void applyHostKeyVerification(Session session) {
+    private void applyHostKeyVerification(Session session) throws JSchException {
         HostKeyPins pins = app.getSshHostKeyPins();
         if (pins == null || pins.isEmpty()) {
+            if (app.requiresVerifiedSshHostKey()) {
+                // Asked for by --ssh-host-key-policy require: refuse before setPassword's value
+                // can reach a server nothing has vouched for.
+                throw new JSchException(String.format(
+                    "No host key fingerprint for %s:%d, and --ssh-host-key-policy is 'require'. "
+                        + "Supply one with --ssh-host-key, or use 'warn' to connect unverified.",
+                    server, sshPort));
+            }
             session.setConfig("StrictHostKeyChecking", "no");
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
-                String.format("[%s] The tunnel server's host key is not verified: the API "
-                    + "supplied no fingerprint. The account secret is this connection's "
-                    + "password, so anything answering %s:%d receives it.",
+                String.format("[%s] The tunnel server's host key is not verified: no fingerprint "
+                    + "was configured with --ssh-host-key and the API supplied none. The account "
+                    + "secret is this connection's password, so anything answering %s:%d "
+                    + "receives it. Use --ssh-host-key-policy require to refuse this.",
                     connectionId, server, sshPort));
             return;
         }
@@ -137,7 +163,16 @@ public class SSHTunnel implements ReconnectableTunnel {
                 connectionId, pins.size()));
     }
 
+    /** Milliseconds allowed for the dial and handshake; {@code --http-dial-timeout} when set. */
+    private int connectTimeoutMs() {
+        Integer seconds = app.getHttpDialTimeoutSeconds();
+        return seconds == null ? DEFAULT_CONNECT_TIMEOUT_MS : seconds * 1000;
+    }
+
     public final void connect() throws Exception {
+        if (shuttingDown.get()) {
+            throw new IllegalStateException("Tunnel has been stopped");
+        }
         Histogram.Timer histogramTimer = TunnelMetrics.TUNNEL_CONNECT_DURATION_SECONDS.startTimer();
         try {
             /* Now connect */
@@ -146,7 +181,11 @@ public class SSHTunnel implements ReconnectableTunnel {
             session.setPassword(app.getClientSecret());
             applyHostKeyVerification(session);
             applyUpstreamProxy(session);
-            session.connect();
+            // Bounded, because connect() covers the TCP dial, the proxy's CONNECT and the SSH
+            // banner exchange: a peer that accepts the socket and then says nothing -- a
+            // silently dropping firewall, a proxy holding the connection -- otherwise left this
+            // blocked with no timeout at all, on the startup path and on every reconnect.
+            session.connect(connectTimeoutMs());
             long connectTime = System.currentTimeMillis() - startTime;
 
             TunnelMetrics.TUNNEL_CONNECTS_TOTAL.inc();
@@ -172,39 +211,51 @@ public class SSHTunnel implements ReconnectableTunnel {
             throw new Exception("Authentication failed");
         }
 
-        // Start keep-alive timer with configurable interval
-        keepAliveTimer = new Timer("KeepAlive-" + connectionId);
-        keepAliveTimer.schedule(new KeepAliveTask(), 30000, 30000);
-
-        // Start connection monitoring timer
-        connectionMonitorTimer = new Timer("ConnectionMonitor-" + connectionId);
-        connectionMonitorTimer.schedule(new ConnectionMonitorTask(), 10000, 10000);
-
-        // Start port forwarding monitoring timer
-        portForwardingMonitorTimer = new Timer("PortForwardingMonitor-" + connectionId);
-        portForwardingMonitorTimer.schedule(new PortForwardingMonitorTask(), 15000, 15000);
+        synchronized (lifecycleLock) {
+            if (shuttingDown.get()) {
+                session.disconnect();
+                throw new IllegalStateException("Tunnel stopped while connecting");
+            }
+            keepAliveTimer = new Timer("KeepAlive-" + connectionId);
+            keepAliveTimer.schedule(new KeepAliveTask(), 30000, 30000);
+            connectionMonitorTimer = new Timer("ConnectionMonitor-" + connectionId);
+            connectionMonitorTimer.schedule(new ConnectionMonitorTask(), 10000, 10000);
+            portForwardingMonitorTimer = new Timer("PortForwardingMonitor-" + connectionId);
+            portForwardingMonitorTimer.schedule(new PortForwardingMonitorTask(), 15000, 15000);
+        }
     }
 
     public void stop(boolean quitting) {
-        this.shuttingDown.set(true);
+        if (quitting) {
+            this.shuttingDown.set(true);
+            connectionMonitor.cancel();
+        }
         this.stop();
     }
 
     public void stop() {
-        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format("[%s] Stopping secure tunnel", connectionId));
-        if (keepAliveTimer != null) {
-            keepAliveTimer.cancel();
-        }
-        if (connectionMonitorTimer != null) {
-            connectionMonitorTimer.cancel();
-        }
-        if (portForwardingMonitorTimer != null) {
-            portForwardingMonitorTimer.cancel();
-        }
+        synchronized (lifecycleLock) {
+            portForwardingEstablished = false;
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format("[%s] Stopping secure tunnel", connectionId));
+            if (keepAliveTimer != null) {
+                keepAliveTimer.cancel();
+            }
+            if (connectionMonitorTimer != null) {
+                connectionMonitorTimer.cancel();
+            }
+            if (portForwardingMonitorTimer != null) {
+                portForwardingMonitorTimer.cancel();
+            }
 
-        if (session != null && session.isConnected()) {
-            session.disconnect();
+            if (session != null) {
+                session.disconnect();
+            }
         }
+    }
+
+    @Override
+    public boolean isForwardingEstablished() {
+        return portForwardingEstablished && isAuthenticated() && !shuttingDown.get();
     }
 
     // Delivery target for the reverse forward. JSch connects to this host for every
@@ -223,18 +274,18 @@ public class SSHTunnel implements ReconnectableTunnel {
         portForwardingEstablished = reverseOk && localOk;
         if (portForwardingEstablished) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
-                String.format("[%s] Port forwarding established: %s:2010 -> %s:%d, localhost:%d -> %s:%d",
-                    connectionId, server, REVERSE_FORWARD_HOST, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
+                String.format("[%s] Port forwarding established: %s:%d -> %s:%d, localhost:%d -> %s:%d",
+                    connectionId, server, remoteProxyPort, REVERSE_FORWARD_HOST, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
         }
     }
 
     private boolean establishReverseForward() {
         try {
-            session.setPortForwardingR(2010, REVERSE_FORWARD_HOST, app.getJettyPort());
+            session.setPortForwardingR(remoteProxyPort, REVERSE_FORWARD_HOST, app.getJettyPort());
             return true;
         } catch (JSchException ex) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
-                String.format("[%s] Could not setup port forwarding. Please make sure we can make an outbound connection to port 2010.", connectionId), ex);
+                String.format("[%s] Could not setup port forwarding. Please make sure we can make an outbound connection to port %d.", connectionId, remoteProxyPort), ex);
             return false;
         }
     }
@@ -254,7 +305,7 @@ public class SSHTunnel implements ReconnectableTunnel {
     /** Drops both forwards, ignoring ones that are not registered. */
     private void removePortForwarding() {
         try {
-            session.delPortForwardingR(2010);
+            session.delPortForwardingR(remoteProxyPort);
         } catch (Exception notRegistered) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
                 String.format("[%s] Reverse forward was not registered", connectionId));
