@@ -102,10 +102,18 @@ public final class Doctor {
     public void checkSshHostKeyPins() {
         ssh.HostKeyPins pins = app.getSshHostKeyPins();
         if (pins == null || pins.isEmpty()) {
+            if (app.requiresVerifiedSshHostKey()) {
+                Logger.getLogger(Doctor.class.getName()).log(Level.SEVERE,
+                    "FAIL - no host key fingerprint is available and --ssh-host-key-policy is "
+                        + "'require', so the tunnel will refuse to connect. Supply one with "
+                        + "--ssh-host-key.");
+                return;
+            }
             Logger.getLogger(Doctor.class.getName()).log(Level.WARNING,
                 "WARN - the tunnel server's SSH host key will not be verified. The account "
                     + "secret is that connection's password, so it goes to whatever answers. "
-                    + "The API did not supply a fingerprint for this tunnel.");
+                    + "No --ssh-host-key was given and the API supplied no fingerprint for this "
+                    + "tunnel. Use --ssh-host-key-policy require to refuse an unverified server.");
             return;
         }
         Logger.getLogger(Doctor.class.getName()).log(Level.INFO,

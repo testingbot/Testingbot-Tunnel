@@ -79,6 +79,32 @@ class EnvOptionsTest {
     }
 
     @Test
+    void explicitFalseInConfigSuppressesTrueFromTheEnvironment(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp) throws Exception {
+        options.addOption(null, "shared", false, "shared tunnel");
+        java.nio.file.Path config = tmp.resolve("tunnel.conf");
+        java.nio.file.Files.writeString(config, "shared=false\nnobump=false\n");
+        ConfigFile.Expansion fromConfig = ConfigFile.expandWithSources(
+                new String[]{"--config", config.toString()}, options);
+        String[] expanded = EnvOptions.expand(fromConfig, options,
+                Map.of("TESTINGBOT_SHARED", "true", "TESTINGBOT_NOBUMP", "true"));
+        var parsed = new org.apache.commons.cli.PosixParser().parse(options, expanded);
+        assertThat(parsed.hasOption("shared")).isFalse();
+        assertThat(parsed.hasOption("nobump")).isFalse();
+    }
+
+    @Test
+    void commandLineTrueStillOverridesConfigFalse(
+            @org.junit.jupiter.api.io.TempDir java.nio.file.Path tmp) throws Exception {
+        java.nio.file.Path config = tmp.resolve("tunnel.conf");
+        java.nio.file.Files.writeString(config, "nobump=false\n");
+        ConfigFile.Expansion fromConfig = ConfigFile.expandWithSources(
+                new String[]{"--config", config.toString(), "--nobump"}, options);
+        assertThat(EnvOptions.expand(fromConfig, options,
+                Map.of("TESTINGBOT_NOBUMP", "false"))).contains("--nobump");
+    }
+
+    @Test
     void emptyOrBlankValues_areIgnored() {
         assertThat(EnvOptions.expand(new String[]{}, options,
                 Map.of("TESTINGBOT_SE_PORT", "   "))).isEmpty();

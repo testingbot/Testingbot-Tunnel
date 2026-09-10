@@ -102,7 +102,8 @@ public class ForwarderHandler extends ProxyHandler.Reverse {
         }
 
         JUL.log(Level.INFO, "[{0}] {1}",
-                new Object[]{clientToProxyRequest.getMethod(), clientToProxyRequest.getHttpURI()});
+                new Object[]{clientToProxyRequest.getMethod(),
+                        SensitiveHeaders.redactUrl(clientToProxyRequest.getHttpURI().toString())});
 
         if (mode.includesHeaders() || app.isDebugMode()) {
             StringBuilder sb = new StringBuilder();

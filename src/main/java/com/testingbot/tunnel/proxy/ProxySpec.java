@@ -40,6 +40,12 @@ public final class ProxySpec {
         return type == Type.SOCKS5;
     }
 
+    /** Credentials belong to one protocol, host and port, including for PAC-selected peers. */
+    public boolean sameEndpoint(ProxySpec other) {
+        return other != null && type == other.type && port == other.port
+                && host.equalsIgnoreCase(other.host);
+    }
+
     /**
      * @return the parsed spec, or null when {@code spec} is blank or malformed
      */

@@ -34,6 +34,8 @@ import org.apache.hc.core5.http.message.BasicNameValuePair;
 import org.apache.hc.core5.util.Timeout;
 
 import com.testingbot.tunnel.proxy.ProxySpec;
+import com.testingbot.tunnel.proxy.ProxyAuthenticator;
+import com.testingbot.tunnel.proxy.ProxyNegotiateScheme;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -137,7 +139,15 @@ public class Api {
         if (spec.isSocks5()) {
             configureSocksProxy(builder, spec, credentials);
         } else {
-            if (credentials != null) {
+            if (ProxyAuthenticator.Scheme.parse(app.getProxyAuthScheme())
+                    == ProxyAuthenticator.Scheme.NEGOTIATE) {
+                ProxyAuthenticator authenticator = app.controlProxyAuthenticator();
+                // Proxy authentication also runs for HttpClient's internally generated HTTPS
+                // CONNECT requests. A request interceptor would miss those requests.
+                builder.setProxyAuthenticationStrategy((type, challenges, context) ->
+                        challenges.containsKey("negotiate")
+                                ? List.of(new ProxyNegotiateScheme(spec, authenticator)) : List.of());
+            } else if (credentials != null) {
                 BasicCredentialsProvider credsProvider = new BasicCredentialsProvider();
                 credsProvider.setCredentials(
                     new AuthScope(spec.getHost(), spec.getPort()),
@@ -269,6 +279,21 @@ public class Api {
         Authenticator.setDefault(installedAuthenticator);
     }
 
+    /**
+     * Forgets the SOCKS credentials for one proxy endpoint.
+     *
+     * <p>The registry is static, so without this a stopped tunnel's password went on being
+     * offered for the proxy it named -- to the host application's own SOCKS connections, in an
+     * embedded process, for as long as the JVM lived. The authenticator itself stays installed
+     * and delegating: something else may have chained to it since, and an empty registry makes
+     * it a pass-through.
+     */
+    static void forgetSocksCredentials(ProxySpec spec) {
+        if (spec != null) {
+            SOCKS_CREDENTIALS.remove(key(spec.getHost(), spec.getPort()));
+        }
+    }
+
     private static String key(String host, int port) {
         return (host == null ? "" : host.toLowerCase(java.util.Locale.ROOT)) + ":" + port;
     }
@@ -312,6 +337,21 @@ public class Api {
     }
 
     /**
+     * The absolute URL of an API path, as this Api is configured to reach it.
+     *
+     * <p>Everything that talks to the API has to go through here. The startup self-test built
+     * {@code https://api.testingbot.com/...} literally, so an embedder that pointed its Api
+     * somewhere else -- the only way to run this against anything but production -- had two of
+     * its three readiness checks agreeing with the configuration and the third talking to a host
+     * it was told not to use. Readiness is gated on that check, so it failed the whole tunnel.
+     *
+     * @param path the path, beginning with a slash
+     */
+    String url(String path) {
+        return apiScheme + "://" + apiHost + path;
+    }
+
+    /**
      * For testing purposes only - allows providing a custom HttpClientBuilder
      */
     void setHttpClientBuilderSupplier(Supplier<HttpClientBuilder> supplier) {
@@ -338,7 +378,7 @@ public class Api {
                 nameValuePairs.add(new BasicNameValuePair("no_bump_domains", noBumpDomains));
             }
             nameValuePairs.add(new BasicNameValuePair("shared", String.valueOf(app.isShared())));
-            return this._post(apiScheme + "://" + apiHost + "/v1/tunnel/create", nameValuePairs);
+            return this._post(url("/v1/tunnel/create"), nameValuePairs);
         }
         catch (Exception e) {
             throw new Exception("Could not start tunnel: " + describe(e));
@@ -371,7 +411,7 @@ public class Api {
 
     public JsonNode pollTunnel(String tunnelID) throws Exception {
         try {
-            return this._get(apiScheme + "://" + apiHost + "/v1/tunnel/" + tunnelID);
+            return this._get(url("/v1/tunnel/" + tunnelID));
         }
         catch (Exception e) {
             throw new Exception("Could not get tunnel info: " + e.getMessage());
@@ -385,7 +425,7 @@ public class Api {
             String auth = this.clientKey + ":" + this.clientSecret;
             String encoding = Base64.getEncoder().encodeToString(auth.getBytes(StandardCharsets.UTF_8));
 
-            HttpDelete deleteRequest = new HttpDelete(apiScheme + "://" + apiHost + "/v1/tunnel/" + this.tunnelID);
+            HttpDelete deleteRequest = new HttpDelete(url("/v1/tunnel/" + this.tunnelID));
             deleteRequest.addHeader("accept", "application/json");
             deleteRequest.setHeader("Authorization", "Basic " + encoding);
 

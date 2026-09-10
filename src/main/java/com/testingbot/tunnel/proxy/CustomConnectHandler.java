@@ -102,8 +102,7 @@ public class CustomConnectHandler extends ConnectHandler {
      * necessarily the one the credentials were issued for.
      */
     private boolean isConfiguredProxy(ProxySpec upstream) {
-        return proxySpec != null && upstream != null
-                && proxySpec.getHost().equalsIgnoreCase(upstream.getHost());
+        return proxySpec != null && proxySpec.sameEndpoint(upstream);
     }
 
     /**
@@ -725,7 +724,8 @@ public class CustomConnectHandler extends ConnectHandler {
 
         // Sent pre-emptively rather than after a 407: a proxy that does not want it ignores it,
         // and waiting for the challenge would mean replaying the whole exchange.
-        String authorization = proxyAuthenticator.authorizationValue(upstream.getHost());
+        String authorization = isConfiguredProxy(upstream)
+                ? proxyAuthenticator.authorizationValue(upstream.getHost()) : null;
         if (authorization != null) {
             connect.append("Proxy-Authorization: ").append(authorization).append("\r\n");
         }

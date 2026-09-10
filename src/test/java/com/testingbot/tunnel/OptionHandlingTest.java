@@ -11,6 +11,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import static java.nio.charset.StandardCharsets.UTF_8;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -223,6 +224,52 @@ class OptionHandlingTest {
         assertThatThrownBy(() -> withOptions("--localhost-policy", "maybe"))
                 .isInstanceOf(ParseException.class)
                 .hasMessageContaining("Expected allow or deny");
+    }
+
+    @Test
+    void sshHostKeyPinsComeFromTheCommandLine() throws Exception {
+        // The recourse on a network where the API response itself could be rewritten: a pin
+        // established out of band, which the API is then not allowed to replace.
+        String first = ssh.HostKeyPins.displayFingerprint("key-one".getBytes(UTF_8));
+        String second = ssh.HostKeyPins.displayFingerprint("key-two".getBytes(UTF_8));
+
+        App app = withOptions("--ssh-host-key", first + "," + second);
+
+        assertThat(app.getSshHostKeyPins().displayValues()).containsExactly(first, second);
+    }
+
+    @Test
+    void repeatingSshHostKeyAddsRatherThanReplaces() throws Exception {
+        String first = ssh.HostKeyPins.displayFingerprint("key-one".getBytes(UTF_8));
+        String second = ssh.HostKeyPins.displayFingerprint("key-two".getBytes(UTF_8));
+
+        App app = withOptions("--ssh-host-key", first, "--ssh-host-key", second);
+
+        assertThat(app.getSshHostKeyPins().displayValues()).containsExactly(first, second);
+    }
+
+    @Test
+    void anUnusableSshHostKeyIsRefusedRatherThanIgnored() {
+        // Accepting it would leave a pin that matches nothing, or none at all -- either way the
+        // operator believes the server is verified when it is not.
+        assertThatThrownBy(() -> withOptions("--ssh-host-key", "not-a-fingerprint"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("--ssh-host-key");
+    }
+
+    @Test
+    void sshHostKeyPolicyAcceptsOnlyWarnOrRequire() throws Exception {
+        assertThat(withOptions("--ssh-host-key-policy", "require").requiresVerifiedSshHostKey())
+                .isTrue();
+        assertThat(withOptions("--ssh-host-key-policy", "WARN").requiresVerifiedSshHostKey())
+                .isFalse();
+        assertThat(new App().requiresVerifiedSshHostKey())
+                .as("still the default, because the service does not publish fingerprints yet")
+                .isFalse();
+
+        assertThatThrownBy(() -> withOptions("--ssh-host-key-policy", "maybe"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("Expected warn or require");
     }
 
     @Test

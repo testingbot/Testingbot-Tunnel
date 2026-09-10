@@ -51,12 +51,26 @@ public final class EnvOptions {
         return expand(args, options, System.getenv());
     }
 
+    public static String[] expand(ConfigFile.Expansion config, Options options) {
+        return expand(config, options, System.getenv());
+    }
+
+    static String[] expand(ConfigFile.Expansion config, Options options,
+                           Map<String, String> environment) {
+        return expand(config.arguments(), options, environment, config.configuredOptions());
+    }
+
     /**
      * Appends flags for any option set in {@code environment} but absent from {@code args}.
      *
      * @param args the command line, already expanded from any {@code --config} file
      */
     static String[] expand(String[] args, Options options, Map<String, String> environment) {
+        return expand(args, options, environment, Set.of());
+    }
+
+    private static String[] expand(String[] args, Options options, Map<String, String> environment,
+                                    Set<String> configuredOptions) {
         if (options == null || environment.isEmpty()) {
             return args;
         }
@@ -67,7 +81,7 @@ public final class EnvOptions {
             if (longOpt == null || NEVER.contains(longOpt) || HANDLED_ELSEWHERE.contains(longOpt)) {
                 continue;
             }
-            if (ConfigFile.isPresent(args, longOpt, options)) {
+            if (configuredOptions.contains(longOpt) || ConfigFile.isPresent(args, longOpt, options)) {
                 // Explicitly given on the command line or via --config; those win.
                 continue;
             }

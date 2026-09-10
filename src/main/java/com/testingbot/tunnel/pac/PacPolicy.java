@@ -18,9 +18,7 @@ import java.util.logging.Logger;
  * file has to come from somewhere (a path or a URL, as browsers accept both), and the answer has
  * to be cheap enough to ask on every request.
  *
- * <p>Results are cached per host. PAC files are pure functions of the URL and host in all but
- * the time-dependent predicates, and re-running an interpreter for every request to the same
- * origin would be waste. The cache is bounded, because a tunnel can be pointed at a very large
+ * <p>Results are cached by URL and host, with expiry for time-dependent predicates. The cache is bounded, because a tunnel can be pointed at a very large
  * number of hosts and an unbounded map here would be a slow leak.
  */
 public final class PacPolicy {
@@ -302,10 +300,8 @@ public final class PacPolicy {
         // Keyed by the whole evaluation input, not by host. FindProxyForURL is handed url and
         // host, and a PAC file may branch on either; caching by host alone let the first
         // decision for a host stand in for every other, so a client could choose which one
-        // applied by arranging which request arrived first. Callers pass a synthetic
-        // "scheme://host:port/", so this stays one entry per scheme and port rather than
-        // growing per path -- a CONNECT to host:443 and a ws:// upgrade to host:80 are
-        // different questions and no longer share an answer.
+        // applied by arranging which request arrived first. HTTP and WebSocket callers supply
+        // the full URL; CONNECT only exposes an authority and uses a synthetic HTTPS URL.
         String key = cacheKey(url, host);
         CachedResult cached = cache.get(key);
         if (cached != null && now - cached.decidedAtMs() < CACHE_TTL_MS) {

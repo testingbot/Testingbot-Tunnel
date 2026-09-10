@@ -176,6 +176,32 @@ class SSHTunnelEmbeddedServerTest {
                 .hasMessageContaining("Connection failed");
     }
 
+    @Test
+    void aPeerThatNeverSendsABannerFailsOnTheDeadlineRatherThanHanging() throws Exception {
+        // The shape of a silently dropping firewall or a proxy that holds the connection open:
+        // the socket is accepted, so there is no connection error, and nothing follows.
+        // session.connect() had no timeout, so startup and every reconnect blocked forever.
+        try (ServerSocket silent = new ServerSocket(0, 50, InetAddress.getLoopbackAddress())) {
+            pool.submit(() -> {
+                try (Socket accepted = silent.accept()) {
+                    Thread.sleep(30_000);
+                } catch (Exception done) {
+                    // test finished
+                }
+            });
+
+            App app = app();
+            app.setHttpDialTimeoutSeconds(1);
+
+            long started = System.currentTimeMillis();
+            assertThatThrownBy(() -> new SSHTunnel(app, "127.0.0.1", silent.getLocalPort(), "127.0.0.1"))
+                    .hasMessageContaining("Connection failed");
+            assertThat(System.currentTimeMillis() - started)
+                    .as("the configured dial timeout is what bounds this")
+                    .isLessThan(15_000);
+        }
+    }
+
     /* -------------------------------------------------------------- port forwarding */
 
     @Test
@@ -442,6 +468,66 @@ class SSHTunnelEmbeddedServerTest {
             assertThat(SSHTunnel.localForwardingActive(
                     tunnel.getSession().getPortForwardingL(), app.getSSHPort())).isFalse();
         }
+    }
+
+    @Test
+    void aServerRefusingTheReverseForwardLeavesTheTunnelNotForwarding() throws Exception {
+        // Authentication succeeding is not the same as the tunnel working. createPortForwarding()
+        // recorded this failure and returned normally, and the reconnect path marked the tunnel
+        // up regardless -- so /readyz advertised a session that could carry no browser traffic.
+        sshd.setForwardingFilter(new org.apache.sshd.server.forward.AcceptAllForwardingFilter() {
+            @Override
+            public boolean canListen(SshdSocketAddress address,
+                                     org.apache.sshd.common.session.Session session) {
+                // Everything else is permitted: the session authenticates and the local forward
+                // works, so only the reverse direction is missing.
+                return false;
+            }
+        });
+        hub = serverAnswering("HUB");
+        localProxy = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        App app = app();
+        app.setHubPort(hub.getLocalPort());
+        app.setJettyPort(localProxy.getLocalPort());
+        tunnel = connect(app, "127.0.0.1");
+
+        tunnel.createPortForwarding();
+
+        assertThat(tunnel.isAuthenticated())
+                .as("the session itself is fine, which is what made this invisible")
+                .isTrue();
+        assertThat(tunnel.isForwardingEstablished())
+                .as("no reverse forward means no browser traffic, so this is not a ready tunnel")
+                .isFalse();
+    }
+
+    @Test
+    void bothDirectionsEstablishedMeansForwarding() throws Exception {
+        hub = serverAnswering("HUB");
+        localProxy = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        App app = app();
+        app.setHubPort(hub.getLocalPort());
+        app.setJettyPort(localProxy.getLocalPort());
+        tunnel = connect(app, "127.0.0.1");
+
+        tunnel.createPortForwarding();
+
+        assertThat(tunnel.isForwardingEstablished()).isTrue();
+    }
+
+    @Test
+    void aStoppedTunnelIsNoLongerForwarding() throws Exception {
+        hub = serverAnswering("HUB");
+        localProxy = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        App app = app();
+        app.setHubPort(hub.getLocalPort());
+        app.setJettyPort(localProxy.getLocalPort());
+        tunnel = connect(app, "127.0.0.1");
+        tunnel.createPortForwarding();
+
+        tunnel.stop();
+
+        assertThat(tunnel.isForwardingEstablished()).isFalse();
     }
 
     @Test
