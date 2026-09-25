@@ -33,7 +33,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
 
     - name: Set up JDK 17
       uses: actions/setup-java@v6
@@ -57,7 +57,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
 
     - name: Set up JDK 17
       uses: actions/setup-java@v6
@@ -133,7 +133,7 @@ jobs:
       TEAM_ID: ${{ vars.MACOS_TEAM_ID }}
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
 
     - name: Set up JDK 17
       uses: actions/setup-java@v6
@@ -233,7 +233,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
 
     - name: Set up JDK 17
       uses: actions/setup-java@v6
@@ -269,7 +269,7 @@ jobs:
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v7
+      uses: actions/checkout@v7.0.1
 
     - name: Set up JDK 17
       uses: actions/setup-java@v6
