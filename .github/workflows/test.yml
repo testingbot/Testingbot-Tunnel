@@ -88,3 +88,34 @@ jobs:
       with:
         name: tunnel-jar
         path: target/TestingBotTunnel-*.jar
+  # The self-contained distributions are otherwise only built by release.yml, on a
+  # tag -- after Maven Central has already published. The Windows leg had never
+  # passed there: dist/archive.sh called `zip`, which Git Bash on the runners lacks,
+  # and nothing before the 5.0 tag could have said so. Linux and Windows cover the
+  # two launchers and both archive formats; macOS adds signing, which needs secrets
+  # a pull request does not get.
+  runtime:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v7.0.1
+    - name: Set up JDK 17
+      uses: actions/setup-java@v6.0.1
+      with:
+        java-version: 17
+        distribution: 'temurin'
+        cache: 'maven'
+    - name: Build JAR
+      shell: bash
+      run: mvn -B -DskipTests package
+    - name: Build self-contained runtime
+      shell: bash
+      run: dist/build-runtime.sh
+    - name: Verify runtime
+      shell: bash
+      run: dist/verify-runtime.sh "$(ls -d dist/testingbot-tunnel-*/ | head -1)"
