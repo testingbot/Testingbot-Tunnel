@@ -625,14 +625,16 @@ public class WebsocketHandler extends ConnectHandler {
                     // Naming the proxy matters here: in get mode the answer usually comes from
                     // the proxy declining to forward the upgrade, not from the target refusing
                     // it, and the old message blamed the target either way.
-                    throw new IOException(proxyTarget != null && !upgradeViaConnect
-                            ? "Upstream proxy (" + proxyTarget.upstream().getHost() + ":"
-                              + proxyTarget.upstream().getPort() + ") did not forward the "
-                              + "WebSocket upgrade to " + proxyTarget.host() + ":"
-                              + proxyTarget.port() + ", answering: " + answered
-                              + ". Squid needs http_upgrade_request_protocols; otherwise use "
-                              + "--ws-proxy-mode connect."
-                            : "Target refused WebSocket upgrade: " + answered);
+                    if (proxyTarget != null && !upgradeViaConnect) {
+                        throw new UpstreamProxyRejection("Upstream proxy ("
+                                + proxyTarget.upstream().getHost() + ":"
+                                + proxyTarget.upstream().getPort() + ") did not forward the "
+                                + "WebSocket upgrade to " + proxyTarget.host() + ":"
+                                + proxyTarget.port() + ", answering: " + answered
+                                + ". Squid needs http_upgrade_request_protocols; otherwise use "
+                                + "--ws-proxy-mode connect.", answered);
+                    }
+                    throw new IOException("Target refused WebSocket upgrade: " + answered);
                 }
                 // add(), not put() into a Map: a 101 carrying two Set-Cookie -- a session and a
                 // load balancer's affinity cookie is ordinary -- reached the client with only
@@ -678,11 +680,12 @@ public class WebsocketHandler extends ConnectHandler {
                 }
                 String statusLine = connectReply.substring(0, connectReply.indexOf("\r\n"));
                 if (!CustomConnectHandler.isSuccessfulConnect(statusLine)) {
-                    throw new IOException("Upstream proxy (" + proxyTarget.upstream().getHost()
+                    throw new UpstreamProxyRejection("Upstream proxy ("
+                            + proxyTarget.upstream().getHost()
                             + ":" + proxyTarget.upstream().getPort() + ") rejected CONNECT to "
                             + proxyTarget.host() + ":" + proxyTarget.port() + ". Status: "
                             + statusLine + ". A proxy that only allows CONNECT to 443 needs "
-                            + "--ws-proxy-mode get.");
+                            + "--ws-proxy-mode get.", statusLine);
                 }
                 awaitingConnectReply = false;
                 sendUpgrade();

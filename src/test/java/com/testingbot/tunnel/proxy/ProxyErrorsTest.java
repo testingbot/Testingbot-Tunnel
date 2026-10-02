@@ -63,6 +63,48 @@ class ProxyErrorsTest {
     }
 
     @Test
+    void anHttpProxyRejection_isClassifiedByStatusCode() {
+        assertThat(ProxyErrors.classify(new UpstreamProxyRejection(
+                "Upstream proxy (10.0.0.1:3128) rejected CONNECT to example.com:443. "
+                        + "Status: HTTP/1.1 407 Proxy Authentication Required",
+                "HTTP/1.1 407 Proxy Authentication Required")))
+                .isEqualTo(ProxyErrors.Reason.UPSTREAM_PROXY_AUTH_FAILED);
+        assertThat(ProxyErrors.classify(new UpstreamProxyRejection(
+                "Upstream proxy (10.0.0.1:3128) rejected CONNECT to example.com:443. "
+                        + "Status: HTTP/1.1 403 Forbidden",
+                "HTTP/1.1 403 Forbidden")))
+                .isEqualTo(ProxyErrors.Reason.UPSTREAM_PROXY_REFUSED);
+    }
+
+    @Test
+    void digitsInThePortDoNotMakeARefusalAnAuthenticationFailure() {
+        // ConnectFramingTest failed about one run in fifty: the stand-in proxy's ephemeral
+        // port was 40797, the message contains "407", and a substring search took that for
+        // the status. The same goes for any real proxy on a port like 3407 or 14070.
+        assertThat(ProxyErrors.classify(new UpstreamProxyRejection(
+                "Upstream proxy (127.0.0.1:40797) rejected CONNECT to example.com:443. "
+                        + "Status: HTTP/1.1 403 Forbidden",
+                "HTTP/1.1 403 Forbidden")))
+                .isEqualTo(ProxyErrors.Reason.UPSTREAM_PROXY_REFUSED);
+        assertThat(ProxyErrors.classify(new UpstreamProxyRejection(
+                "Upstream proxy (proxy.example:3407) did not forward the WebSocket upgrade to "
+                        + "example.com:80, answering: HTTP/1.1 403 Forbidden",
+                "HTTP/1.1 403 Forbidden")))
+                .isEqualTo(ProxyErrors.Reason.UPSTREAM_PROXY_REFUSED);
+    }
+
+    @Test
+    void aDestinationNameDoesNotMakeASocksRefusalAnAuthenticationFailure() {
+        assertThat(ProxyErrors.classify(new IOException(
+                "Upstream SOCKS proxy refused CONNECT to credentials.example.com:443 "
+                        + "(connection not allowed by ruleset)")))
+                .isEqualTo(ProxyErrors.Reason.UPSTREAM_PROXY_REFUSED);
+        assertThat(ProxyErrors.classify(new IOException(
+                "Upstream SOCKS proxy rejected all offered authentication methods")))
+                .isEqualTo(ProxyErrors.Reason.UPSTREAM_PROXY_AUTH_FAILED);
+    }
+
+    @Test
     void wrappedCauses_areUnwrapped() {
         // By the time a failure reaches a handler it is usually wrapped at least once.
         Throwable wrapped = new RuntimeException("proxying failed",
