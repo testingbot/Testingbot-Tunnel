@@ -40,7 +40,15 @@ checksum() {
 case "$NAME" in
   *windows*)
     rm -f "$NAME.zip"
-    zip -qr "$NAME.zip" "$NAME"
+    # Git Bash on the Windows runners has no zip; 7-Zip is preinstalled there instead.
+    if command -v zip >/dev/null 2>&1; then
+      zip -qr "$NAME.zip" "$NAME"
+    elif command -v 7z >/dev/null 2>&1; then
+      7z a -tzip -bso0 -bsp0 "$NAME.zip" "$NAME"
+    else
+      echo "  !! neither zip nor 7z found; dist/$NAME.zip not written" >&2
+      exit 1
+    fi
     echo "  -> dist/$NAME.zip"
     checksum "$NAME.zip"
     ;;
