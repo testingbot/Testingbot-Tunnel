@@ -582,10 +582,10 @@ public class CustomConnectHandler extends ConnectHandler {
 
                 String statusLine = response.substring(0, response.indexOf("\r\n"));
                 if (!isSuccessfulConnect(statusLine)) {
-                    throw new IOException(String.format(
+                    throw new UpstreamProxyRejection(String.format(
                             "Upstream proxy (%s:%d) rejected CONNECT to %s:%d. Status: %s",
                             target.upstream().getHost(), target.upstream().getPort(),
-                            target.host(), target.port(), statusLine));
+                            target.host(), target.port(), statusLine), statusLine);
                 }
                 handshakeSucceeded();
             } catch (Throwable failure) {

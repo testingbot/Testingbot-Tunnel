@@ -151,18 +151,27 @@ public final class ProxyErrors {
             }
             return Reason.CONNECTION_REFUSED;
         }
+        if (t instanceof UpstreamProxyRejection rejection) {
+            // An HTTP proxy's answer is classified by its status code, never by its message,
+            // which carries the proxy's port and the destination's name.
+            return rejection.isAuthenticationFailure()
+                    ? Reason.UPSTREAM_PROXY_AUTH_FAILED
+                    : Reason.UPSTREAM_PROXY_REFUSED;
+        }
         if (t instanceof IOException) {
             String message = t.getMessage() == null ? "" : t.getMessage().toLowerCase(Locale.ROOT);
-            // Raised by our own upstream-proxy handshakes (HTTP CONNECT and SOCKS5), which
-            // report failures as IOException with a descriptive message.
-            if (message.contains("proxy") && (message.contains("credential")
-                    || message.contains("authentication") || message.contains("407"))) {
-                return Reason.UPSTREAM_PROXY_AUTH_FAILED;
-            }
+            // Raised by the SOCKS5 handshake, which reports failures as IOException with a
+            // descriptive message.
             // A refusal is not a connectivity problem, and is checked first: the proxy answered.
+            // First also because its message names the destination, so a host called
+            // credentials.example.com must not read as an authentication failure.
             if (message.contains("rejected connect") || message.contains("refused connect")
                     || message.contains("did not forward")) {
                 return Reason.UPSTREAM_PROXY_REFUSED;
+            }
+            if (message.contains("proxy") && (message.contains("credential")
+                    || message.contains("authentication"))) {
+                return Reason.UPSTREAM_PROXY_AUTH_FAILED;
             }
             if (message.contains("upstream proxy") || message.contains("socks")) {
                 return Reason.UPSTREAM_PROXY_UNREACHABLE;
