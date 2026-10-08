@@ -8,7 +8,7 @@
 
   <properties>
     <maven.compiler.release>17</maven.compiler.release>
-    <jetty.version>12.1.13</jetty.version>
+    <jetty.version>12.1.14</jetty.version>
   </properties>
 
   <licenses>
@@ -600,13 +600,13 @@
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-classic</artifactId>
-      <version>1.6.4</version>
+      <version>1.6.5</version>
     </dependency>
 
     <dependency>
       <groupId>ch.qos.logback</groupId>
       <artifactId>logback-core</artifactId>
-      <version>1.6.4</version>
+      <version>1.6.5</version>
     </dependency>
     <dependency>
       <groupId>com.github.mwiede</groupId>
