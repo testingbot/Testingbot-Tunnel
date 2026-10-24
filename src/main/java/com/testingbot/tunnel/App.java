@@ -503,7 +503,7 @@ public class App {
         localweb.setArgName("directory");
         options.addOption(localweb);
 
-        options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087)");
+        options.addOption("x", "noproxy", false, "Do not start a local proxy (requires user provided proxy server on port 8087, or on the --localproxy port)");
         options.addOption("q", "nocache", false, "Bypass our Caching Proxy running on our tunnel VM.");
         options.addOption("b", "nobump", false, "Do not perform SSL bumping.");
 
@@ -1020,11 +1020,7 @@ public class App {
                 app.seleniumPort = port(commandLine, "se-port");
             }
 
-            if (commandLine.hasOption("localproxy")) {
-                app.setJettyPort(port(commandLine, "localproxy"));
-            } else {
-                app.setFreeJettyPort();
-            }
+            applyLocalProxyPort(app, commandLine);
 
             if (commandLine.hasOption("doctor")) {
                 applyUpstreamProxyOptions(app, commandLine);
@@ -2308,6 +2304,26 @@ public class App {
 
     public void setDnsServer(String dnsServer) {
         this.dnsServer = dnsServer;
+    }
+
+    /** The port --noproxy documents for the user's own proxy when --localproxy names none. */
+    static final int NOPROXY_DEFAULT_PORT = 8087;
+
+    /**
+     * The local proxy port: --localproxy when given, otherwise a free one.
+     *
+     * <p>Under --noproxy the tunnel starts no proxy of its own and the reverse forward targets
+     * this port, where the help text promises the user's proxy on 8087. Picking a free port
+     * there sent every request through the tunnel to a port nothing listened on.
+     */
+    static void applyLocalProxyPort(App app, CommandLine commandLine) throws ParseException {
+        if (commandLine.hasOption("localproxy")) {
+            app.setJettyPort(port(commandLine, "localproxy"));
+        } else if (commandLine.hasOption("noproxy")) {
+            app.setJettyPort(NOPROXY_DEFAULT_PORT);
+        } else {
+            app.setFreeJettyPort();
+        }
     }
 
     /**
