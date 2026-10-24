@@ -437,7 +437,7 @@ public final class PacInterpreter {
                 String host = stringOf(arg(args, 0));
                 yield (double) host.chars().filter(c -> c == '.').count();
             }
-            case "isInNet" -> isInNet(stringOf(arg(args, 0)), stringOf(arg(args, 1)),
+            case "isInNet" -> isInNet(addressOf(arg(args, 0)), stringOf(arg(args, 1)),
                     stringOf(arg(args, 2)));
             case "shExpMatch" -> shExpMatch(stringOf(arg(args, 0)), stringOf(arg(args, 1)));
             case "weekdayRange" -> environment.weekdayRange(stringList(args));
@@ -475,6 +475,22 @@ public final class PacInterpreter {
             regex.append(java.util.regex.Pattern.quote(literal.toString()));
         }
         return value.matches(regex.toString());
+    }
+
+    /**
+     * The address {@code isInNet} compares: a dotted quad as given, a host name resolved through
+     * the environment, as the Netscape specification and every browser do.
+     *
+     * <p>{@code isInNet(host, ...)} on a name is the common way to write it; comparing the name
+     * itself always answered false and sent intranet hosts to the proxy. Only a string is looked
+     * up, so {@code isInNet(dnsResolve(host), ...)} on an unresolvable host stays false instead
+     * of resolving the word "null". A name that does not resolve is not in any net.
+     */
+    private String addressOf(Object host) {
+        if (!(host instanceof String name) || ipv4ToLong(name) >= 0) {
+            return host == null ? null : stringOf(host);
+        }
+        return environment.resolve(name);
     }
 
     /** True when {@code host} falls inside {@code pattern}/{@code mask}, both dotted-quad IPv4. */
