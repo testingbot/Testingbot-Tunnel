@@ -78,6 +78,63 @@ class AppEmbeddedTest {
             .isInstanceOf(TunnelFailedException.class);
     }
 
+    private void createAnswers(String body) {
+        wireMockServer.stubFor(post(urlPathEqualTo("/v1/tunnel/create"))
+            .willReturn(aResponse()
+                .withStatus(200)
+                .withHeader("Content-Type", "application/json")
+                .withBody(body)));
+    }
+
+    @Test
+    void boot_whenTheResponseHasNoState_shouldNameTheApiNotThrowANullPointer() {
+        // Given: an answer without "state", which used to be a NullPointerException
+        createAnswers("{\"id\":\"42\",\"version\":\"5.0\"}");
+
+        // When & Then
+        assertThatThrownBy(() -> app.boot())
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("Unexpected response from the TestingBot API: no tunnel \"state\"")
+            .hasMessageContaining("[id, version]");
+
+        // The id was kept, so the cleanup on the way out can still delete the tunnel
+        assertThat(app.getTunnelID()).isEqualTo(42);
+    }
+
+    @Test
+    void boot_whenTheResponseHasNoId_shouldFailWithAMessage() {
+        createAnswers("{\"state\":\"BOOTING\"}");
+
+        assertThatThrownBy(() -> app.boot())
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("Unexpected response from the TestingBot API: no tunnel \"id\"");
+    }
+
+    @Test
+    void boot_whenTheIdIsNotAnInteger_shouldFailWithAMessage() {
+        // Used to be a NumberFormatException stack trace
+        createAnswers("{\"id\":\"abc\",\"state\":\"BOOTING\"}");
+
+        assertThatThrownBy(() -> app.boot())
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("Unexpected response from the TestingBot API: tunnel \"id\" is not an integer");
+
+        createAnswers("{\"id\":1.5,\"state\":\"BOOTING\"}");
+
+        assertThatThrownBy(() -> app.boot())
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("is not an integer");
+    }
+
+    @Test
+    void boot_whenTheResponseIsNotAnObject_shouldFailWithAMessage() {
+        createAnswers("[]");
+
+        assertThatThrownBy(() -> app.boot())
+            .isInstanceOf(TunnelFailedException.class)
+            .hasMessageContaining("Unexpected response from the TestingBot API: not a JSON object");
+    }
+
     @Test
     void boot_shouldNotStartPidPolling() throws Exception {
         // Given: pid tracking is a command line concern; a background timer that
