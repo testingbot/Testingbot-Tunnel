@@ -65,12 +65,18 @@ public class SSHTunnel implements ReconnectableTunnel {
      * so after a NAT change or a laptop switching networks the session looked connected until the
      * operating system gave up retransmitting -- about 15 minutes on Linux -- and all that time
      * the tunnel server kept port 2010 for a client that was gone.
+     *
+     * <p>2 s x 3: a session that hears nothing at all from the server for ~6 s is dead. That is
+     * the floor of how fast port 2010 can come back after a network change, so it is kept short;
+     * the server answers every keepalive at once, so a healthy connection - busy or idle - is
+     * never that quiet. Measured on a NAT change: 2010 back after ~8 s (5 s x 3: ~18 s); a
+     * 4-second outage passes without a reconnect, and nothing reconnected under load.
      */
-    static final int SERVER_ALIVE_INTERVAL_MS = 5_000;
+    static final int SERVER_ALIVE_INTERVAL_MS = 2_000;
     static final int SERVER_ALIVE_COUNT_MAX = 3;
 
     /** How often the connection and forwarding monitors look. */
-    static final long CONNECTION_CHECK_INTERVAL_MS = 2_000;
+    static final long CONNECTION_CHECK_INTERVAL_MS = 500;
     static final long FORWARDING_CHECK_INTERVAL_MS = 5_000;
 
     /** How long one end-to-end probe of the reverse forward may take. */
