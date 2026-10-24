@@ -182,6 +182,28 @@ class TunnelPollerTest {
     }
 
     @Test
+    void aResponseWithoutAStateIsAFailedPollNamedAsSuch() throws Exception {
+        when(api.pollTunnel(anyString())).thenReturn(objectMapper.readTree("{\"id\":\"1\"}"));
+        poller();
+
+        scheduler.poll();
+
+        // Retried like any failed poll, rather than a NullPointerException counted as one.
+        assertThat(scheduler.wasCancelled()).isFalse();
+        verify(app, never()).tunnelReady(any());
+
+        for (int i = 1; i < TunnelPoller.MAX_CONSECUTIVE_ERRORS; i++) {
+            scheduler.poll();
+        }
+
+        // The reason used to end in ": null", which is what the NPE's message was.
+        verify(app).setupFailed(
+                org.mockito.ArgumentMatchers.contains(
+                        "Unexpected response from the TestingBot API: no tunnel \"state\""),
+                org.mockito.ArgumentMatchers.eq(1));
+    }
+
+    @Test
     void cancelStopsTheSchedule() throws Exception {
         when(api.pollTunnel(anyString())).thenReturn(state("BOOTING"));
         TunnelPoller poller = poller();

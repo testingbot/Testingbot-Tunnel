@@ -1207,6 +1207,10 @@ public class App {
             throw new TunnelFailedException("Creating a new tunnel failed, please make sure you're supplying correct credentials and that you can connect to the TestingBot network.\nUse --doctor to verify if everything is set up correctly.\n" + e.getMessage(), 1, e);
         }
 
+        if (tunnelData == null || !tunnelData.isObject()) {
+            throw new TunnelFailedException(Api.UNEXPECTED_RESPONSE + "not a JSON object", 1);
+        }
+
         if (tunnelData.has("error")) {
             String error = "An error ocurred: " + tunnelData.get("error").asText();
             if (tunnelData.get("error").asText().contains("401")) {
@@ -1215,12 +1219,20 @@ public class App {
             throw new TunnelFailedException(error, 1);
         }
 
-        startInsightServer();
-
-        if (tunnelData.has("id")) {
-            this.tunnelID = Integer.parseInt(tunnelData.get("id").asText());
+        // Validated here rather than dereferenced below: a response without "state", or without
+        // a numeric "id", surfaced as a NullPointerException or NumberFormatException stack
+        // trace that named neither the API nor what it had left out. The id is kept before the
+        // state is checked, so the cleanup on the way out can still delete the tunnel.
+        final String state;
+        try {
+            this.tunnelID = Api.tunnelIdOf(tunnelData);
             api.setTunnelID(tunnelID);
+            state = Api.stateOf(tunnelData);
+        } catch (IllegalStateException unexpected) {
+            throw new TunnelFailedException(unexpected.getMessage(), 1, unexpected);
         }
+
+        startInsightServer();
 
 
         TunnelMetrics.setTunnelInfo(App.VERSION, this.tunnelID, this.tunnelIdentifier);
@@ -1240,10 +1252,10 @@ public class App {
 
         Logger.getLogger(App.class.getName()).log(Level.INFO, "Please wait while your personal Tunnel Server is being setup. Shouldn't take more than a minute.\nWhen the tunnel is ready you will see a message \"You may start your tests.\"");
 
-        if (tunnelData.get("state").asText().equals("READY")) {
+        if (state.equals("READY")) {
             this.tunnelReady(tunnelData);
         } else {
-            poller = new TunnelPoller(this, tunnelData.get("id").asText());
+            poller = new TunnelPoller(this, String.valueOf(tunnelID));
         }
     }
 

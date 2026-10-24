@@ -405,6 +405,57 @@ public class Api {
                 + "; TestingBot itself was never reached)";
     }
 
+    /** Starts every message about an API answer that lacks what the tunnel needs from it. */
+    public static final String UNEXPECTED_RESPONSE = "Unexpected response from the TestingBot API: ";
+
+    /**
+     * The tunnel id from a create response: a JSON integer, or a string holding one.
+     *
+     * @throws IllegalStateException naming what is wrong when it is absent or not an integer
+     */
+    public static int tunnelIdOf(JsonNode response) {
+        JsonNode id = response == null ? null : response.get("id");
+        if (id == null || id.isNull()) {
+            throw unexpected("no tunnel \"id\"", response);
+        }
+        if (id.isIntegralNumber() && id.canConvertToInt()) {
+            return id.intValue();
+        }
+        if (id.isTextual()) {
+            try {
+                return Integer.parseInt(id.asText().trim());
+            } catch (NumberFormatException notAnInteger) {
+                // reported below with the rest
+            }
+        }
+        throw unexpected("tunnel \"id\" is not an integer", response);
+    }
+
+    /**
+     * The tunnel state from a create or poll response, e.g. {@code READY}.
+     *
+     * @throws IllegalStateException when it is absent, empty or not a string
+     */
+    public static String stateOf(JsonNode response) {
+        JsonNode state = response == null ? null : response.get("state");
+        if (state == null || !state.isTextual() || state.asText().isEmpty()) {
+            throw unexpected("no tunnel \"state\"", response);
+        }
+        return state.asText();
+    }
+
+    /**
+     * Names the fields the response did carry, not their values: a create response holds the
+     * tunnel server's address and host key, which have no business in a log line about it.
+     */
+    private static IllegalStateException unexpected(String what, JsonNode response) {
+        List<String> fields = new ArrayList<>();
+        if (response != null) {
+            response.fieldNames().forEachRemaining(fields::add);
+        }
+        return new IllegalStateException(UNEXPECTED_RESPONSE + what + " (fields: " + fields + ")");
+    }
+
     public void setTunnelID(int tunnelID) {
         this.tunnelID = tunnelID;
     }

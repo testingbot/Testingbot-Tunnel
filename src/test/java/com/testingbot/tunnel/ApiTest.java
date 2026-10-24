@@ -593,4 +593,34 @@ class ApiTest {
         assertThat(result.get("id").asText()).isEqualTo("wrapped");
         assertThat(result.get("state").asText()).isEqualTo("READY");
     }
+
+    @Test
+    void tunnelIdOf_acceptsAnIntegerOrAStringHoldingOne() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        assertThat(Api.tunnelIdOf(json.readTree("{\"id\":123}"))).isEqualTo(123);
+        assertThat(Api.tunnelIdOf(json.readTree("{\"id\":\"456\"}"))).isEqualTo(456);
+
+        assertThatThrownBy(() -> Api.tunnelIdOf(json.readTree("{\"id\":null}")))
+            .isInstanceOf(IllegalStateException.class)
+            .hasMessageStartingWith("Unexpected response from the TestingBot API: ");
+        assertThatThrownBy(() -> Api.tunnelIdOf(json.readTree("{\"id\":99999999999}")))
+            .hasMessageContaining("is not an integer");
+        assertThatThrownBy(() -> Api.tunnelIdOf(null))
+            .hasMessageContaining("no tunnel \"id\"");
+    }
+
+    @Test
+    void stateOf_refusesAMissingOrNonStringState() throws Exception {
+        com.fasterxml.jackson.databind.ObjectMapper json = new com.fasterxml.jackson.databind.ObjectMapper();
+
+        assertThat(Api.stateOf(json.readTree("{\"state\":\"READY\"}"))).isEqualTo("READY");
+
+        assertThatThrownBy(() -> Api.stateOf(json.readTree("{\"state\":3}")))
+            .hasMessageContaining("no tunnel \"state\"");
+        // Field names only: a create response carries the server's address and host key
+        assertThatThrownBy(() -> Api.stateOf(json.readTree("{\"ip\":\"10.9.8.7\"}")))
+            .hasMessageContaining("[ip]")
+            .hasMessageNotContaining("10.9.8.7");
+    }
 }

@@ -75,6 +75,10 @@ public class TunnelPoller {
             JsonNode response;
             try {
                 response = api.pollTunnel(tunnelID);
+                // A response without a state is a failed poll, named as such, rather than a
+                // NullPointerException whose message was "null". Checked before the error count
+                // is reset below, or a run of them would never add up to giving up.
+                String state = Api.stateOf(response);
 
                 if (this.counter > 80) {
                     giveUp("Unable to create tunnel, waited for 400 seconds. Please try again or check https://status.testingbot.com");
@@ -85,12 +89,12 @@ public class TunnelPoller {
                 // failures, and a run of them broken by one success is not the same thing.
                 this.consecutiveErrors = 0;
 
-                if (response.get("state").asText().equals("READY")) {
+                if (state.equals("READY")) {
                    scheduler.cancel();
                    app.tunnelReady(response);
                 } else {
                     this.counter += 1;
-                    Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", response.get("state").asText());
+                    Logger.getLogger(TunnelPoller.class.getName()).log(Level.INFO, "Current tunnel status: {0}", state);
                 }
             } catch (TunnelFailedException tunnelFailedException) {
                 // The tunnel became ready but could not be set up. Not retryable -- the failure
