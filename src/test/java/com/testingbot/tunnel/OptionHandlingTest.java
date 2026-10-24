@@ -187,6 +187,39 @@ class OptionHandlingTest {
                 .hasMessageContaining("Invalid --metrics-port");
     }
 
+    /* ------------------------------------------------------------- local proxy port */
+
+    private static int localProxyPort(String... args) throws ParseException {
+        App app = new App();
+        App.applyLocalProxyPort(app, parse(args));
+        return app.getJettyPort();
+    }
+
+    @Test
+    void noproxyWithoutLocalproxyTargetsTheDocumentedPort() throws Exception {
+        // The reverse forward goes to this port; a free one meant nothing was listening there.
+        assertThat(localProxyPort("--noproxy")).isEqualTo(8087);
+        assertThat(localProxyPort("-x")).isEqualTo(8087);
+    }
+
+    @Test
+    void localproxyStillWinsUnderNoproxy() throws Exception {
+        assertThat(localProxyPort("--noproxy", "--localproxy", "3128")).isEqualTo(3128);
+        assertThat(localProxyPort("--localproxy", "3128")).isEqualTo(3128);
+    }
+
+    @Test
+    void withoutEitherAFreePortIsChosen() throws Exception {
+        assertThat(localProxyPort()).isGreaterThan(0);
+    }
+
+    @Test
+    void anInvalidLocalproxyIsStillRefused() {
+        assertThatThrownBy(() -> localProxyPort("--noproxy", "--localproxy", "http"))
+                .isInstanceOf(ParseException.class)
+                .hasMessageContaining("--localproxy");
+    }
+
     /* ----------------------------------------------------------------- applyOptions */
 
     private static App withOptions(String... args) throws Exception {
