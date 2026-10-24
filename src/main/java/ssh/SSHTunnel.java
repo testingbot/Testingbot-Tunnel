@@ -1,5 +1,6 @@
 package ssh;
 
+import com.jcraft.jsch.ChannelDirectTCPIP;
 import com.jcraft.jsch.JSch;
 import com.jcraft.jsch.ProxySOCKS5;
 import com.testingbot.tunnel.proxy.ProxySpec;
@@ -7,10 +8,15 @@ import com.testingbot.tunnel.proxy.SshHttpProxy;
 import com.jcraft.jsch.Session;
 import com.jcraft.jsch.JSchException;
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.ForwardProbeHandler;
 import com.testingbot.tunnel.TunnelMetrics;
 import io.prometheus.client.Histogram;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
@@ -34,6 +40,9 @@ public class SSHTunnel implements ReconnectableTunnel {
     private final AtomicBoolean shuttingDown = new AtomicBoolean(false);
     private final CustomConnectionMonitor connectionMonitor;
     private volatile boolean portForwardingEstablished = false;
+    /** Set once a reverse-forward probe has succeeded on this session: the server permits it. */
+    private volatile boolean probeSupported;
+    private int probeFailures;
 
     /** Long enough for a slow network and a proxy hop, short enough to fail rather than hang. */
     static final int DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
@@ -46,6 +55,28 @@ public class SSHTunnel implements ReconnectableTunnel {
 
     /** The port the tunnel server accepts browser traffic on and forwards back to us. */
     static final int DEFAULT_REMOTE_PROXY_PORT = 2010;
+
+    /**
+     * How quickly a dead session is noticed: JSch sends a keepalive after this long without a
+     * packet from the server, and drops the session after {@link #SERVER_ALIVE_COUNT_MAX}
+     * unanswered ones.
+     *
+     * <p>Without it nothing read-side ever timed out. The 30-second keepalive below only writes,
+     * so after a NAT change or a laptop switching networks the session looked connected until the
+     * operating system gave up retransmitting -- about 15 minutes on Linux -- and all that time
+     * the tunnel server kept port 2010 for a client that was gone.
+     */
+    static final int SERVER_ALIVE_INTERVAL_MS = 5_000;
+    static final int SERVER_ALIVE_COUNT_MAX = 3;
+
+    /** How often the connection and forwarding monitors look. */
+    static final long CONNECTION_CHECK_INTERVAL_MS = 2_000;
+    static final long FORWARDING_CHECK_INTERVAL_MS = 5_000;
+
+    /** How long one end-to-end probe of the reverse forward may take. */
+    static final int REVERSE_PROBE_TIMEOUT_MS = 5_000;
+    /** Consecutive failed probes before the reverse forward is re-registered. */
+    static final int REVERSE_PROBE_FAILURES_BEFORE_REPAIR = 2;
 
     private final int sshPort;
     private final String hubHost;
@@ -178,9 +209,13 @@ public class SSHTunnel implements ReconnectableTunnel {
             /* Now connect */
             long startTime = System.currentTimeMillis();
             session = jsch.getSession(app.getClientKey(), server, sshPort);
+            probeSupported = false;
+            probeFailures = 0;
             session.setPassword(app.getClientSecret());
             applyHostKeyVerification(session);
             applyUpstreamProxy(session);
+            session.setServerAliveInterval(SERVER_ALIVE_INTERVAL_MS);
+            session.setServerAliveCountMax(SERVER_ALIVE_COUNT_MAX);
             // Bounded, because connect() covers the TCP dial, the proxy's CONNECT and the SSH
             // banner exchange: a peer that accepts the socket and then says nothing -- a
             // silently dropping firewall, a proxy holding the connection -- otherwise left this
@@ -219,9 +254,11 @@ public class SSHTunnel implements ReconnectableTunnel {
             keepAliveTimer = new Timer("KeepAlive-" + connectionId);
             keepAliveTimer.schedule(new KeepAliveTask(), 30000, 30000);
             connectionMonitorTimer = new Timer("ConnectionMonitor-" + connectionId);
-            connectionMonitorTimer.schedule(new ConnectionMonitorTask(), 10000, 10000);
+            connectionMonitorTimer.schedule(new ConnectionMonitorTask(),
+                    CONNECTION_CHECK_INTERVAL_MS, CONNECTION_CHECK_INTERVAL_MS);
             portForwardingMonitorTimer = new Timer("PortForwardingMonitor-" + connectionId);
-            portForwardingMonitorTimer.schedule(new PortForwardingMonitorTask(), 15000, 15000);
+            portForwardingMonitorTimer.schedule(new PortForwardingMonitorTask(),
+                    FORWARDING_CHECK_INTERVAL_MS, FORWARDING_CHECK_INTERVAL_MS);
         }
     }
 
@@ -331,6 +368,74 @@ public class SSHTunnel implements ReconnectableTunnel {
             return true;
         } catch (IOException ex) {
             return false;
+        }
+    }
+
+    /**
+     * Sends a request into port 2010 on the tunnel server and checks it comes back out of this
+     * client's local proxy.
+     *
+     * <p>{@link #verifyReverseForwardDelivery()} only proves the local end. What fails in
+     * practice is the server end: the forward was never registered because an older session of
+     * the same account still held 2010, or the listener on 2010 belongs to a session whose client
+     * is gone. In both cases the tunnel looked healthy here while every device request through
+     * it failed. This opens a direct-tcpip channel to the server's own 127.0.0.1:2010 -- exactly
+     * where squid and the devices connect -- and sends a request only our proxy answers with this
+     * nonce.
+     *
+     * @return true when the probe made the round trip through this client's reverse forward
+     */
+    boolean probeReverseForward(int timeoutMs) {
+        Session current = session;
+        if (current == null || !current.isConnected()) {
+            return false;
+        }
+        String nonce = UUID.randomUUID().toString();
+        ChannelDirectTCPIP channel = null;
+        try {
+            channel = (ChannelDirectTCPIP) current.openChannel("direct-tcpip");
+            channel.setHost("127.0.0.1");
+            channel.setPort(remoteProxyPort);
+            InputStream in = channel.getInputStream();
+            OutputStream out = channel.getOutputStream();
+            channel.connect(timeoutMs);
+            out.write(("GET http://" + ForwardProbeHandler.PROBE_HOST + "/ HTTP/1.1\r\n"
+                    + "Host: " + ForwardProbeHandler.PROBE_HOST + "\r\n"
+                    + ForwardProbeHandler.PROBE_HEADER + ": " + nonce + "\r\n"
+                    + "Connection: close\r\n\r\n").getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            String expected = ForwardProbeHandler.PROBE_HEADER.toLowerCase(Locale.ROOT) + ": " + nonce;
+            StringBuilder answer = new StringBuilder();
+            byte[] buffer = new byte[1024];
+            long deadline = System.currentTimeMillis() + timeoutMs;
+            while (System.currentTimeMillis() < deadline && answer.length() < 8192) {
+                if (in.available() > 0) {
+                    int n = in.read(buffer);
+                    if (n < 0) {
+                        break;
+                    }
+                    answer.append(new String(buffer, 0, n, StandardCharsets.ISO_8859_1));
+                    if (answer.toString().toLowerCase(Locale.ROOT).contains(expected)) {
+                        return true;
+                    }
+                } else if (channel.isClosed()) {
+                    break;
+                } else {
+                    Thread.sleep(20);
+                }
+            }
+            return false;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception failed) {
+            // The channel could not be opened: nothing listens on 2010, or the server does not
+            // permit the probe. Which of the two is decided by the caller.
+            return false;
+        } finally {
+            if (channel != null) {
+                channel.disconnect();
+            }
         }
     }
 
@@ -506,6 +611,12 @@ public class SSHTunnel implements ReconnectableTunnel {
                             String.format("[%s] Reverse port forwarding delivery to %s:%d restored", connectionId, REVERSE_FORWARD_HOST, app.getJettyPort()));
                         default -> { }
                     }
+
+                    // A reconnect in flight owns the forwards; repairing them in parallel would
+                    // race its own attempt.
+                    if (!connectionMonitor.isRetrying()) {
+                        checkRemoteForward();
+                    }
                 }
             } catch (Exception ex) {
                 Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
@@ -514,7 +625,51 @@ public class SSHTunnel implements ReconnectableTunnel {
         }
     }
 
-    private void restartPortForwarding() {
+    /**
+     * Keeps port 2010 on the tunnel server pointing at this client.
+     *
+     * <p>A reverse forward that could not be registered -- typically because an older session of
+     * the same account still held 2010 -- was never asked for again while the SSH session stayed
+     * up, so the tunnel stayed up, not ready, and carrying nothing until the client was
+     * restarted. Now it is re-requested on every check until the server lets it go. A forward
+     * that is registered but no longer delivers (the probe fails twice in a row) is re-registered
+     * the same way.
+     */
+    private void checkRemoteForward() {
+        if (!portForwardingEstablished) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING, String.format(
+                    "[%s] Port forwarding is not established; requesting it again", connectionId));
+            restartPortForwarding();
+            if (portForwardingEstablished) {
+                app.reverseForwardRestored();
+            }
+            return;
+        }
+        if (probeReverseForward(REVERSE_PROBE_TIMEOUT_MS)) {
+            probeSupported = true;
+            probeFailures = 0;
+            return;
+        }
+        if (!probeSupported) {
+            // Never succeeded on this session: the server does not allow the probe (an older
+            // image's PermitOpen), so a failure says nothing about the forward.
+            return;
+        }
+        probeFailures += 1;
+        if (probeFailures >= REVERSE_PROBE_FAILURES_BEFORE_REPAIR) {
+            probeFailures = 0;
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE, String.format(
+                    "[%s] Port %d on the tunnel server no longer reaches this client; re-registering it",
+                    connectionId, remoteProxyPort));
+            restartPortForwarding();
+            if (portForwardingEstablished) {
+                app.reverseForwardRestored();
+            }
+        }
+    }
+
+    @Override
+    public synchronized void restartPortForwarding() {
         try {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                 String.format("[%s] Restarting port forwarding", connectionId));

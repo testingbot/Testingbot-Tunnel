@@ -23,11 +23,13 @@ class CustomConnectionMonitorTest {
         private Runnable pending;
         private int scheduled;
         private int cancels;
+        private long lastDelayMs = -1;
 
         @Override
         public void scheduleOnce(String name, Runnable task, long delayMs) {
             pending = task;
             scheduled++;
+            lastDelayMs = delayMs;
         }
 
         @Override
@@ -102,6 +104,11 @@ class CustomConnectionMonitorTest {
         @Override
         public void createPortForwarding() {
             calls.add("createPortForwarding");
+        }
+
+        @Override
+        public void restartPortForwarding() {
+            calls.add("restartPortForwarding");
         }
     }
 
@@ -216,12 +223,54 @@ class CustomConnectionMonitorTest {
         tunnel.authenticated = true;
         tunnel.forwardingEstablished = false;
         monitor.connectionLost(new RuntimeException("drop"));
-        for (int i = 0; i < CustomConnectionMonitor.MAX_RETRIES; i++) {
+        scheduler.fire(); // the reconnect, whose forward request is the first of them
+        for (int i = 1; i < CustomConnectionMonitor.MAX_FORWARD_RETRIES; i++) {
             scheduler.fire();
         }
         assertThat(host.calls).contains("rebuildTunnel");
         assertThat(scheduler.hasPending()).isFalse();
         assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isFalse();
+    }
+
+    @Test
+    void aRefusedForwardIsRequestedAgainOnTheSameSession() {
+        // 2010 still held by the session this one replaces: the SSH session is fine, only the
+        // forward failed. It used to be torn down and re-dialled every five seconds.
+        tunnel.authenticated = true;
+        tunnel.forwardingEstablished = false;
+        monitor.connectionLost(new RuntimeException("drop"));
+        scheduler.fire();
+        assertThat(tunnel.calls).containsExactly("stop", "connect", "createPortForwarding");
+        assertThat(scheduler.lastDelayMs).isEqualTo(CustomConnectionMonitor.FORWARD_RETRY_DELAY);
+
+        scheduler.fire();
+        scheduler.fire();
+        assertThat(tunnel.calls).containsExactly("stop", "connect", "createPortForwarding",
+                "restartPortForwarding", "restartPortForwarding");
+        assertThat(monitor.isRetrying()).isTrue();
+
+        tunnel.forwardingEstablished = true; // the server let go of 2010
+        scheduler.fire();
+        assertThat(monitor.isRetrying()).isFalse();
+        assertThat(com.testingbot.tunnel.TunnelMetrics.isTunnelUp()).isTrue();
+        assertThat(host.calls).doesNotContain("rebuildTunnel");
+    }
+
+    @Test
+    void aSessionThatDropsWhileTheForwardIsRetriedIsReconnected() {
+        tunnel.authenticated = true;
+        tunnel.forwardingEstablished = false;
+        monitor.connectionLost(new RuntimeException("drop"));
+        scheduler.fire();
+        tunnel.authenticated = false;
+        scheduler.fire();
+        assertThat(tunnel.calls).endsWith("stop", "connect");
+    }
+
+    @Test
+    void theFirstReconnectIsNotDelayedByTheFullRetryInterval() {
+        monitor.connectionLost(new RuntimeException("drop"));
+        assertThat(scheduler.lastDelayMs).isLessThanOrEqualTo(CustomConnectionMonitor.FIRST_RETRY_DELAY);
     }
 
     @Test

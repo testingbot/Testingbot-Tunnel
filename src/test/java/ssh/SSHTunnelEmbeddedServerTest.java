@@ -2,6 +2,7 @@ package ssh;
 
 import com.testingbot.tunnel.TestPorts;
 import com.testingbot.tunnel.App;
+import com.testingbot.tunnel.ForwardProbeHandler;
 import org.apache.sshd.common.util.net.SshdSocketAddress;
 import org.apache.sshd.server.SshServer;
 import org.apache.sshd.server.forward.AcceptAllForwardingFilter;
@@ -257,6 +258,100 @@ class SSHTunnelEmbeddedServerTest {
 
         assertThat(tunnel.getSession().getPortForwardingR())
                 .anyMatch(forward -> forward.contains("2010"));
+    }
+
+    /* ------------------------------------------- end-to-end probe of the reverse forward */
+
+    /** Stands in for the local proxy's ForwardProbeHandler: echoes the probe header back. */
+    private ServerSocket probeAnsweringProxy() throws IOException {
+        ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        pool.submit(() -> {
+            while (!server.isClosed()) {
+                // the reader goes with the socket, after the response is written
+                try (Socket socket = server.accept();
+                     BufferedReader in = new BufferedReader(new InputStreamReader(
+                             socket.getInputStream(), StandardCharsets.UTF_8))) {
+                    String nonce = null;
+                    String line;
+                    while ((line = in.readLine()) != null && !line.isEmpty()) {
+                        if (line.regionMatches(true, 0, ForwardProbeHandler.PROBE_HEADER + ":", 0,
+                                ForwardProbeHandler.PROBE_HEADER.length() + 1)) {
+                            nonce = line.substring(line.indexOf(':') + 1).trim();
+                        }
+                    }
+                    OutputStream out = socket.getOutputStream();
+                    out.write(("HTTP/1.1 204 No Content\r\n" + ForwardProbeHandler.PROBE_HEADER
+                            + ": " + nonce + "\r\nConnection: close\r\n\r\n")
+                            .getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                } catch (IOException closed) {
+                    return;
+                }
+            }
+        });
+        return server;
+    }
+
+    /** Counts the tunnel telling the app its reverse forward came back. */
+    private static final class RestoreCountingApp extends App {
+        private final java.util.concurrent.atomic.AtomicInteger restored =
+                new java.util.concurrent.atomic.AtomicInteger();
+
+        @Override
+        public void reverseForwardRestored() {
+            restored.incrementAndGet();
+        }
+    }
+
+    @Test
+    void theProbeMakesTheRoundTripThroughTheServersReverseForward() throws Exception {
+        hub = serverAnswering("HUB");
+        localProxy = probeAnsweringProxy();
+        App app = app();
+        app.setHubPort(hub.getLocalPort());
+        app.setJettyPort(localProxy.getLocalPort());
+        tunnel = new SSHTunnel(app, "127.0.0.1", sshd.getPort(), "127.0.0.1", findFreePort());
+        tunnel.createPortForwarding();
+
+        assertThat(tunnel.probeReverseForward(5_000)).isTrue();
+    }
+
+    @Test
+    void theProbeFailsWhenTheServerHasNoReverseForwardForUs() throws Exception {
+        localProxy = probeAnsweringProxy();
+        App app = app();
+        app.setJettyPort(localProxy.getLocalPort());
+        tunnel = new SSHTunnel(app, "127.0.0.1", sshd.getPort(), "127.0.0.1", findFreePort());
+
+        assertThat(tunnel.probeReverseForward(2_000)).isFalse();
+    }
+
+    @Test
+    void aReverseForwardTheServerRefusedIsRequestedAgainByTheMonitor() throws Exception {
+        // The production failure: an older session of the same account still holds 2010 on the
+        // tunnel server, so the forward is refused. It used to be asked for exactly once.
+        hub = serverAnswering("HUB");
+        localProxy = probeAnsweringProxy();
+        RestoreCountingApp app = new RestoreCountingApp();
+        app.setClientKey(USER);
+        app.setClientSecret(PASSWORD);
+        app.setSeleniumPort(findFreePort());
+        app.setHubPort(hub.getLocalPort());
+        app.setJettyPort(localProxy.getLocalPort());
+        int remotePort = findFreePort();
+        tunnel = new SSHTunnel(app, "127.0.0.1", sshd.getPort(), "127.0.0.1", remotePort);
+
+        try (ServerSocket heldByAStaleSession = new ServerSocket(remotePort, 50,
+                InetAddress.getLoopbackAddress())) {
+            tunnel.createPortForwarding();
+            assertThat(tunnel.isForwardingEstablished()).isFalse();
+        }
+
+        tunnel.new PortForwardingMonitorTask().run();
+
+        assertThat(tunnel.isForwardingEstablished()).isTrue();
+        assertThat(tunnel.probeReverseForward(5_000)).isTrue();
+        assertThat(app.restored.get()).isEqualTo(1);
     }
 
     /* ----------------------------------------------------- reverse delivery probe */

@@ -28,4 +28,9 @@ public interface ReconnectableTunnel {
     default boolean isForwardingEstablished() {
         return false;
     }
+
+    /** Drops whatever forwards are registered and requests them again, on the same session. */
+    default void restartPortForwarding() {
+        createPortForwarding();
+    }
 }
