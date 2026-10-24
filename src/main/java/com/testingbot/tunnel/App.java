@@ -1198,6 +1198,20 @@ public class App {
         }
 
         setupFailure = null;
+
+        // Loaded before the create call rather than when the local proxy starts. By then a
+        // tunnel server had been provisioned for a PAC file that was never going to load -- a
+        // plain-http URL without --pac-local-sha256, a digest mismatch, a syntax error -- and
+        // the failure arrived after the wait for it. Cached, so the proxy reuses this load.
+        // Not under --noproxy: there is no local proxy to route, and the file was never read.
+        if (!noProxy) {
+            try {
+                getPacPolicy();
+            } catch (com.testingbot.tunnel.pac.PacException unusable) {
+                throw new TunnelFailedException(unusable.getMessage(), 1, unusable);
+            }
+        }
+
         api = createApi();
         JsonNode tunnelData = null;
 
