@@ -188,28 +188,38 @@ public class CustomConnectHandler extends ConnectHandler {
     }
 
     /**
-     * The upstream proxy for this destination.
+     * The upstream proxies for this destination, in failover order.
      *
      * <p>--pac-local wins over --proxy for hosts the file routes: a PAC file is per-destination
      * by definition, and a static --proxy is the fallback for everything it does not mention.
-     * Only the first directive is used; the failover list would need a retry loop through this
-     * hand-rolled NIO exchange to honour properly.
+     * The whole failover list is kept, and {@link #onConnectFailure} moves down it when a proxy
+     * cannot be reached.
      */
-    private ProxySpec upstreamFor(String host, int port) {
+    private PacRoute routeFor(String host, int port) {
         if (pacPolicy == null) {
-            return proxySpec;
+            return PacRoute.only(proxySpec);
         }
         com.testingbot.tunnel.pac.PacResult result =
                 pacPolicy.resolveOrNull("https://" + host + ":" + port + "/", host);
         if (result == null) {
             // The file could not be evaluated. Falling through to --proxy rather than going
             // direct: on a proxy-only network, direct is not a safe default, it is a bypass.
-            return proxySpec;
+            return PacRoute.only(proxySpec);
         }
-        if (result.first().isDirect()) {
-            return null;
+        return PacRoute.of(result);
+    }
+
+    /** Carries this CONNECT's route between dial attempts, so the file is asked only once. */
+    private static final String ATTR_ROUTE = CustomConnectHandler.class.getName() + ".route";
+
+    private PacRoute routeOf(Request request, String host, int port) {
+        Object existing = request.getAttribute(ATTR_ROUTE);
+        if (existing instanceof PacRoute route) {
+            return route;
         }
-        return ProxySpec.parse(result.first().toProxySpec());
+        PacRoute route = routeFor(host, port);
+        request.setAttribute(ATTR_ROUTE, route);
+        return route;
     }
 
     public void setLocalhostPolicy(LocalhostPolicy localhostPolicy) {
@@ -295,11 +305,41 @@ public class CustomConnectHandler extends ConnectHandler {
         // --proxy counted twice; and --pac-local returning DIRECT with --proxy counted nothing.
         TunnelMetrics.DIAL_TOTAL.labels("connect", "failure").inc();
         observeDial(request);
+        if (failOver(request, response, callback, failure)) {
+            return;
+        }
         ProxyErrors.Reason reason = ProxyErrors.classify(failure);
         TunnelMetrics.HTTPS_CONNECT_ERRORS_TOTAL.labels(reason.reason().replace('-', '_')).inc();
         LOG.warn("CONNECT failed ({}): {}", reason.reason(),
                 failure == null ? "unknown" : failure.getMessage());
         ProxyErrors.write(request, response, callback, reason);
+    }
+
+    /**
+     * Dials the next PAC entry when the proxy just tried could not be reached.
+     *
+     * <p>Nothing has been written to the client yet -- the tunnel is only published once a dial
+     * succeeds -- so the CONNECT is simply run again against the next entry. Only the last
+     * failure is answered, with its own classified reason.
+     *
+     * @return true when another entry is being tried and this failure must not be answered
+     */
+    private boolean failOver(Request request, Response response, Callback callback,
+                             Throwable failure) {
+        Object attribute = request == null ? null : request.getAttribute(ATTR_ROUTE);
+        if (!(attribute instanceof PacRoute route)) {
+            return false;
+        }
+        ProxySpec failed = route.current();
+        if (!route.failOver(failure)) {
+            return false;
+        }
+        LOG.warn("CONNECT to {} could not reach {} ({}); trying the next PAC entry, {}",
+                request.getHttpURI().getAuthority(), PacRoute.describe(failed),
+                failure.getMessage(), PacRoute.describe(route.current()));
+        request.removeAttribute(ATTR_PROXY_TARGET_REQUEST);
+        handleConnect(request, response, callback, request.getHttpURI().getAuthority());
+        return true;
     }
 
     private static final String ATTR_DIAL_TIMER = CustomConnectHandler.class.getName() + ".dialTimer";
@@ -351,8 +391,8 @@ public class CustomConnectHandler extends ConnectHandler {
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         // Resolved per destination: with --pac-local the answer differs by host, and without it
-        // this is just the static --proxy.
-        ProxySpec upstream = upstreamFor(host, port);
+        // this is just the static --proxy. On a retry this is the next entry of the same answer.
+        ProxySpec upstream = routeOf(request, host, port).current();
         if (upstream == null) {
             // Not wrapped in timedDial: Jetty's default connectToServer succeeds the promise as
             // soon as the non-blocking connect is *initiated*, so wrapping it recorded every

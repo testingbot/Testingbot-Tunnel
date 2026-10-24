@@ -108,18 +108,19 @@ public class WebsocketHandler extends ConnectHandler {
     }
 
     /**
-     * The proxy to route this destination through, or null to dial it directly.
+     * The proxy to route this destination through first, or null to dial it directly.
      *
      * <p>Resolved per destination because {@code --pac-local} can answer differently per host;
      * without a PAC file this is just the static {@code --proxy}.
      */
     ProxySpec upstreamFor(String host, int port) {
-        return upstreamFor(TunnelProxyHandler.absoluteForm("http", host, port, "/"), host);
+        return routeFor(TunnelProxyHandler.absoluteForm("http", host, port, "/"), host).current();
     }
 
-    private ProxySpec upstreamFor(String url, String host) {
+    /** The whole failover list, which {@link #onConnectFailure} walks; see CustomConnectHandler. */
+    private PacRoute routeFor(String url, String host) {
         if (pacPolicy == null) {
-            return proxySpec;
+            return PacRoute.only(proxySpec);
         }
         // ws:// is carried over HTTP, so that is the scheme a PAC file is asked about.
         com.testingbot.tunnel.pac.PacResult result =
@@ -127,12 +128,22 @@ public class WebsocketHandler extends ConnectHandler {
         if (result == null) {
             // Could not evaluate: fall through to --proxy rather than direct, so a broken file
             // does not silently bypass the network's only sanctioned egress.
-            return proxySpec;
+            return PacRoute.only(proxySpec);
         }
-        if (result.first().isDirect()) {
-            return null;
+        return PacRoute.of(result);
+    }
+
+    /** Carries this upgrade's route between dial attempts, so the file is asked only once. */
+    private static final String WS_ROUTE_ATTRIBUTE = WebsocketHandler.class.getName() + ".route";
+
+    private PacRoute routeOf(Request request, String host) {
+        Object existing = request.getAttribute(WS_ROUTE_ATTRIBUTE);
+        if (existing instanceof PacRoute route) {
+            return route;
         }
-        return ProxySpec.parse(result.first().toProxySpec());
+        PacRoute route = routeFor(request.getHttpURI().asString(), host);
+        request.setAttribute(WS_ROUTE_ATTRIBUTE, route);
+        return route;
     }
 
     public void setAllowedHosts(AllowedHosts allowedHosts) {
@@ -343,9 +354,12 @@ public class WebsocketHandler extends ConnectHandler {
     @Override
     protected void connectToServer(Request request, String host, int port, Promise<SocketChannel> promise) {
         request.setAttribute(WS_TARGET_ATTRIBUTE, Boolean.TRUE);
-        ProxySpec upstream = upstreamFor(request.getHttpURI().asString(), host);
+        ProxySpec upstream = routeOf(request, host).current();
         if (upstream != null) {
             request.setAttribute(WS_PROXY_TARGET_ATTRIBUTE, new ProxyTarget(upstream, host, port));
+        } else {
+            // A retry going DIRECT after a proxy entry failed must not inherit that proxy.
+            request.removeAttribute(WS_PROXY_TARGET_ATTRIBUTE);
         }
         request.setAttribute(WS_DIAL_TIMER_ATTRIBUTE,
                 com.testingbot.tunnel.TunnelMetrics.DIAL_DURATION_SECONDS
@@ -408,10 +422,37 @@ public class WebsocketHandler extends ConnectHandler {
                                     Throwable failure) {
         com.testingbot.tunnel.TunnelMetrics.DIAL_TOTAL.labels("websocket", "failure").inc();
         observeWsDial(request);
+        if (failOver(request, response, callback, failure)) {
+            return;
+        }
         ProxyErrors.Reason reason = ProxyErrors.classify(failure);
         LOG.warn("WebSocket upgrade failed ({}): {}", reason.reason(),
                 failure == null ? "unknown" : failure.getMessage());
         ProxyErrors.write(request, response, callback, reason);
+    }
+
+    /**
+     * Dials the next PAC entry when the proxy just tried could not be reached; the same rule as
+     * CustomConnectHandler. The client has been sent nothing yet -- the 101 waits for the
+     * target's answer -- so the upgrade is simply run again.
+     *
+     * @return true when another entry is being tried and this failure must not be answered
+     */
+    private boolean failOver(Request request, Response response, Callback callback,
+                             Throwable failure) {
+        Object attribute = request == null ? null : request.getAttribute(WS_ROUTE_ATTRIBUTE);
+        if (!(attribute instanceof PacRoute route)) {
+            return false;
+        }
+        ProxySpec failed = route.current();
+        if (!route.failOver(failure)) {
+            return false;
+        }
+        LOG.warn("WebSocket upgrade to {} could not reach {} ({}); trying the next PAC entry, {}",
+                request.getHttpURI().getAuthority(), PacRoute.describe(failed),
+                failure.getMessage(), PacRoute.describe(route.current()));
+        handleConnect(request, response, callback, request.getHttpURI().getAuthority());
+        return true;
     }
 
     @Override

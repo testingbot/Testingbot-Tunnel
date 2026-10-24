@@ -279,31 +279,45 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
      *
      * <p>The same rule {@code CustomConnectHandler} follows: --pac-local wins over --proxy for
      * every host, because a PAC file is per-destination by definition and a static --proxy
-     * cannot be. Only the first directive is used; honouring the failover list would need a
-     * retry loop around jetty-client's exchange.
+     * cannot be. This is the first entry of the failover list;
+     * {@link #onServerToProxyResponseFailure} walks the rest.
      */
     ProxySpec upstreamFor(String host, int port, String scheme) {
         return upstreamFor(absoluteForm(scheme, host, port, "/"), host);
     }
 
     private ProxySpec upstreamFor(String url, String host) {
+        return routeFor(url, host).current();
+    }
+
+    private PacRoute routeFor(String url, String host) {
         if (pacPolicy == null) {
-            return ProxySpec.parse(upstreamProxy);
+            return PacRoute.only(ProxySpec.parse(upstreamProxy));
         }
         if (host == null) {
-            return null;
+            return PacRoute.only(null);
         }
         com.testingbot.tunnel.pac.PacResult result =
                 pacPolicy.resolveOrNull(url, host);
         if (result == null) {
             // Could not evaluate: fall through to --proxy rather than direct, so a broken file
             // does not silently bypass the network's only sanctioned egress.
-            return ProxySpec.parse(upstreamProxy);
+            return PacRoute.only(ProxySpec.parse(upstreamProxy));
         }
-        if (result.first().isDirect()) {
-            return null;
+        return PacRoute.of(result);
+    }
+
+    /** Carries this request's route between attempts, so the file is asked only once. */
+    private static final String ATTR_ROUTE = TunnelProxyHandler.class.getName() + ".route";
+
+    private PacRoute routeOf(Request clientToProxyRequest, HttpURI target) {
+        Object existing = clientToProxyRequest.getAttribute(ATTR_ROUTE);
+        if (existing instanceof PacRoute route) {
+            return route;
         }
-        return ProxySpec.parse(result.first().toProxySpec());
+        PacRoute route = routeFor(target.asString(), target.getHost());
+        clientToProxyRequest.setAttribute(ATTR_ROUTE, route);
+        return route;
     }
 
     /**
@@ -818,7 +832,8 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         }
         // Before the request is created, so the proxy PAC chose is already in the client's
         // configuration when jetty-client resolves the destination and asks which one matches.
-        ProxySpec chosen = upstreamFor(newHttpURI.asString(), newHttpURI.getHost());
+        // On a failover retry this is the next entry of the answer the first attempt got.
+        ProxySpec chosen = routeOf(clientToProxyRequest, newHttpURI).current();
         String pacTag = registerPacProxy(chosen);
 
         org.eclipse.jetty.client.Request proxyRequest =
@@ -1025,6 +1040,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
                                                   Response proxyToClientResponse,
                                                   Callback proxyToClientCallback,
                                                   Throwable failure) {
+        if (failOver(clientToProxyRequest, serverToProxyResponse, proxyToClientResponse,
+                proxyToClientCallback, failure)) {
+            return;
+        }
         String uri = String.valueOf(clientToProxyRequest.getHttpURI());
         ProxyErrors.Reason reason = ProxyErrors.classify(failure);
 
@@ -1039,5 +1058,48 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
         }
 
         ProxyErrors.write(clientToProxyRequest, proxyToClientResponse, proxyToClientCallback, reason);
+    }
+
+    /**
+     * Sends the request again through the next PAC entry when the proxy just tried could not be
+     * reached; the same rule as CustomConnectHandler.
+     *
+     * <p>Only for a request without a body. A failed exchange fails its request content, and
+     * the content here is the client's own stream: once failed it cannot be read again, so a
+     * second attempt would forward an empty or broken body. Nothing has reached the client yet
+     * either way -- a dial failure happens before any response exists.
+     *
+     * @return true when another entry is being tried and this failure must not be answered
+     */
+    private boolean failOver(Request clientToProxyRequest,
+                             org.eclipse.jetty.client.Response serverToProxyResponse,
+                             Response proxyToClientResponse, Callback proxyToClientCallback,
+                             Throwable failure) {
+        Object attribute = clientToProxyRequest.getAttribute(ATTR_ROUTE);
+        // A status means the upstream answered, which is never a reason to try elsewhere.
+        boolean answered = serverToProxyResponse != null && serverToProxyResponse.getStatus() > 0;
+        if (!(attribute instanceof PacRoute route) || answered
+                || proxyToClientResponse.isCommitted() || hasBody(clientToProxyRequest)) {
+            return false;
+        }
+        ProxySpec failed = route.current();
+        if (!route.failOver(failure)) {
+            return false;
+        }
+        LOG.log(Level.WARNING, "{0} {1} could not reach {2} ({3}); trying the next PAC entry, {4}",
+                new Object[]{clientToProxyRequest.getMethod(), clientToProxyRequest.getHttpURI(),
+                        PacRoute.describe(failed), failure.getMessage(),
+                        PacRoute.describe(route.current())});
+        super.handle(clientToProxyRequest, proxyToClientResponse, proxyToClientCallback);
+        return true;
+    }
+
+    /** ProxyHandler's own test is private; this is the same one. */
+    private static boolean hasBody(Request request) {
+        long length = request.getLength();
+        if (length > 0) {
+            return true;
+        }
+        return length < 0 && request.getHeaders().contains(HttpHeader.TRANSFER_ENCODING);
     }
 }
