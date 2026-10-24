@@ -267,9 +267,10 @@ class SSHTunnelEmbeddedServerTest {
         ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
         pool.submit(() -> {
             while (!server.isClosed()) {
-                try (Socket socket = server.accept()) {
-                    BufferedReader in = new BufferedReader(
-                            new InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8));
+                // the reader goes with the socket, after the response is written
+                try (Socket socket = server.accept();
+                     BufferedReader in = new BufferedReader(new InputStreamReader(
+                             socket.getInputStream(), StandardCharsets.UTF_8))) {
                     String nonce = null;
                     String line;
                     while ((line = in.readLine()) != null && !line.isEmpty()) {
