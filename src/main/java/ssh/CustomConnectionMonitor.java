@@ -26,6 +26,16 @@ public class CustomConnectionMonitor {
 
     static final long CURRENT_RETRY_DELAY = 5000;
     static final int MAX_RETRIES = 30;
+    /**
+     * The first reconnect goes out after this long, not after the full retry delay: the session
+     * has already been gone for the keepalive's ~15 seconds, and every second more is a second
+     * of failing tests.
+     */
+    static final long FIRST_RETRY_DELAY = 1000;
+    /** Between re-requests of the reverse forward on a session that is up. */
+    static final long FORWARD_RETRY_DELAY = 2000;
+    /** About two minutes of re-requests before the tunnel is rebuilt. */
+    static final int MAX_FORWARD_RETRIES = 60;
 
     private final ReconnectableTunnel tunnel;
     private final ReconnectHost host;
@@ -34,6 +44,7 @@ public class CustomConnectionMonitor {
 
     private final AtomicBoolean retrying = new AtomicBoolean(false);
     private int retryAttempts = 0;
+    private int forwardRetryAttempts = 0;
     private final Object lifecycleLock = new Object();
     private volatile boolean cancelled;
 
@@ -67,7 +78,7 @@ public class CustomConnectionMonitor {
             // Only the first loss starts a retry cycle; further reports while one is already in
             // flight would otherwise stack up timers all racing to reconnect the same tunnel.
             if (retrying.compareAndSet(false, true)) {
-                scheduleRetry();
+                scheduleRetry(this::attemptReconnect, Math.min(FIRST_RETRY_DELAY, retryDelayMs));
             }
         }
     }
@@ -77,9 +88,13 @@ public class CustomConnectionMonitor {
     }
 
     private void scheduleRetry(Runnable task) {
+        scheduleRetry(task, retryDelayMs);
+    }
+
+    private void scheduleRetry(Runnable task, long delayMs) {
         synchronized (lifecycleLock) {
             if (!isStopped()) {
-                scheduler.scheduleOnce("Reconnect-" + tunnel.getConnectionId(), task, retryDelayMs);
+                scheduler.scheduleOnce("Reconnect-" + tunnel.getConnectionId(), task, delayMs);
             }
         }
     }
@@ -171,14 +186,19 @@ public class CustomConnectionMonitor {
             return;
         }
         tunnel.createPortForwarding();
+        checkReconnected();
+    }
+
+    /** Ready when the session and the forwards are up; otherwise schedules what is missing. */
+    private void checkReconnected() {
         synchronized (lifecycleLock) {
             if (isStopped()) {
                 tunnel.stop();
                 return;
             }
-            if (!tunnel.isAuthenticated() || !tunnel.isForwardingEstablished()) {
+            if (!tunnel.isAuthenticated()) {
                 host.setReady(false);
-                LOG.log(Level.WARNING, "SSH reconnected but port forwarding failed; retrying setup");
+                LOG.log(Level.WARNING, "SSH dropped again while setting up port forwarding; retrying");
                 if (retryAttempts >= MAX_RETRIES) {
                     giveUpAndRebuild();
                 } else {
@@ -186,6 +206,28 @@ public class CustomConnectionMonitor {
                 }
                 return;
             }
+            if (!tunnel.isForwardingEstablished()) {
+                // The session is up; what failed is the forward. On a tunnel server this is
+                // nearly always 2010 still held by the session this one replaces, which the
+                // server releases once it notices that session is gone. Tearing the healthy
+                // session down and re-dialling it every five seconds -- what this did -- made
+                // each attempt slower and burned the retry budget, so a stale listener that
+                // lived longer than ~3 minutes ended in a rebuild. Ask again on this session,
+                // often, and rebuild only if the port never comes free.
+                host.setReady(false);
+                forwardRetryAttempts += 1;
+                LOG.log(Level.WARNING, String.format(
+                        "[%s] SSH reconnected but port forwarding failed; requesting it again (%d)",
+                        tunnel.getConnectionId(), forwardRetryAttempts));
+                if (forwardRetryAttempts >= MAX_FORWARD_RETRIES) {
+                    forwardRetryAttempts = 0;
+                    giveUpAndRebuild();
+                } else {
+                    scheduleRetry(this::retryForwarding, FORWARD_RETRY_DELAY);
+                }
+                return;
+            }
+            forwardRetryAttempts = 0;
             retrying.set(false);
             scheduler.cancel();
             host.setReady(true);
@@ -194,6 +236,19 @@ public class CustomConnectionMonitor {
                     tunnel.getConnectionId(), retryAttempts));
             retryAttempts = 0;
         }
+    }
+
+    /** Re-requests the forwards on the current session; reconnects if the session went away. */
+    private void retryForwarding() {
+        if (isStopped()) {
+            return;
+        }
+        if (!tunnel.isAuthenticated()) {
+            attemptReconnect();
+            return;
+        }
+        tunnel.restartPortForwarding();
+        checkReconnected();
     }
 
     /**

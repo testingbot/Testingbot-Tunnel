@@ -1554,6 +1554,12 @@ public class App {
 
     /** How long between self-test retries, and how many are attempted before giving up. */
     static final long SELF_TEST_RETRY_INTERVAL_MS = 30_000L;
+    /**
+     * The first retry comes quickly. The usual startup failure is a race -- the tunnel server's
+     * proxy not yet routing to a forward registered a moment ago -- that is over within a second,
+     * and waiting the full 30 seconds held every test back by that much.
+     */
+    static final long SELF_TEST_FIRST_RETRY_MS = 2_000L;
     static final int SELF_TEST_RETRY_ATTEMPTS = 10;
 
     private Timer selfTestRetryTimer;
@@ -1614,7 +1620,18 @@ public class App {
                     cancelSelfTestRetry();
                 }
             }
-        }, selfTestRetryIntervalMs, selfTestRetryIntervalMs);
+        }, Math.min(SELF_TEST_FIRST_RETRY_MS, selfTestRetryIntervalMs), selfTestRetryIntervalMs);
+    }
+
+    /**
+     * Called by the tunnel when it re-established port 2010 on a session that stayed up. Nothing
+     * else re-checks readiness in that case, so the tunnel would otherwise stay not-ready with a
+     * working forward.
+     */
+    public void reverseForwardRestored() {
+        if (!isReady()) {
+            scheduleSelfTestRetry();
+        }
     }
 
     synchronized void cancelSelfTestRetry() {

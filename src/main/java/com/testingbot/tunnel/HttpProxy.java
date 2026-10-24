@@ -229,7 +229,11 @@ public final class HttpProxy {
         // GracefulHandler tracks in-flight requests so stop() can drain them; it must sit
         // outermost to see every request.
         GracefulHandler gracefulHandler = new GracefulHandler();
-        gracefulHandler.setHandler(logHandler);
+        // Before the log handler: the reverse-forward probe arrives every few seconds and is
+        // not traffic anyone wants to see in the HTTP log or the request metrics.
+        ForwardProbeHandler probeHandler = new ForwardProbeHandler();
+        probeHandler.setHandler(logHandler);
+        gracefulHandler.setHandler(probeHandler);
 
         if (app.isDebugMode()) {
             // Jetty 12 handlers own a Callback that must be completed exactly once. This
