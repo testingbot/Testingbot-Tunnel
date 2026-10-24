@@ -211,6 +211,11 @@ Check a file before relying on it:
 java -jar testingbot-tunnel.jar --pac-local corp.pac --pac-test https://internal.corp/page
 ```
 
+A result with several entries, such as `PROXY a:8080; PROXY b:8080; DIRECT`, is a failover
+list, as it is for a browser: when a proxy cannot be reached (refused, timed out, unresolvable)
+the next entry is tried, on plain HTTP, CONNECT and WebSocket alike. A proxy that answers is
+final, refusal included, and a plain HTTP request with a body is not sent a second time.
+
 `--dns` resolves through servers you name rather than the platform resolver, taking a list: the
 first is primary and the rest are tried in order when it does not answer. `--dns-round-robin`
 spreads queries across them instead, and `--dns-timeout` bounds each one.
