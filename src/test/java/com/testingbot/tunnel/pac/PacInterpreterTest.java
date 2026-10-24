@@ -148,6 +148,43 @@ class PacInterpreterTest {
     }
 
     @Test
+    void isInNet_resolvesAHostNameArgument() {
+        // The specification resolves the host; comparing the name itself was always false, so
+        // an intranet rule written this way sent everything to the proxy.
+        String source = """
+                function FindProxyForURL(url, host) {
+                    if (isInNet(host, "127.0.0.0", "255.0.0.0")) return "DIRECT";
+                    return "PROXY p:8080";
+                }
+                """;
+        PacInterpreter pac = new PacInterpreter(source,
+                env(Map.of("app.local", "127.0.0.1", "outside.com", "93.184.216.34"), "10.0.0.5"));
+
+        assertThat(pac.findProxyForUrl("http://app.local/", "app.local")).isEqualTo("DIRECT");
+        assertThat(pac.findProxyForUrl("http://outside.com/", "outside.com"))
+                .isEqualTo("PROXY p:8080");
+        assertThat(pac.findProxyForUrl("http://nope.invalid/", "nope.invalid"))
+                .isEqualTo("PROXY p:8080");
+        assertThat(pac.findProxyForUrl("http://127.0.0.1/", "127.0.0.1")).isEqualTo("DIRECT");
+    }
+
+    @Test
+    void isInNet_doesNotLookUpTheWordNull() {
+        // isInNet(dnsResolve(host), ...) on an unresolvable host passes null, which must stay
+        // false rather than be stringified and sent to DNS.
+        String source = """
+                function FindProxyForURL(url, host) {
+                    if (isInNet(dnsResolve(host), "127.0.0.0", "255.0.0.0")) return "DIRECT";
+                    return "PROXY p:8080";
+                }
+                """;
+        PacInterpreter pac = new PacInterpreter(source, env(Map.of("null", "127.0.0.1"), "10.0.0.5"));
+
+        assertThat(pac.findProxyForUrl("http://nope.invalid/", "nope.invalid"))
+                .isEqualTo("PROXY p:8080");
+    }
+
+    @Test
     void isResolvableAndMyIpAddress() {
         String source = """
                 function FindProxyForURL(url, host) {
