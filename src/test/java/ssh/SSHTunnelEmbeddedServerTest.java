@@ -326,7 +326,7 @@ class SSHTunnelEmbeddedServerTest {
         assertThat(tunnel.probeReverseForward(2_000)).isFalse();
     }
 
-    @Test
+    @org.junit.jupiter.api.RepeatedTest(200)
     void aReverseForwardTheServerRefusedIsRequestedAgainByTheMonitor() throws Exception {
         // The production failure: an older session of the same account still holds 2010 on the
         // tunnel server, so the forward is refused. It used to be asked for exactly once.
