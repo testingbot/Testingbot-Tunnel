@@ -419,6 +419,12 @@ public class SSHTunnel implements ReconnectableTunnel {
                         return true;
                     }
                 } else if (channel.isClosed()) {
+                    // The answer and the close arrive together (the proxy closes as soon as it
+                    // has answered), so both can land between available() and isClosed().
+                    // Buffered data survives the close: read it before giving up.
+                    if (in.available() > 0) {
+                        continue;
+                    }
                     break;
                 } else {
                     Thread.sleep(20);
