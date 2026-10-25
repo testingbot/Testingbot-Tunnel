@@ -21,6 +21,8 @@ import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
@@ -476,7 +478,7 @@ public class SSHTunnel implements ReconnectableTunnel {
         for (int i = 0; i < MUX_PORT_COUNT; i++) {
             int port = muxFirstPort + (slot + i) % MUX_PORT_COUNT;
             try {
-                session.setPortForwardingR(port, REVERSE_FORWARD_HOST, app.getJettyPort());
+                setPortForwardingR(port);
                 return port;
             } catch (JSchException taken) {
                 Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
@@ -583,9 +585,53 @@ public class SSHTunnel implements ReconnectableTunnel {
         }
     }
 
+    /**
+     * Registers a reverse forward on a thread of its own.
+     *
+     * <p>JSch wakes the thread waiting for the server's reply to {@code tcpip-forward} by
+     * interrupting it, and sets the reply first. When the reply is quick -- always, on loopback --
+     * the caller can see it, return, and receive the interrupt afterwards. The caller was left
+     * interrupted, so its next blocking call failed: the probe that follows a re-registration
+     * returned false at once, and {@code boot()} failed starting Jetty. A thread that ends here
+     * absorbs the interrupt instead.
+     *
+     * <p>The wait is uninterruptible, as JSch's own is, and bounded by JSch's ten-second reply
+     * timeout; an interrupt that arrives meanwhile is restored rather than failing the forward.
+     */
+    private void setPortForwardingR(int port) throws JSchException {
+        Session current = session;
+        FutureTask<Void> request = new FutureTask<>(() -> {
+            current.setPortForwardingR(port, REVERSE_FORWARD_HOST, app.getJettyPort());
+            return null;
+        });
+        Thread requester = new Thread(request, "tcpip-forward-" + connectionId);
+        requester.setDaemon(true);
+        requester.start();
+        boolean interrupted = false;
+        try {
+            while (true) {
+                try {
+                    request.get();
+                    return;
+                } catch (InterruptedException again) {
+                    interrupted = true;
+                }
+            }
+        } catch (ExecutionException failed) {
+            if (failed.getCause() instanceof JSchException jschFailure) {
+                throw jschFailure;
+            }
+            throw new JSchException(String.valueOf(failed.getCause()), failed.getCause());
+        } finally {
+            if (interrupted) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
     private boolean establishLegacyReverseForward() {
         try {
-            session.setPortForwardingR(remoteProxyPort, REVERSE_FORWARD_HOST, app.getJettyPort());
+            setPortForwardingR(remoteProxyPort);
             boundRemotePort = remoteProxyPort;
             return true;
         } catch (JSchException ex) {
