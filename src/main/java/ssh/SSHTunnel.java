@@ -425,6 +425,7 @@ public class SSHTunnel implements ReconnectableTunnel {
                     if (in.available() > 0) {
                         continue;
                     }
+                    System.err.println("PROBEDBG closed, got=[" + answer + "] exit=" + channel.getExitStatus());
                     break;
                 } else {
                     Thread.sleep(20);
@@ -435,6 +436,7 @@ public class SSHTunnel implements ReconnectableTunnel {
             Thread.currentThread().interrupt();
             return false;
         } catch (Exception failed) {
+            System.err.println("PROBEDBG exception " + failed); failed.printStackTrace();
             // The channel could not be opened: nothing listens on 2010, or the server does not
             // permit the probe. Which of the two is decided by the caller.
             return false;
