@@ -110,6 +110,8 @@ class SSHTunnelEmbeddedServerTest {
         app.setClientSecret(PASSWORD);
         app.setJettyPort(findFreePort());
         app.setSeleniumPort(findFreePort());
+        // One connection: what these tests are about. Several are SSHTunnelMultiConnectionTest's.
+        app.setSshConnections(1);
         return app;
     }
 

@@ -93,6 +93,10 @@ public class App {
             com.testingbot.tunnel.proxy.NegotiateHosts.none();
     /** Null means "keep the built-in default", so an absent flag changes nothing. */
     private Integer httpDialTimeoutSeconds = null;
+    /** SSH connections to the tunnel server; see {@code --ssh-connections}. */
+    private int sshConnections = DEFAULT_SSH_CONNECTIONS;
+    static final int DEFAULT_SSH_CONNECTIONS = 4;
+    static final int MAX_SSH_CONNECTIONS = 8;
     private Integer httpIdleTimeoutSeconds = null;
     private String controlProxy = null;
     private String controlProxyAuth = null;
@@ -425,6 +429,16 @@ public class App {
             + "target as an opaque CONNECT tunnel.");
         krb5Hosts.setArgName("HOST,HOST");
         options.addOption(krb5Hosts);
+
+        Option sshConnections = new Option(null, "ssh-connections", true,
+            "How many SSH connections to open to the tunnel server, 1-" + MAX_SSH_CONNECTIONS
+            + " (default " + DEFAULT_SSH_CONNECTIONS + "). Browser connections are spread over "
+            + "them, so on a lossy or distant link one lost packet no longer stalls every request "
+            + "and the tunnel is not held to one TCP connection's share of the link; when one "
+            + "connection drops the others keep carrying traffic. Tunnel servers that do not "
+            + "support this get a single connection, as do tunnels with 1.");
+        sshConnections.setArgName("n");
+        options.addOption(sshConnections);
 
         Option dialTimeout = new Option(null, "http-dial-timeout", true,
             "Seconds to wait for a TCP connection to a target or upstream proxy before giving "
@@ -845,6 +859,19 @@ public class App {
         }
 
         app.httpDialTimeoutSeconds = positiveSeconds(commandLine, "http-dial-timeout");
+        if (commandLine.hasOption("ssh-connections")) {
+            String value = commandLine.getOptionValue("ssh-connections").trim();
+            try {
+                int n = Integer.parseInt(value);
+                if (n < 1 || n > MAX_SSH_CONNECTIONS) {
+                    throw new NumberFormatException(value);
+                }
+                app.sshConnections = n;
+            } catch (NumberFormatException invalid) {
+                throw new ParseException("Invalid --ssh-connections '" + value
+                        + "': expected a whole number from 1 to " + MAX_SSH_CONNECTIONS);
+            }
+        }
         app.httpIdleTimeoutSeconds = positiveSeconds(commandLine, "http-idle-timeout");
 
         if (commandLine.hasOption("dns")) {
@@ -1537,6 +1564,11 @@ public class App {
             }
         }
 
+        if (tunnel != null) {
+            // Before the self-test: on a server with tunnel-mux, port 2010 is only served once
+            // the server has reached this proxy through one of our forwards.
+            tunnel.settleForwarding();
+        }
         return selfTest();
     }
 
@@ -1590,7 +1622,7 @@ public class App {
 
     /** Package-private so a test can drive the retry without a live SSH session. */
     boolean tunnelIsForwarding() {
-        return tunnel != null && tunnel.isForwardingEstablished();
+        return tunnel != null && tunnel.isAnyConnectionForwarding();
     }
 
     /**
@@ -2403,6 +2435,18 @@ public class App {
      * up quickly, a tunnelled connection should not -- and one number for both would be worse
      * than either.
      */
+    public int getSshConnections() {
+        return sshConnections;
+    }
+
+    public void setSshConnections(int sshConnections) {
+        this.sshConnections = sshConnections;
+    }
+
+    public boolean isNoProxy() {
+        return noProxy;
+    }
+
     public Integer getHttpDialTimeoutSeconds() {
         return httpDialTimeoutSeconds;
     }
