@@ -16,10 +16,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -44,6 +46,24 @@ public class SSHTunnel implements ReconnectableTunnel {
     private volatile boolean probeSupported;
     private int probeFailures;
 
+    /** The first connection carries the hub forward and owns readiness and the extra connections. */
+    private final boolean primary;
+    /** Which of the multiplexed ports this connection tries first. */
+    private final int slot;
+    /** The server's tunnel-mux took 2010 for our forwards; sticky for this server. */
+    private volatile boolean muxed;
+    /** The server has no tunnel-mux (or it is not wanted): this connection binds 2010 itself. */
+    private volatile boolean muxRuledOut;
+    /** A multiplexed port bound but not yet confirmed: waiting for the local proxy to listen. */
+    private volatile boolean muxPending;
+    /** The remote port this connection's reverse forward holds, or -1. */
+    private volatile int boundRemotePort = -1;
+    private final List<SSHTunnel> extras = new CopyOnWriteArrayList<>();
+    private volatile Thread extrasStarter;
+    private final SSHTunnel owner;
+    private volatile boolean proxyKeptForOthers;
+    private volatile int forwardRestarts;
+
     /** Long enough for a slow network and a proxy hop, short enough to fail rather than hang. */
     static final int DEFAULT_CONNECT_TIMEOUT_MS = 30_000;
 
@@ -65,12 +85,18 @@ public class SSHTunnel implements ReconnectableTunnel {
      * so after a NAT change or a laptop switching networks the session looked connected until the
      * operating system gave up retransmitting -- about 15 minutes on Linux -- and all that time
      * the tunnel server kept port 2010 for a client that was gone.
+     *
+     * <p>2 s x 3: a session that hears nothing at all from the server for ~6 s is dead. That is
+     * the floor of how fast port 2010 can come back after a network change, so it is kept short;
+     * the server answers every keepalive at once, so a healthy connection - busy or idle - is
+     * never that quiet. Measured on a NAT change: 2010 back after ~8 s (5 s x 3: ~18 s); a
+     * 4-second outage passes without a reconnect, and nothing reconnected under load.
      */
-    static final int SERVER_ALIVE_INTERVAL_MS = 5_000;
+    static final int SERVER_ALIVE_INTERVAL_MS = 2_000;
     static final int SERVER_ALIVE_COUNT_MAX = 3;
 
     /** How often the connection and forwarding monitors look. */
-    static final long CONNECTION_CHECK_INTERVAL_MS = 2_000;
+    static final long CONNECTION_CHECK_INTERVAL_MS = 500;
     static final long FORWARDING_CHECK_INTERVAL_MS = 5_000;
 
     /** How long one end-to-end probe of the reverse forward may take. */
@@ -78,9 +104,27 @@ public class SSHTunnel implements ReconnectableTunnel {
     /** Consecutive failed probes before the reverse forward is re-registered. */
     static final int REVERSE_PROBE_FAILURES_BEFORE_REPAIR = 2;
 
+    /**
+     * Ports for the reverse forwards of a multi-connection tunnel (--ssh-connections). The
+     * server's tunnel-mux notices them, checks each one with the same probe request as {@link
+     * #probeReverseForward}, and then serves 2010 itself, spreading connections over them.
+     * Sixteen, so a reconnect finds a free one while a dead connection's session still holds its
+     * port on the server.
+     */
+    static final int MUX_FIRST_PORT = 2020;
+    static final int MUX_PORT_COUNT = 16;
+    /**
+     * How long a server gets to serve 2010 through a new forward before it is taken as one
+     * without tunnel-mux. tunnel-mux sees a forward within 0.25 s and serves 2010 once its probe
+     * came back through it, one round trip over the customer's link; this is also what a tunnel on
+     * an image without it waits once at startup (5 s made it 20 s to ready instead of 15).
+     */
+    static final int MUX_CONFIRM_MS = 3_000;
+
     private final int sshPort;
     private final String hubHost;
     private final int remoteProxyPort;
+    private int muxFirstPort = MUX_FIRST_PORT;
 
     public SSHTunnel(App app, String server) throws Exception {
         this(app, server, DEFAULT_SSH_PORT, DEFAULT_HUB_HOST, DEFAULT_REMOTE_PROXY_PORT);
@@ -103,18 +147,38 @@ public class SSHTunnel implements ReconnectableTunnel {
      */
     SSHTunnel(App app, String server, int sshPort, String hubHost, int remoteProxyPort)
             throws Exception {
-        /* Create a connection instance */
+        this(app, server, sshPort, hubHost, remoteProxyPort, MUX_FIRST_PORT);
+    }
+
+    /** As above, with the multiplexed ports moved, for the same reason as remoteProxyPort. */
+    SSHTunnel(App app, String server, int sshPort, String hubHost, int remoteProxyPort,
+              int muxFirstPort) throws Exception {
+        this(app, server, sshPort, hubHost, remoteProxyPort, muxFirstPort, null, 0);
+        this.connect();
+    }
+
+    /** An extra connection of {@code owner}'s tunnel; not connected yet, see {@link #startExtra}. */
+    private SSHTunnel(App app, String server, int sshPort, String hubHost, int remoteProxyPort,
+                      int muxFirstPort, SSHTunnel owner, int slot) {
         this.app = app;
         this.server = server;
         this.sshPort = sshPort;
         this.hubHost = hubHost;
         this.remoteProxyPort = remoteProxyPort;
+        this.muxFirstPort = muxFirstPort;
         this.connectionId = UUID.randomUUID().toString().substring(0, 8);
+        this.owner = owner;
+        this.primary = owner == null;
+        this.slot = slot;
+        // an extra connection exists only once the server's tunnel-mux has been seen
+        this.muxed = !primary;
 
         this.jsch = new JSch();
         this.session = null;
-        this.connectionMonitor = new CustomConnectionMonitor(this, this.app);
-        this.connect();
+        ReconnectHost host = ReconnectHost.of(app);
+        this.connectionMonitor = new CustomConnectionMonitor(this,
+                primary ? new PrimaryHost(host) : new ExtraHost(), Scheduler.timerBased(),
+                CustomConnectionMonitor.CURRENT_RETRY_DELAY);
     }
 
     /**
@@ -266,6 +330,14 @@ public class SSHTunnel implements ReconnectableTunnel {
         if (quitting) {
             this.shuttingDown.set(true);
             connectionMonitor.cancel();
+            Thread starter = extrasStarter;
+            if (starter != null) {
+                starter.interrupt();
+            }
+            for (SSHTunnel extra : extras) {
+                extra.stop(true);
+            }
+            extras.clear();
         }
         this.stop();
     }
@@ -273,6 +345,8 @@ public class SSHTunnel implements ReconnectableTunnel {
     public void stop() {
         synchronized (lifecycleLock) {
             portForwardingEstablished = false;
+            boundRemotePort = -1;
+            muxPending = false;
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format("[%s] Stopping secure tunnel", connectionId));
             if (keepAliveTimer != null) {
                 keepAliveTimer.cancel();
@@ -295,6 +369,55 @@ public class SSHTunnel implements ReconnectableTunnel {
         return portForwardingEstablished && isAuthenticated() && !shuttingDown.get();
     }
 
+    /** True when this connection or any of its extra connections carries traffic. */
+    public boolean isAnyConnectionForwarding() {
+        if (isForwardingEstablished() && !muxPending) {
+            return true;
+        }
+        for (SSHTunnel extra : extras) {
+            if (extra.isForwardingEstablished()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Whether a connection other than this one still carries traffic. */
+    private boolean othersForwarding() {
+        SSHTunnel first = primary ? this : owner;
+        if (first != this && first.isForwardingEstablished()) {
+            return true;
+        }
+        for (SSHTunnel extra : first.extras) {
+            if (extra != this && extra.isForwardingEstablished()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Connections currently forwarding, this one included; for the log. */
+    int forwardingConnections() {
+        int n = isForwardingEstablished() ? 1 : 0;
+        for (SSHTunnel extra : extras) {
+            n += extra.isForwardingEstablished() ? 1 : 0;
+        }
+        return n;
+    }
+
+    /** The port this connection's reverse forward holds on the server; -1 when none. */
+    int getBoundRemotePort() {
+        return boundRemotePort;
+    }
+
+    boolean isMuxed() {
+        return muxed;
+    }
+
+    List<SSHTunnel> getExtras() {
+        return extras;
+    }
+
     // Delivery target for the reverse forward. JSch connects to this host for every
     // forwarded-tcpip channel; "0.0.0.0" is not connectable on macOS (TB-253), and
     // "localhost" could resolve to ::1 while Jetty listens on IPv4 only.
@@ -306,19 +429,164 @@ public class SSHTunnel implements ReconnectableTunnel {
         // exactly what happened on every restart, because the reverse forward was still
         // registered on the server and re-registering it throws.
         boolean reverseOk = establishReverseForward();
-        boolean localOk = establishLocalForward();
+        // The hub forward is a local port, so only one connection can hold it: the first.
+        boolean localOk = !primary || establishLocalForward();
 
         portForwardingEstablished = reverseOk && localOk;
         if (portForwardingEstablished) {
-            Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
-                String.format("[%s] Port forwarding established: %s:%d -> %s:%d, localhost:%d -> %s:%d",
-                    connectionId, server, remoteProxyPort, REVERSE_FORWARD_HOST, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort()));
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, primary
+                ? String.format("[%s] Port forwarding established: %s:%d -> %s:%d, localhost:%d -> %s:%d",
+                    connectionId, server, boundRemotePort, REVERSE_FORWARD_HOST, app.getJettyPort(), app.getSSHPort(), hubHost, app.getHubPort())
+                : String.format("[%s] Extra connection forwarding: %s:%d -> %s:%d",
+                    connectionId, server, boundRemotePort, REVERSE_FORWARD_HOST, app.getJettyPort()));
+        }
+        if (muxPending && verifyReverseForwardDelivery()) {
+            // a reconnect: the local proxy already listens, so this can be decided now
+            settleForwarding();
         }
     }
 
+    /** More than one connection asked for, and something on this side answers the probe. */
+    private boolean wantsMux() {
+        return app.getSshConnections() > 1 && !app.isNoProxy() && !muxRuledOut;
+    }
+
     private boolean establishReverseForward() {
+        if (wantsMux()) {
+            int port = bindMuxPort();
+            if (port > 0) {
+                boundRemotePort = port;
+                // Confirmed later, once the local proxy listens: the server only serves 2010
+                // after its probe through this forward came back from that proxy.
+                muxPending = !muxed;
+                return true;
+            }
+            if (muxed) {
+                // every multiplexed port refused: still held by dead sessions; asked again later
+                return false;
+            }
+            // the server permits none of them: an image without tunnel-mux
+            muxRuledOut = true;
+        }
+        return establishLegacyReverseForward();
+    }
+
+    /** Binds a free port among the multiplexed ones, this connection's own slot first. */
+    private int bindMuxPort() {
+        for (int i = 0; i < MUX_PORT_COUNT; i++) {
+            int port = muxFirstPort + (slot + i) % MUX_PORT_COUNT;
+            try {
+                session.setPortForwardingR(port, REVERSE_FORWARD_HOST, app.getJettyPort());
+                return port;
+            } catch (JSchException taken) {
+                Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
+                    String.format("[%s] Port %d on the tunnel server refused: %s", connectionId, port, taken.getMessage()));
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Decides a multiplexed forward bound before the local proxy listened: when port 2010 now
+     * reaches this client the server's tunnel-mux took it over, and the extra connections are
+     * opened; otherwise the server has none, and this connection binds 2010 itself as every
+     * client before did. Called by App once the proxy is up, and by a reconnect.
+     */
+    public synchronized void settleForwarding() {
+        if (!muxPending) {
+            return;
+        }
+        long deadline = System.currentTimeMillis() + MUX_CONFIRM_MS;
+        boolean served = false;
+        while (!served && System.currentTimeMillis() < deadline && isAuthenticated()) {
+            served = probeReverseForward(Math.max(500, (int) (deadline - System.currentTimeMillis())));
+            if (!served) {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+        muxPending = false;
+        if (served) {
+            muxed = true;
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format(
+                    "[%s] The tunnel server spreads port %d over this tunnel's SSH connections; opening %d more",
+                    connectionId, remoteProxyPort, app.getSshConnections() - 1 - extras.size()));
+            startExtras();
+            return;
+        }
+        Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format(
+                "[%s] The tunnel server does not support several SSH connections; using one, on port %d",
+                connectionId, remoteProxyPort));
+        muxRuledOut = true;
+        try {
+            session.delPortForwardingR(boundRemotePort);
+        } catch (Exception notRegistered) {
+            // gone with the session
+        }
+        boundRemotePort = -1;
+        portForwardingEstablished = establishLegacyReverseForward() && establishLocalForwardPresent();
+    }
+
+    private boolean establishLocalForwardPresent() {
+        if (!primary) {
+            return true;
+        }
+        try {
+            if (localForwardingActive(session.getPortForwardingL(), app.getSSHPort())) {
+                return true;
+            }
+        } catch (JSchException gone) {
+            return false;
+        }
+        return establishLocalForward();
+    }
+
+    /** Opens the extra connections in the background; the tunnel is ready without them. */
+    private void startExtras() {
+        if (!primary || shuttingDown.get() || extrasStarter != null) {
+            return;
+        }
+        Thread starter = new Thread(() -> {
+            for (int i = 1; i < app.getSshConnections() && !shuttingDown.get(); i++) {
+                SSHTunnel extra = new SSHTunnel(app, server, sshPort, hubHost, remoteProxyPort,
+                        muxFirstPort, this, i);
+                extras.add(extra);
+                extra.startExtra();
+            }
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format(
+                    "[%s] %d of %d SSH connections forwarding", connectionId,
+                    forwardingConnections(), app.getSshConnections()));
+        }, "ExtraConnections-" + connectionId);
+        starter.setDaemon(true);
+        extrasStarter = starter;
+        starter.start();
+    }
+
+    /** Connects an extra connection; a failure is retried by its own connection monitor. */
+    private void startExtra() {
+        try {
+            connect();
+            createPortForwarding();
+            if (!isForwardingEstablished()) {
+                connectionMonitor.connectionLost(new Exception("extra connection could not forward"));
+            }
+        } catch (Exception failed) {
+            Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING, String.format(
+                    "[%s] Extra connection failed: %s; retrying", connectionId, failed.getMessage()));
+            if (!shuttingDown.get()) {
+                connectionMonitor.connectionLost(failed);
+            }
+        }
+    }
+
+    private boolean establishLegacyReverseForward() {
         try {
             session.setPortForwardingR(remoteProxyPort, REVERSE_FORWARD_HOST, app.getJettyPort());
+            boundRemotePort = remoteProxyPort;
             return true;
         } catch (JSchException ex) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.SEVERE,
@@ -342,10 +610,14 @@ public class SSHTunnel implements ReconnectableTunnel {
     /** Drops both forwards, ignoring ones that are not registered. */
     private void removePortForwarding() {
         try {
-            session.delPortForwardingR(remoteProxyPort);
+            session.delPortForwardingR(boundRemotePort > 0 ? boundRemotePort : remoteProxyPort);
         } catch (Exception notRegistered) {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.FINE,
                 String.format("[%s] Reverse forward was not registered", connectionId));
+        }
+        boundRemotePort = -1;
+        if (!primary) {
+            return;
         }
         try {
             session.delPortForwardingL(app.getSSHPort());
@@ -591,9 +863,11 @@ public class SSHTunnel implements ReconnectableTunnel {
         public void run() {
             try {
                 if (session != null && session.isConnected() && !shuttingDown.get()) {
-                    // Check if port forwarding is still active by testing the forwarded ports
-                    boolean localForwardingActive =
-                            localForwardingActive(session.getPortForwardingL(), app.getSSHPort());
+                    // Check if port forwarding is still active by testing the forwarded ports.
+                    // Only the first connection holds the hub forward: an extra one reported it
+                    // lost every 5 s and re-registered its reverse forward, often on a new port.
+                    boolean localForwardingActive = !primary
+                            || localForwardingActive(session.getPortForwardingL(), app.getSSHPort());
 
                     if (!localForwardingActive && portForwardingEstablished) {
                         Logger.getLogger(SSHTunnel.class.getName()).log(Level.WARNING,
@@ -645,6 +919,10 @@ public class SSHTunnel implements ReconnectableTunnel {
             }
             return;
         }
+        if (!primary || muxPending) {
+            // the server's tunnel-mux checks each forward itself; 2010 is everyone's
+            return;
+        }
         if (probeReverseForward(REVERSE_PROBE_TIMEOUT_MS)) {
             probeSupported = true;
             probeFailures = 0;
@@ -668,8 +946,89 @@ public class SSHTunnel implements ReconnectableTunnel {
         }
     }
 
+    /**
+     * The first connection's view of the App while it reconnects. With other connections still
+     * forwarding, the local proxy keeps running and the tunnel stays ready: their traffic goes
+     * through that proxy, and stopping it made one dropped connection an outage for all of them.
+     */
+    private final class PrimaryHost implements ReconnectHost {
+        private final ReconnectHost app;
+
+        PrimaryHost(ReconnectHost app) {
+            this.app = app;
+        }
+
+        @Override
+        public void stopLocalProxy() {
+            if (othersForwarding()) {
+                proxyKeptForOthers = true;
+                Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO, String.format(
+                        "[%s] The other SSH connections keep carrying traffic while this one reconnects", connectionId));
+                return;
+            }
+            app.stopLocalProxy();
+        }
+
+        @Override
+        public void startLocalProxy() {
+            if (proxyKeptForOthers) {
+                proxyKeptForOthers = false;
+                return;
+            }
+            app.startLocalProxy();
+        }
+
+        @Override
+        public void rebuildTunnel() throws Exception {
+            app.rebuildTunnel();
+        }
+
+        @Override
+        public void setReady(boolean ready) {
+            if (!ready && othersForwarding()) {
+                return;
+            }
+            app.setReady(ready);
+        }
+    }
+
+    /**
+     * An extra connection's view: it never touches the local proxy, which belongs to the first,
+     * and never rebuilds the tunnel; it keeps reconnecting until the tunnel stops. It reports
+     * not-ready only when it was the last connection carrying traffic.
+     */
+    private final class ExtraHost implements ReconnectHost {
+        @Override
+        public void stopLocalProxy() {
+        }
+
+        @Override
+        public void startLocalProxy() {
+        }
+
+        @Override
+        public void rebuildTunnel() {
+            if (!shuttingDown.get()) {
+                connectionMonitor.connectionLost(new Exception("still unreachable; continuing to retry"));
+            }
+        }
+
+        @Override
+        public void setReady(boolean ready) {
+            if (!ready && !othersForwarding()) {
+                ReconnectHost.of(app).setReady(false);
+            }
+        }
+    }
+
+    /** Times the forwards were dropped and requested again on this session; for tests. */
+    int getForwardRestarts() {
+        return forwardRestarts;
+    }
+
     @Override
     public synchronized void restartPortForwarding() {
+        forwardRestarts += 1;
         try {
             Logger.getLogger(SSHTunnel.class.getName()).log(Level.INFO,
                 String.format("[%s] Restarting port forwarding", connectionId));

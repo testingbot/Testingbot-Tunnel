@@ -24,14 +24,19 @@ public class CustomConnectionMonitor {
 
     private static final Logger LOG = Logger.getLogger(CustomConnectionMonitor.class.getName());
 
-    static final long CURRENT_RETRY_DELAY = 5000;
-    static final int MAX_RETRIES = 30;
+    /**
+     * Between reconnect attempts while the network is down: the first one that can get through
+     * should not wait long once it is back (5 s -> 2 s took 2010's return after a 20-second outage
+     * from 25.1 s to 23.6 s). MAX_RETRIES keeps the ~150 s before the tunnel is rebuilt.
+     */
+    static final long CURRENT_RETRY_DELAY = 2000;
+    static final int MAX_RETRIES = 75;
     /**
      * The first reconnect goes out after this long, not after the full retry delay: the session
      * has already been gone for the keepalive's ~15 seconds, and every second more is a second
      * of failing tests.
      */
-    static final long FIRST_RETRY_DELAY = 1000;
+    static final long FIRST_RETRY_DELAY = 250;
     /** Between re-requests of the reverse forward on a session that is up. */
     static final long FORWARD_RETRY_DELAY = 2000;
     /** About two minutes of re-requests before the tunnel is rebuilt. */
