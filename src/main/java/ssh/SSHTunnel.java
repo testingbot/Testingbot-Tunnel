@@ -419,13 +419,6 @@ public class SSHTunnel implements ReconnectableTunnel {
                         return true;
                     }
                 } else if (channel.isClosed()) {
-                    // The answer and the close arrive together (the proxy closes as soon as it
-                    // has answered), so both can land between available() and isClosed().
-                    // Buffered data survives the close: read it before giving up.
-                    if (in.available() > 0) {
-                        continue;
-                    }
-                    System.err.println("PROBEDBG closed, got=[" + answer + "] exit=" + channel.getExitStatus());
                     break;
                 } else {
                     Thread.sleep(20);
@@ -436,7 +429,6 @@ public class SSHTunnel implements ReconnectableTunnel {
             Thread.currentThread().interrupt();
             return false;
         } catch (Exception failed) {
-            System.err.println("PROBEDBG exception " + failed); failed.printStackTrace();
             // The channel could not be opened: nothing listens on 2010, or the server does not
             // permit the probe. Which of the two is decided by the caller.
             return false;
