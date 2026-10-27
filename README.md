@@ -37,7 +37,7 @@ When you see `You may start your tests`, point your Selenium client at
 ### Docker
 
 ```bash
-docker run -e TESTINGBOT_KEY=... -e TESTINGBOT_SECRET=... testingbot/tunnel:5.0
+docker run -e TESTINGBOT_KEY=... -e TESTINGBOT_SECRET=... testingbot/tunnel:5.1
 ```
 
 The image has a `HEALTHCHECK` that reports healthy once the tunnel is actually forwarding.
@@ -110,6 +110,14 @@ present more than one key. The API supplies a fingerprint over its authenticated
 where it has one, and a pin given here outranks it. Without either the tunnel connects anyway and
 logs a warning, which is what every existing tunnel does. `--doctor` reports which case applies
 before anything connects.
+
+### Several connections to the tunnel server
+
+Browser traffic is spread over several SSH connections, `--ssh-connections N` (1-8, default 4),
+so one slow or dropped connection does not hold up the rest, and each reconnects on its own. This
+needs a tunnel server that can spread the traffic; on one that cannot, the tunnel notices within
+about 3 seconds of starting and carries everything over one connection, as earlier versions did.
+`--ssh-connections 1` skips that and always uses one.
 
 ### Restricting what the tunnel can reach
 
@@ -291,7 +299,7 @@ See [docs/embedding.md](docs/embedding.md) for the worked example and what is gu
 ## Building
 
 ```bash
-mvn package          # produces target/TestingBotTunnel-5.0-shaded.jar
+mvn package          # produces target/TestingBotTunnel-5.1-shaded.jar
 mvn verify           # plus the full test suite
 e2e/run-e2e.sh       # end-to-end against real browsers (needs credentials)
 ```
