@@ -204,9 +204,13 @@ class HttpLoggingTest {
     }
 
     private void proxyGet(String extraHeaders) throws Exception {
+        proxyGet("/page", extraHeaders);
+    }
+
+    private void proxyGet(String path, String extraHeaders) throws Exception {
         try (Socket socket = new Socket("127.0.0.1", proxyPort)) {
             socket.setSoTimeout(10_000);
-            String request = "GET http://127.0.0.1:" + originPort + "/page HTTP/1.1\r\n"
+            String request = "GET http://127.0.0.1:" + originPort + path + " HTTP/1.1\r\n"
                     + "Host: 127.0.0.1:" + originPort + "\r\n"
                     + extraHeaders
                     + "Connection: close\r\n\r\n";
@@ -293,6 +297,32 @@ class HttpLoggingTest {
         String logged = awaitLogged();
         assertThat(logged).contains("500");
         assertThat(logged).contains("X-Custom: visible");
+    }
+
+    @Test
+    void errors_staysQuietForSquidsWarmupRequest() throws Exception {
+        // Web sends this through every new tunnel and it fails by design; logged, it printed
+        // two WARNINGs on every start that read as a broken tunnel.
+        startOrigin(502);
+        startProxy("errors", null);
+
+        proxyGet("/squid-internal-tunnel-warmup", "");
+
+        // A deliberate wait, not a guess at readiness: this asserts a record never appears,
+        // so there is nothing to poll for and the only way to be wrong is to look too early.
+        Thread.sleep(200);
+        assertThat(captured.count()).isZero();
+    }
+
+    @Test
+    void url_stillLogsSquidsWarmupRequest() throws Exception {
+        // url asked for every request, so it is not this handler's place to leave one out.
+        startOrigin(502);
+        startProxy("url", null);
+
+        proxyGet("/squid-internal-tunnel-warmup", "");
+
+        assertThat(awaitLogged()).contains("/squid-internal-tunnel-warmup").contains("502");
     }
 
     @Test

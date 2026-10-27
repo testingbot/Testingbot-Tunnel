@@ -124,7 +124,7 @@ public class HttpLogHandler extends Handler.Wrapper {
         boolean failed = failure != null || status >= 500;
         // BODY is refused for this module, so it can only arrive here by mistake; treat it as
         // HEADERS rather than silently logging nothing.
-        if (mode == Mode.ERRORS && !failed) {
+        if (mode == Mode.ERRORS && (!failed || isSquidInternal(request))) {
             return;
         }
 
@@ -147,6 +147,19 @@ public class HttpLogHandler extends Handler.Wrapper {
             }
         }
         LOG.log(failed ? Level.WARNING : Level.INFO, line.toString());
+    }
+
+    /**
+     * Squid's own requests through the tunnel, which fail by design. Web warms up every new
+     * tunnel with {@code GET http://127.0.0.1:1/squid-internal-tunnel-warmup} through both of
+     * Squid's ports, to absorb the cold-start 502 before a customer's first request does. Port 1
+     * is refused, so each answers 502 here, and printed a WARNING with headers on every start
+     * that read as a failed tunnel. Only the default {@code errors} mode drops them: {@code url}
+     * and {@code headers} asked for every request.
+     */
+    private static boolean isSquidInternal(Request request) {
+        String path = request.getHttpURI().getPath();
+        return path != null && path.startsWith("/squid-internal");
     }
 
     /** CONNECT carries an authority rather than a URL; log whichever the request actually has. */
