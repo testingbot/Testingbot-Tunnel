@@ -1,3 +1,23 @@
+5.1
+
+Faster, steadier traffic through the tunnel server
+* Several SSH connections to the tunnel server: `--ssh-connections N` (1-8, default 4). The first keeps the Selenium hub forward and readiness; the others carry browser traffic only and reconnect on their own, so one dropped connection no longer stops traffic. Tunnel servers that spread port 2010 over them do so; on servers that do not, the tunnel falls back to one connection on 2010, as before, after a probe of up to 3 s at startup
+* Uploads through the tunnel are up to 10x faster at real-world latency: the window of each forwarded connection is 2 MB instead of JSch's fixed 128 KB, which capped every connection at 128 KB per round trip -- 3 MB/s at 20 ms from the tunnel server, 1.3 MB/s at 50 ms
+* A dead SSH session is noticed in about 6 s instead of 15 minutes after a NAT or IP change (VPN reconnect, Wi-Fi switch), and the tunnel reconnects at once
+* Port 2010 keeps working through reconnects: a refused reverse forward is retried on the same session instead of tearing down a healthy one, it is requested again after a rebuild, and the server end of the forward is probed so a forward that stopped delivering is repaired
+
+PAC files (`--pac-local`)
+* A failover list is honoured: `PROXY a; DIRECT` falls through to the next entry when `a` cannot be reached, on plain HTTP, CONNECT and WebSocket upgrades. 5.0 used only the first entry and answered 502
+* `isInNet()` resolves a host name, as browsers and the specification do; it returned false for any name
+* The PAC file is loaded before the tunnel is created, so an unparseable file, a digest mismatch or an unpinned http:// URL fails at once instead of after a tunnel server was provisioned
+
+Other
+* `--noproxy` without `--localproxy` points the reverse forward at 8087, the port its help text names; it used a random port nothing listened on
+* An incomplete API response is reported as one, naming the missing field, instead of as a NullPointerException stack trace
+* The tunnel server's warm-up request is no longer logged as two failed requests on every start
+* An upstream proxy's rejection is classified by its status code, not by searching the message text, which also contains the proxy's port
+* The Windows download is built again; 5.0 shipped without one
+
 5.0
 
 Breaking changes from 4.x
