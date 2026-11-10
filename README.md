@@ -37,7 +37,7 @@ When you see `You may start your tests`, point your Selenium client at
 ### Docker
 
 ```bash
-docker run -e TESTINGBOT_KEY=... -e TESTINGBOT_SECRET=... testingbot/tunnel:5.1
+docker run -e TESTINGBOT_KEY=... -e TESTINGBOT_SECRET=... testingbot/tunnel:5.2
 ```
 
 The image has a `HEALTHCHECK` that reports healthy once the tunnel is actually forwarding.
@@ -299,7 +299,7 @@ See [docs/embedding.md](docs/embedding.md) for the worked example and what is gu
 ## Building
 
 ```bash
-mvn package          # produces target/TestingBotTunnel-5.1-shaded.jar
+mvn package          # produces target/TestingBotTunnel-5.2-shaded.jar
 mvn verify           # plus the full test suite
 e2e/run-e2e.sh       # end-to-end against real browsers (needs credentials)
 ```

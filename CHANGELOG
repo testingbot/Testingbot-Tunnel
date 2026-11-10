@@ -1,3 +1,10 @@
+5.2
+
+Fixes
+* HTTPS from iOS devices, iOS simulators and macOS Safari works again through the tunnel. CFNetwork sends `CONNECT host:443` with `Host: host`, no port, and since 5.0 the local proxy (Jetty 12) answered 400 "Authority!=Host" to every such request; only clients that put the port in the Host header (Android, Chrome, curl) got through, and only traffic relayed by the tunnel server's cache was unaffected. The proxy now accepts a CONNECT whose Host header has no port
+* TestCafe works again through the tunnel. TestCafe puts the page URL in its proxy path (`/<session>*<window>/http://site/`), and since 5.0 the local proxy answered 400 "Ambiguous URI empty segment" to every such request, so runs ended in "browser disconnected". The path is relayed unchanged; the origin judges it
+* Plain HTTP requests carried two `User-Agent` headers, the client's and Jetty's; only the client's is forwarded now. TestCafe reported the browser as "Other 0.0" because of it
+
 5.1
 
 Faster, steadier traffic through the tunnel server
