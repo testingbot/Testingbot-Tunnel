@@ -29,6 +29,7 @@ import org.apache.hc.core5.util.Timeout;
 
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.http.UriCompliance;
 import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.io.Content;
 import org.eclipse.jetty.server.Handler;
@@ -105,6 +106,12 @@ public final class HttpProxy {
         // and the client on the far side would have carried them.
         http_config.setRequestHeaderSize(PROXY_HEADER_SIZE);
         http_config.setResponseHeaderSize(PROXY_HEADER_SIZE);
+        // A forward proxy relays the request target; it never maps a path onto files, so the
+        // "ambiguous" paths Jetty 12 refuses by default (empty segments, encoded separators or
+        // dot segments) are for the origin to judge. TestCafe puts the page URL in the path
+        // ("/<session>*<window>/http://site/"), and DEFAULT answered every such request with
+        // 400 "Ambiguous URI empty segment", so TestCafe runs failed with "browser disconnected".
+        http_config.setUriCompliance(UriCompliance.UNSAFE);
 
         ServerConnector proxyConnector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
