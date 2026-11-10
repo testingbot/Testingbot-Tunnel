@@ -522,6 +522,10 @@ public class TunnelProxyHandler extends ProxyHandler.Forward {
     @Override
     protected void configureHttpClient(HttpClient client) {
         super.configureHttpClient(client);
+        // jetty-client adds "User-Agent: Jetty/<version>" to every request, ahead of the
+        // browser's own header that the proxy copies, so origins saw two and most read the
+        // first. A proxy forwards the client's User-Agent, or none when the client sent none.
+        client.setUserAgentField(null);
         client.setIdleTimeout(idleTimeoutMs);
         if (connectTimeoutMs > 0) {
             client.setConnectTimeout(connectTimeoutMs);
