@@ -29,6 +29,7 @@ import org.apache.hc.core5.util.Timeout;
 
 import org.eclipse.jetty.http.HttpHeader;
 import org.eclipse.jetty.http.HttpStatus;
+import org.eclipse.jetty.http.HttpCompliance;
 import org.eclipse.jetty.http.UriCompliance;
 import org.eclipse.jetty.io.ConnectionStatistics;
 import org.eclipse.jetty.io.Content;
@@ -112,6 +113,15 @@ public final class HttpProxy {
         // ("/<session>*<window>/http://site/"), and DEFAULT answered every such request with
         // 400 "Ambiguous URI empty segment", so TestCafe runs failed with "browser disconnected".
         http_config.setUriCompliance(UriCompliance.UNSAFE);
+        // CFNetwork (every iOS app, iOS Safari, macOS Safari) sends "CONNECT host:443" with
+        // "Host: host" -- no port. Jetty 12's default RFC9110 mode compares the two and refuses
+        // with 400 "Authority!=Host", so 5.0 and 5.1 rejected every HTTPS CONNECT that reached
+        // this proxy straight from an iPhone or a Mac (--nobump, --nocache, macOS Safari); only
+        // CONNECTs relayed by the tunnel VM's squid, which adds the port, got through. OkHttp,
+        // Chrome and curl send "Host: host:443", which is why Android never noticed. A forward
+        // proxy dials the authority; what the Host header says is for the origin to judge.
+        http_config.setHttpCompliance(HttpCompliance.RFC9110.with("TestingBot-Tunnel",
+                HttpCompliance.Violation.MISMATCHED_AUTHORITY));
 
         ServerConnector proxyConnector = new ServerConnector(httpProxy,
                 new HttpConnectionFactory(http_config));
