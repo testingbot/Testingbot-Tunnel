@@ -86,7 +86,7 @@ carrying a secret are worth setting in the environment instead:
 | Option | Purpose |
 |---|---|
 | `--se-port` | Local Selenium port (default 4445) |
-| `--localproxy` | Local HTTP proxy port (default 8087) |
+| `--localproxy` | Local HTTP proxy port (default: a free port, or 8087 with `--noproxy`) |
 | `--tunnel-identifier` | Name this tunnel, so several can run at once |
 | `--allow-hosts` | Reach only these hosts; everything else gets 403 |
 | `--fast-fail-regexps` | Refuse matching hosts. Prefix `!` for an exception: `.*,!ok\.com` blocks everything except `ok.com` and its subdomains |

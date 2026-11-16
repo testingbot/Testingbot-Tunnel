@@ -413,7 +413,7 @@ public class App {
         identifier.setArgName("id");
         options.addOption(identifier);
 
-        Option hubPort = new Option("p", "hubport", true, "Use this if you want to connect to port 80 on our hub instead of the default port 4444");
+        Option hubPort = new Option("p", "hubport", true, "The port to connect to on our hub: 80 (default) or 4444");
         hubPort.setArgName("HUBPORT");
         options.addOption(hubPort);
 
@@ -528,7 +528,7 @@ public class App {
             + "already covers every host.");
         noBumpDomains.setArgName("HOST,HOST");
         options.addOption(noBumpDomains);
-        options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default 8087)");
+        options.addOption("j", "localproxy", true, "The port to launch the local proxy on (default: a free port, or 8087 with --noproxy)");
 
         options.addOption("s", "shared", false, "Share this tunnel among team members.");
         options.addOption(null, "doctor", false, "Perform checks to detect possible misconfiguration or problems.");
